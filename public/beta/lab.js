@@ -1,7 +1,7 @@
 // Formula tab (beta): type a trip's distance and Grab's time, see what the passenger should pay and
 // what you should earn by the current formula, then type the real numbers. Saving records the
-// predictions first, then re-fits, so every trip is an honest test. The booking time shows which
-// hours run above the normal-price formula (surge-prone hours). Trips stay on this phone (beta
+// predictions first, then re-fits, so every trip is an honest test. The trip's time is when you
+// tap Save; it shows which hours run above the normal-price formula (surge-prone hours). Trips stay on this phone (beta
 // only): they are never sent to the shared pool.
 import * as db from './db.js';
 import {
@@ -19,10 +19,6 @@ const num = (el) => {
   return Number.isFinite(v) ? v : null;
 };
 const pad = (n) => String(n).padStart(2, '0');
-const toLocalInput = (ts) => {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
 const offText = (pred, actual) => {
   const off = pred - actual;
   return Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`;
@@ -46,16 +42,14 @@ export async function buildLab(root) {
         <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="22"></div>
     </div>
     <div class="row2">
-      <div class="field"><label for="lab-when">Booked at</label>
-        <input id="lab-when" type="datetime-local"></div>
       <div class="field"><label for="lab-erp">ERP / tolls (S$, if any)</label>
         <input id="lab-erp" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div>
+      <div class="field"><span class="flabel">Pricing</span>
+        <div id="lab-surge" class="seg g2">
+          <button type="button" data-v="normal">Normal</button>
+          <button type="button" data-v="surge">Surge</button>
+        </div></div>
     </div>
-    <div class="field"><span class="flabel">Pricing</span>
-      <div id="lab-surge" class="seg g2">
-        <button type="button" data-v="normal">Normal</button>
-        <button type="button" data-v="surge">Surge</button>
-      </div></div>
 
     <div class="lab-predict" aria-live="polite">
       <div class="lab-two">
@@ -90,8 +84,7 @@ export async function buildLab(root) {
     <div id="lab-list" class="stack"></div>
     <button type="button" class="ghost wide" id="lab-export">Export CSV</button>`;
 
-  $('#lab-when', root).value = toLocalInput(Date.now());
-  for (const id of ['lab-km', 'lab-min', 'lab-when', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
+  for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
   for (const b of root.querySelectorAll('#lab-surge button')) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
@@ -121,10 +114,9 @@ function renderFormula() {
 
 function readForm() {
   const r = lab.root;
-  const when = new Date($('#lab-when', r).value).getTime();
   return {
     km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: num($('#lab-erp', r)) || 0,
-    ts: Number.isFinite(when) ? when : Date.now(),
+    ts: Date.now(), // the trip's time is when you save it
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
   };
 }
@@ -195,7 +187,7 @@ async function save() {
   const t = timeOfDay(lab.trips, f.ts);
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...f,
-    savedAt: Date.now(), predicted, predictedEarned, todLift: t.near ? t.lift : null,
+    predicted, predictedEarned, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
   });
   await db.setKV(KEY, lab.trips);
@@ -207,7 +199,6 @@ async function save() {
 
 function clearForm(keepMsg) {
   for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, lab.root).value = '';
-  $('#lab-when', lab.root).value = toLocalInput(Date.now());
   lab.surge = 'normal';
   if (keepMsg !== true) $('#lab-msg', lab.root).textContent = '';
   update();
