@@ -4,6 +4,7 @@
 //   GET  /api/status                         -> { map, pool, keyRequired, authorized }
 //   GET  /api/search?q=...                   -> { results: [{ label, address, postal, lat, lng }] }
 //   GET  /api/route?from=lat,lng&to=lat,lng  -> { km, min, source: "onemap" }
+//   GET  /api/near?at=lat,lng                -> { label, address, postal, lat, lng } nearest address
 //   POST /api/jobs   { device, jobs: [...] } -> { accepted, rejected }   add/update anonymous jobs
 //   GET  /api/jobs?since=REV&limit=N         -> { jobs, next, more }     page through the pool
 //
@@ -139,6 +140,42 @@ async function route(from, to, env) {
   });
   if (cache) await cache.put(cacheKey, out.clone()).catch(() => {});
   return out;
+}
+
+// Nearest address to a point (where the driver was when they tapped), for prefilling the pickup.
+async function near(at, env) {
+  let token;
+  try {
+    token = await getToken(env);
+  } catch {
+    return json({ error: 'Signing in to OneMap failed.' }, 503);
+  }
+  if (!token) return json({ error: 'OneMap isn’t set up on the server yet.' }, 503);
+  for (const buffer of [150, 500]) {
+    const url = new URL(`${OM}/api/public/revgeocode`);
+    url.searchParams.set('location', `${at.lat},${at.lng}`);
+    url.searchParams.set('buffer', String(buffer));
+    url.searchParams.set('addressType', 'All');
+    url.searchParams.set('otherFeatures', 'N');
+    const res = await fetch(url, { headers: { Authorization: token } });
+    if (res.status === 401) {
+      resetTokenCache();
+      return json({ error: 'OneMap session expired. Try again.' }, 502);
+    }
+    if (!res.ok) return json({ error: 'Address lookup failed.' }, 502);
+    const data = await res.json();
+    const nil = (v) => (v && v !== 'NIL' && v !== 'null' ? String(v) : '');
+    const hit = (data.GeocodeInfo || data.GeoCodeInfo || [])
+      .map((r) => ({ r, lat: Number(r.LATITUDE), lng: Number(r.LONGITUDE) }))
+      .filter((x) => Number.isFinite(x.lat) && Number.isFinite(x.lng))[0];
+    if (!hit) continue;
+    const { r } = hit;
+    const street = [nil(r.BLOCK), nil(r.ROAD)].filter(Boolean).join(' ');
+    const label = nil(r.BUILDINGNAME) || street || 'Near where you tapped';
+    const postal = nil(r.POSTALCODE) || null;
+    return json({ label, address: [street, postal].filter(Boolean).join(' '), postal, lat: hit.lat, lng: hit.lng });
+  }
+  return json({ error: 'No address near that point.' }, 404);
 }
 
 // ---------- shared training pool ----------
@@ -326,6 +363,11 @@ export default {
         const to = parsePoint(url.searchParams.get('to'));
         if (!from || !to) return json({ error: 'from and to must be lat,lng points in Singapore.' }, 400);
         return await route(from, to, env);
+      }
+      if (url.pathname === '/api/near') {
+        const at = parsePoint(url.searchParams.get('at'));
+        if (!at) return json({ error: 'at must be a lat,lng point in Singapore.' }, 400);
+        return await near(at, env);
       }
     } catch {
       return json({ error: 'OneMap couldn’t be reached.' }, 502);

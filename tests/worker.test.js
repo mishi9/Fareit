@@ -78,3 +78,15 @@ test('non-api paths go to the static assets', async () => {
   const env = { ASSETS: { fetch: async () => new Response('app shell') } };
   assert.equal(await (await call('/', env)).text(), 'app shell');
 });
+
+test('near turns a tap location into the closest address', async () => {
+  mockOneMap([tokenHandler, ['revgeocode', (url, init) => {
+    assert.equal(init.headers.Authorization, 'tok-1');
+    assert.equal(url.searchParams.get('location'), '1.3469,103.9474');
+    return okJson({ GeocodeInfo: [{ BUILDINGNAME: 'null', BLOCK: '111', ROAD: 'TAMPINES STREET 11', POSTALCODE: '521111', LATITUDE: '1.34691', LONGITUDE: '103.94742' }] });
+  }]]);
+  const res = await call('/api/near?at=1.3469,103.9474');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { label: '111 TAMPINES STREET 11', address: '111 TAMPINES STREET 11 521111', postal: '521111', lat: 1.34691, lng: 103.94742 });
+  assert.equal((await call('/api/near?at=40,0')).status, 400);
+});

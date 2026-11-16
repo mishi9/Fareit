@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, DEFAULT_SETTINGS } from '../public/model.js';
+import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, dropAreaTrial, DEFAULT_SETTINGS } from '../public/model.js';
 import { classifyZone, findArea, isPostal } from '../public/places.js';
 
 const at = (iso) => new Date(iso).getTime();
@@ -193,4 +193,34 @@ test('area names and postal codes are recognised', () => {
   assert.equal(findArea('111 Tampines St 11'), null);
   assert.ok(isPostal('521111'));
   assert.ok(!isPostal('52111'));
+});
+
+test('by default the drop area does not change the predicted fare, only the dead-drop verdict', () => {
+  const ts = at('2026-11-16T18:00:00+08:00');
+  // East drops paid double, North drops paid the formula, all else equal.
+  const trips = [
+    ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:00:00+08:00`, { zone: 'E', fare: priorNet(12, 20, S) * 2 })),
+    ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:05:00+08:00`, { zone: 'N', fare: priorNet(12, 20, S) })),
+  ];
+  const east = predict({ band: '10-15', zone: 'E', ts }, trips, S);
+  const north = predict({ band: '10-15', zone: 'N', ts }, trips, S);
+  assert.ok(Math.abs(east.net - north.net) < 0.01, 'same fare whichever area the drop is in');
+
+  const on = { ...S, matchDropArea: true };
+  assert.ok(predict({ band: '10-15', zone: 'E', ts }, trips, on).net > predict({ band: '10-15', zone: 'N', ts }, trips, on).net + 1);
+
+  const tuas = predict({ band: '10-15', zone: 'TUAS', ts }, trips, S);
+  assert.ok(Math.abs(tuas.net - east.net) < 0.01);
+  assert.ok(tuas.perHour < east.perHour, 'a dead drop still lowers your $/hr');
+});
+
+test('the drop-area trial compares both ways on past jobs', () => {
+  const trips = [
+    ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:00:00+08:00`, { zone: 'E', fare: priorNet(12, 20, S) * 2 })),
+    ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:05:00+08:00`, { zone: 'N', fare: priorNet(12, 20, S) })),
+  ];
+  const r = dropAreaTrial(trips, S);
+  assert.equal(r.count, 12);
+  assert.ok(r.withDrop < r.withoutDrop, 'when drop area really matters, matching on it predicts better');
+  assert.deepEqual(dropAreaTrial([], S), { count: 0, withDrop: null, withoutDrop: null });
 });

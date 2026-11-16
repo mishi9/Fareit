@@ -1,4 +1,4 @@
-import { BANDS, ZONES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, accuracy, isTrainable } from './model.js';
+import { BANDS, ZONES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, accuracy, isTrainable, dropAreaTrial } from './model.js';
 import { findArea, isPostal, classifyZone } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
@@ -346,6 +346,8 @@ function openForm(trip) {
     ? `${when(trip.ts)} · ${bandLabel(trip.band)} · ${zoneLabel(trip.zone)}${trip.prediction ? ` · predicted ${dollars(trip.prediction.net)}` : ''}`
     : 'A trip you didn’t tap in the window.';
   $('#rf-pickup').value = trip?.pickupText || '';
+  $('#rf-pickup-hint').textContent = '';
+  if (trip && !trip.pickupText && trip.tapLoc?.lat) prefillPickup(trip);
   $('#rf-drop').value = trip?.dropText || '';
   $('#rf-min').value = trip?.tripMin || '';
   $('#rf-fare').value = trip?.fare || '';
@@ -357,7 +359,24 @@ function openForm(trip) {
   markFormZone();
   msg('');
   $('#rf-save').disabled = false;
-  $('#rf-pickup').focus();
+  if (!state.form.pickup) $('#rf-pickup').focus();
+}
+
+// The pickup starts as where Phone 2 was when you tapped. That's usually 1–5 km from the real
+// pickup: close enough for the area, and you can type over it if the pickup was far off.
+function prefillPickup(trip) {
+  const input = $('#rf-pickup');
+  const hint = $('#rf-pickup-hint');
+  const tap = { label: 'Where you tapped', lat: trip.tapLoc.lat, lng: trip.tapLoc.lng, precision: 'tap' };
+  state.form.pickup = tap;
+  input.value = tap.label;
+  hint.textContent = 'From where you were when you tapped. Change it if the pickup was far from there.';
+  api(`/api/near?at=${tap.lat.toFixed(5)},${tap.lng.toFixed(5)}`).then((r) => {
+    // Only replace it if the form is still showing this job's untouched prefill.
+    if (!state.form || state.form.id !== trip.id || state.form.pickup !== tap) return;
+    state.form.pickup = { label: r.label, address: r.address, postal: r.postal, lat: tap.lat, lng: tap.lng, precision: 'tap' };
+    input.value = r.label;
+  }).catch(() => { /* keep "Where you tapped"; the coordinates are what matter */ });
 }
 
 function msg(text, isError = false) {
@@ -373,6 +392,7 @@ function wirePlace(inputId, key) {
   let seq = 0;
   input.addEventListener('input', () => {
     if (state.form) state.form[key] = null;
+    if (key === 'pickup') $('#rf-pickup-hint').textContent = '';
     clearTimeout(timer);
     const q = input.value.trim();
     const area = findArea(q);
@@ -571,6 +591,7 @@ function renderTrips() {
     ${bias ? `<p class="note">${esc(bias)} across ${acc.count} trip${acc.count === 1 ? '' : 's'}.</p>` : ''}
     <p class="note">${state.syncError ? esc(state.syncError) : state.lastSync ? `Shared pool synced at ${clock(state.lastSync)}.` : 'Shared pool not synced yet.'}</p>
     ${decided.length ? `<p class="note">${decided.length} decision${decided.length === 1 ? '' : 's'} logged: ${decided.length - cancelled} taken, ${cancelled} cancelled.${noFare ? ` ${noFare} kept without a fare.` : ''}</p>` : ''}
+    ${trialNote()}
     ${pending ? '<button type="button" class="primary wide" id="retry-dist">Fetch road distances now</button>' : ''}
     <h2>Reconciled</h2>
     ${rec.length ? '' : '<p class="empty">No reconciled trips yet. Add the real fare for a job on the Reconcile tab.</p>'}`;
@@ -591,6 +612,26 @@ function renderTrips() {
     card.append(acts);
     box.append(card);
   }
+}
+
+// The drop-area trial: would predictions have been closer matching on drop area, or ignoring it?
+let trialCache = { key: '', html: '' };
+function trialNote() {
+  const data = trainingSet();
+  const key = `${data.length}:${state.settings.matchDropArea}`;
+  if (trialCache.key === key) return trialCache.html;
+  const r = dropAreaTrial(data, state.settings);
+  let html = '';
+  if (r.count < 10) {
+    html = `<p class="note">Drop-area trial: fares are predicted from distance, time and pickup area, ignoring the drop area. A comparison shows here after 10 jobs with a fare (${r.count} so far).</p>`;
+  } else {
+    const a = Math.round(r.withoutDrop * 100);
+    const b = Math.round(r.withDrop * 100);
+    const verdict = Math.abs(a - b) < 2 ? 'About the same so far.' : a < b ? 'Ignoring the drop area is closer.' : 'Matching on the drop area is closer.';
+    html = `<p class="note">Drop-area trial on your last ${r.count} jobs: ignoring the drop area is ${a}% off on average, matching on it is ${b}% off. ${verdict}</p>`;
+  }
+  trialCache = { key, html };
+  return html;
 }
 
 async function retryDistances() {
