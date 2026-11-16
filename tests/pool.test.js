@@ -25,7 +25,7 @@ const now = Date.now();
 function job(over = {}) {
   return {
     id: 'job-0000000001', ts: now - 3600 * 1000, ride: 'standard', band: '10-15', zone: 'E', decision: 'took',
-    km: 12.34, trip_min: 20, drive_min: 19.5, fare: 18.4, pricing: 'surge',
+    km: 12.34, trip_min: 20, drive_min: 19.5, fare: 18.4, pricing: 'surge', card_km: 12,
     pickup_lat: 1.30481, pickup_lng: 103.83179, drop_lat: 1.34961, drop_lng: 103.95681, ...over,
   };
 }

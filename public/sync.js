@@ -27,6 +27,7 @@ export function toPoolRow(t) {
     fare: t.status === 'reconciled' ? r2(t.fare) : null,
     payment: t.payment || null,
     pricing: t.pricing || null,
+    card_km: t.cardKm > 0 ? Math.round(t.cardKm) : null,
     pickup_lat: origin ? r2(origin.lat) : null,
     pickup_lng: origin ? r2(origin.lng) : null,
     drop_lat: drop ? r2(drop.lat) : null,
@@ -51,6 +52,7 @@ export function fromPoolRow(row) {
     driveMin: row.drive_min,
     fare: row.fare,
     pricing: row.pricing || null,
+    cardKm: row.card_km || null,
     pickup: row.pickup_lat != null ? { lat: row.pickup_lat, lng: row.pickup_lng } : null,
   };
 }

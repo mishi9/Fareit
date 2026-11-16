@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, normalizeBand, bandMidKm, surgeOutlook, inferPricing, DEFAULT_SETTINGS } from '../public/model.js';
+import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, normalizeBand, bandMidKm, cardKm, kmSimilarity, surgeOutlook, inferPricing, DEFAULT_SETTINGS } from '../public/model.js';
 import { classifyZone, findArea, isPostal } from '../public/places.js';
 
 const at = (iso) => new Date(iso).getTime();
@@ -248,4 +248,24 @@ test('with enough fares, untagged jobs that paid well above normal count as surg
   assert.equal(inferPricing(trips.map((t) => ({ ...t, pricing: 'normal' })), S).size, 0);
   // Too few fares to know what normal is: no inference.
   assert.equal(inferPricing(trips.slice(0, 7), S).size, 0);
+});
+
+test('the slider km predicts from that exact distance, and nearby km count most', () => {
+  const ts = at('2026-11-16T18:00:00+08:00');
+  assert.ok(Math.abs(predict({ km: 14, ts }, [], S).prior - priorNet(14, 5 + 1.1 * 14, S)) < 0.01);
+  assert.ok(predict({ km: 15, ts }, [], S).net > predict({ km: 14, ts }, [], S).net, 'one more km, a bit more fare');
+  // A 14 km job paid double; a 30 km job paid the formula. At 14 km the double counts most.
+  const trips = [
+    trip('2026-11-16T18:00:00+08:00', { km: 14, cardKm: 14, fare: priorNet(14, 20, S) * 2 }),
+    trip('2026-11-16T18:00:00+08:00', { km: 30, cardKm: 30, fare: priorNet(30, 20, S) }),
+  ];
+  const at14 = predict({ km: 14, ts }, trips, S);
+  const at30 = predict({ km: 30, ts }, trips, S);
+  assert.ok(at14.net / at14.prior > at30.net / at30.prior + 0.1);
+  assert.equal(at14.band, '12-15');
+  assert.equal(at14.km, 14);
+  // Old band-only jobs count by their band's middle.
+  assert.ok(Math.abs(cardKm({ band: '10-15' }) - 12.5) < 1e-9);
+  assert.equal(cardKm({ cardKm: 9, km: 11 }), 9, 'the card km wins over the road km');
+  assert.ok(kmSimilarity(14, 14) === 2 && kmSimilarity(17, 14) < 0.3 && kmSimilarity(44, 40) > kmSimilarity(10, 6));
 });

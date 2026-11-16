@@ -1,4 +1,7 @@
 import { BANDS, mergeSettings, predict, bandFor, bandMidKm, estDriveMin, accuracy, isTrainable } from './model.js';
+
+const KM_MIN = 1;
+const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
@@ -10,7 +13,7 @@ const state = {
   trips: [],
   settings: mergeSettings(),
   apiKey: '',
-  band: null,
+  km: null, // the distance on the job card, from the slider
   currentId: null,
   currentAt: 0,
   resetTimer: null,
@@ -37,6 +40,7 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toStr
 const dollars = (n) => `$${Math.round(n)}`;
 const fare = (n) => `S$${Number(n).toFixed(2)}`;
 const PRICING_LABEL = { surge: 'Surge', normal: 'Normal', bad: 'Bad' };
+const distLabel = (t) => (t.cardKm > 0 ? `${t.cardKm >= KM_MAX ? '50+' : t.cardKm} km on card` : bandLabel(t.band));
 const bandLabel = (id) => (BANDS.find((b) => b.id === id)?.label ?? (id ? id.replace('-', '–') : '—')) + ' km';
 const when = (ts) => new Date(ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 const placeLabel = (p, text) => (p && p.label) || text || '—';
@@ -124,15 +128,38 @@ function show(view) {
   keepAwake();
 }
 
-// ---------- window: one tap -> predicted fare ----------
+// ---------- window: slide the card's km -> predicted fare ----------
 function buildWindow() {
-  const bands = $('#bands');
-  bands.innerHTML = '';
-  for (const b of BANDS) {
-    const el = button(esc(b.label), 'tap mono', () => pick('band', b.id));
-    el.dataset.id = b.id;
-    el.setAttribute('aria-label', `${b.label} kilometres`);
-    bands.append(el);
+  const track = $('#km-track');
+  const ticks = $('.km-ticks');
+  ticks.innerHTML = [1, 10, 20, 30, 40, 50].map((k) => `<span style="left:${kmPos(k)}%">${k === KM_MAX ? '50+' : k}</span>`).join('');
+  const fromX = (x) => {
+    const r = $('.km-rail').getBoundingClientRect();
+    return Math.round(KM_MIN + Math.min(1, Math.max(0, (x - r.left) / r.width)) * (KM_MAX - KM_MIN));
+  };
+  // Touch anywhere to jump there; the fare follows the drag; the job is saved on release.
+  let dragging = false;
+  track.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    track.setPointerCapture(e.pointerId);
+    preview(fromX(e.clientX));
+  });
+  track.addEventListener('pointermove', (e) => { if (dragging) preview(fromX(e.clientX)); });
+  const release = () => { if (!dragging) return; dragging = false; commitKm(); };
+  track.addEventListener('pointerup', release);
+  track.addEventListener('pointercancel', release);
+  track.addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    preview((state.km ?? 10) + step);
+    commitKm();
+  });
+  for (const b of $$('.nudge')) {
+    b.addEventListener('click', () => {
+      preview((state.km ?? 10) + Number(b.dataset.nudge));
+      commitKm();
+    });
   }
   const onAct = (e) => {
     const b = e.target.closest('button[data-act]');
@@ -145,13 +172,29 @@ function buildWindow() {
   renderVerdict(null);
 }
 
-function markSelection() {
-  for (const el of $$('#bands .tap')) el.classList.toggle('sel', el.dataset.id === state.band);
+const kmPos = (km) => ((km - KM_MIN) / (KM_MAX - KM_MIN)) * 100;
+
+function markKm() {
+  const track = $('#km-track');
+  track.classList.toggle('empty', state.km === null);
+  track.style.setProperty('--pos', state.km === null ? 0 : kmPos(state.km) / 100);
+  track.setAttribute('aria-valuenow', state.km ?? '');
+  $('#km-val').textContent = state.km === null ? '—' : state.km === KM_MAX ? '50+' : state.km;
 }
 
-function pick(kind, id) {
-  state[kind] = id;
-  markSelection();
+const nowLoc = () => (state.loc && Date.now() - state.loc.at < 10 * 60 * 1000 ? state.loc : null);
+
+// While sliding: move the thumb and show the fare for this km, without saving anything yet.
+function preview(km) {
+  km = Math.min(KM_MAX, Math.max(KM_MIN, km));
+  if (km === state.km) return;
+  state.km = km;
+  markKm();
+  renderVerdict(predict({ km, ts: Date.now(), loc: nowLoc() }, trainingSet(), state.settings));
+}
+
+function commitKm() {
+  if (state.km === null) return;
   clearTimeout(state.resetTimer);
   state.resetTimer = setTimeout(resetWindow, 30000);
   decide();
@@ -159,16 +202,16 @@ function pick(kind, id) {
 
 function resetWindow() {
   clearTimeout(state.resetTimer);
-  state.band = null;
+  state.km = null;
   state.currentId = null;
-  markSelection();
+  markKm();
   renderVerdict(null);
 }
 
 async function decide() {
   const now = Date.now();
-  const loc = state.loc && now - state.loc.at < 10 * 60 * 1000 ? state.loc : null;
-  const p = predict({ band: state.band, ts: now, loc }, trainingSet(), state.settings);
+  const loc = nowLoc();
+  const p = predict({ km: state.km, ts: now, loc }, trainingSet(), state.settings);
   renderVerdict(p);
 
   // A change within 15 seconds is a correction of the same job, not a new one.
@@ -179,7 +222,8 @@ async function decide() {
     state.currentId = trip.id;
     state.currentAt = now;
   }
-  trip.band = state.band;
+  trip.cardKm = state.km;
+  trip.band = bandFor(state.km).id;
   if (loc && !trip.tapLoc) trip.tapLoc = { lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy };
   trip.prediction = {
     net: p.net, lo: p.lo, hi: p.hi, km: p.km, tripMin: p.tripMin, stage: p.stage, basis: p.basis,
@@ -194,7 +238,7 @@ function renderVerdict(p) {
   $('#decide').hidden = !p;
   if (!p) {
     v.className = 'verdict idle';
-    v.innerHTML = '<p>Tap the trip distance from the job card.</p>';
+    v.innerHTML = '<p>Slide to the trip distance on the job card.</p>';
     return;
   }
   const stage = p.stage === 'seed'
@@ -203,7 +247,7 @@ function renderVerdict(p) {
   v.className = `verdict fare ${p.surge.likely}`;
   v.innerHTML = `
     <div class="top-row"><span class="word">${dollars(p.net)}</span><button type="button" class="clear" data-act="clear">Clear</button></div>
-    <div class="nums"><span class="rng">likely ${dollars(p.lo)}–${dollars(p.hi)} · ${esc(bandLabel(p.band))}, about ${Math.round(p.tripMin)} min</span></div>
+    <div class="nums"><span class="rng">likely ${dollars(p.lo)}–${dollars(p.hi)} · ${p.km >= KM_MAX ? '50+' : p.km} km, about ${Math.round(p.tripMin)} min</span></div>
     <div class="why">${esc(surgeLine(p.surge))} ${esc(stage)}</div>`;
 }
 
@@ -251,7 +295,7 @@ function renderReconList() {
     const decided = t.decision ? `<span class="pill ${t.decision}">${decisionLabel(t.decision)} ${clock(t.decidedAt)}</span>` : '';
     card.innerHTML = `
       <div class="line1"><span class="when">${esc(when(t.ts))}</span><span class="acts">${decided}${p && p.surge === 'surge' ? '<span class="pill surge">Surge likely</span>' : ''}</span></div>
-      <div class="meta">${esc(bandLabel(t.band))}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>`;
+      <div class="meta">${esc(distLabel(t))}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     acts.append(
@@ -311,7 +355,7 @@ function openForm(trip) {
   f.hidden = false;
   $('#rf-title').textContent = trip ? 'Add the real fare' : 'Add a trip';
   $('#rf-sub').textContent = trip
-    ? `${when(trip.ts)} · ${bandLabel(trip.band)}${trip.prediction ? ` · predicted ${dollars(trip.prediction.net)}` : ''}`
+    ? `${when(trip.ts)} · ${distLabel(trip)}${trip.prediction ? ` · predicted ${dollars(trip.prediction.net)}` : ''}`
     : 'A trip you didn’t tap in the window.';
   $('#rf-pickup').value = trip?.pickupText || '';
   $('#rf-pickup-hint').textContent = '';
@@ -319,6 +363,7 @@ function openForm(trip) {
   $('#rf-drop').value = trip?.dropText || '';
   $('#rf-min').value = trip?.tripMin || '';
   $('#rf-km').value = trip?.kmTyped || '';
+  $('#rf-km').placeholder = trip?.cardKm ? `${trip.cardKm} on card` : '45.8';
   $('#rf-fare').value = trip?.fare || '';
   $('#rf-when').value = toLocalInput(trip ? trip.ts : Date.now());
   markFormDecision();
@@ -418,12 +463,12 @@ async function fetchDistance(trip) {
   if (trip.drop?.pending) trip.drop = await resolvePlace(trip.dropText, null).catch(() => trip.drop);
   // No drop-off: the km you typed, or failing that the middle of the band you tapped.
   if (!trip.dropText) {
-    const km = trip.kmTyped > 0 ? trip.kmTyped : bandMidKm(trip.band);
+    const km = trip.kmTyped > 0 ? trip.kmTyped : trip.cardKm > 0 ? trip.cardKm : bandMidKm(trip.band);
     if (!km) { trip.distanceStatus = 'failed'; trip.distanceError = 'No drop-off, trip km or band.'; return false; }
     trip.km = km;
     trip.driveMin = estDriveMin(km);
     trip.distanceStatus = 'ok';
-    trip.distanceSource = trip.kmTyped > 0 ? 'typed' : 'band';
+    trip.distanceSource = trip.kmTyped > 0 ? 'typed' : trip.cardKm > 0 ? 'card' : 'band';
     delete trip.distanceError;
     if (!trip.band) trip.band = bandFor(km).id;
     return true;
@@ -471,7 +516,7 @@ async function saveRecon(ev) {
   if (!pickupText) return msg('Add the pickup.', true);
   if (kmTyped !== null && !(kmTyped > 0 && kmTyped <= 150)) return msg('Trip km should be between 0.1 and 150.', true);
   const formTrip = state.form.id ? state.trips.find((t) => t.id === state.form.id) : null;
-  if (!dropText && !kmTyped && !formTrip?.band) return msg('Add the drop-off or the trip km, so Fareit knows the distance.', true);
+  if (!dropText && !kmTyped && !formTrip?.cardKm && !formTrip?.band) return msg('Add the drop-off or the trip km, so Fareit knows the distance.', true);
   if (!(paid > 0)) return msg(state.form.decision === 'cancelled' ? 'Add the fare the card showed when you cancelled.' : 'Add the fare you were paid.', true);
   if (!Number.isFinite(jobTs)) return msg('Add the job time. Time of day matters for the prediction.', true);
   if (jobTs > Date.now() + 5 * 60 * 1000) return msg('The job time is in the future.', true);
@@ -515,7 +560,7 @@ async function saveRecon(ev) {
   const p = trip.prediction;
   const off = p ? Math.round(((p.net - paid) / paid) * 100) : null;
   const vs = p ? ` Predicted ${dollars(p.net)}, paid ${fare(paid)} (${off === 0 ? 'spot on' : `${Math.abs(off)}% ${off > 0 ? 'high' : 'low'}`}).` : '';
-  const how = { onemap: `OneMap road distance ${trip.km} km`, typed: `your trip km (${trip.km} km)`, band: `the ${bandLabel(trip.band)} band (about ${trip.km} km)` }[trip.distanceSource];
+  const how = { onemap: `OneMap road distance ${trip.km} km`, typed: `your trip km (${trip.km} km)`, card: `the card's ${trip.km} km`, band: `the ${bandLabel(trip.band)} band (about ${trip.km} km)` }[trip.distanceSource];
   toast(gotDistance ? `Saved with ${how}.${vs}` : `Saved. Road distance will be fetched when OneMap is reachable.${vs}`);
   syncNow();
 }

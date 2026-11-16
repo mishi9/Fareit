@@ -126,6 +126,33 @@ export function bandProfile(bandId, trips) {
   return { km: band.km, min: estDriveMin(band.km), learned: false, count: inBand.length };
 }
 
+// ---- Exact km from the card (the slider) ----
+// The km the driver set for a job: the card's distance from the slider, else the road km from
+// Reconcile, else the middle of an old band.
+export function cardKm(t) {
+  if (t.cardKm > 0) return t.cardKm;
+  if (t.km > 0) return t.km;
+  return bandMidKm(t.band);
+}
+
+// Trip minutes for a distance: from reconciled jobs within a few km once there are 3, as minutes
+// per km scaled to this distance; otherwise the rough Singapore drive-time rule.
+export function kmProfile(km, trips) {
+  const near = trips.filter(isTrainable).filter((t) => Math.abs(t.km - km) <= Math.max(3, 0.2 * km));
+  if (near.length >= 3) {
+    return { km, min: km * median(near.map((t) => tripMinutes(t) / t.km)), learned: true, count: near.length };
+  }
+  return { km, min: estDriveMin(km), learned: false, count: near.length };
+}
+
+// How alike two distances are: 2 at the same km, fading over about 1.5 km for short trips and
+// 10% of the distance for long ones (a 2 km gap matters more at 6 km than at 40).
+export function kmSimilarity(a, b) {
+  if (!(a > 0) || !(b > 0)) return 1;
+  const sd = Math.max(1.5, 0.1 * b);
+  return 2 * Math.exp(-((a - b) ** 2) / (2 * sd * sd));
+}
+
 // ---- Time of day ----
 // Yield swings with the clock: commute peaks, lunch, going home, and bar closing (around 2:45
 // on weekdays, 3:45 on weekends, Orchard especially). So time is matched tightly: a trip 45 min
@@ -193,7 +220,8 @@ export function placeSimilarity(t, q) {
 // the price is already in the distance.
 export function similarity(t, q) {
   let w = 1;
-  if (tripBand(t) === q.band) w *= 2;
+  if (q.km > 0) w *= kmSimilarity(cardKm(t), q.km);
+  else if (tripBand(t) === q.band) w *= 2;
   w *= timeSimilarity(t.ts, q.ts);
   w *= placeSimilarity(t, q);
   // Premium, 6-seater and taxi fares run on different rates, so other ride types count little.
@@ -275,10 +303,10 @@ export function surgeOutlook(q, trips, settings) {
   return { chance, likely, near, evidence, inferredNear };
 }
 
-// q = { band, ts, loc }
+// q = { km (from the card) or band, ts, loc }
 export function predict(q, trips, settings) {
   const s = mergeSettings(settings);
-  const profile = bandProfile(q.band, trips);
+  const profile = q.km > 0 ? kmProfile(q.km, trips) : bandProfile(q.band, trips);
   const prior = priorNet(profile.km, profile.min, s);
 
   const data = trips
@@ -320,7 +348,7 @@ export function predict(q, trips, settings) {
   const shared = data.filter((x) => x.t.shared).length;
 
   return {
-    band: q.band,
+    band: q.km > 0 ? bandFor(q.km).id : q.band,
     km: profile.km,
     tripMin: profile.min,
     prior,

@@ -199,18 +199,20 @@ const SCHEMA = [
     ts INTEGER NOT NULL,
     ride TEXT NOT NULL,
     band TEXT, zone TEXT, decision TEXT,
-    km REAL, trip_min REAL, drive_min REAL, fare REAL, payment TEXT, pricing TEXT,
+    km REAL, trip_min REAL, drive_min REAL, fare REAL, payment TEXT, pricing TEXT, card_km REAL,
     pickup_lat REAL, pickup_lng REAL, drop_lat REAL, drop_lng REAL
   )`,
   'CREATE INDEX IF NOT EXISTS jobs_rev ON jobs(rev)',
   'CREATE INDEX IF NOT EXISTS jobs_ip ON jobs(ip_hash, received_at)',
 ];
 let schemaReady = null;
+// Pools created before a column existed get it added; on newer ones it's already there.
+const addColumn = (db, def) => Promise.resolve().then(() => db.prepare(`ALTER TABLE jobs ADD COLUMN ${def}`).run()).catch(() => {});
 function ensureSchema(db) {
   if (!schemaReady) {
     schemaReady = db.batch(SCHEMA.map((s) => db.prepare(s)))
-      // Pools created before the surge tag existed get the column added; on newer ones it's already there.
-      .then(() => Promise.resolve().then(() => db.prepare('ALTER TABLE jobs ADD COLUMN pricing TEXT').run()).catch(() => {}))
+      .then(() => addColumn(db, 'pricing TEXT'))
+      .then(() => addColumn(db, 'card_km REAL'))
       .catch((e) => {
         schemaReady = null;
         throw e;
@@ -248,6 +250,8 @@ export function cleanJob(j, now = Date.now()) {
   const tripMin = j.trip_min == null ? null : Number(j.trip_min);
   const driveMin = j.drive_min == null ? null : Number(j.drive_min);
   const fare = j.fare == null ? null : Number(j.fare);
+  const cardKm = j.card_km == null ? null : Number(j.card_km);
+  if (!inRange(cardKm, 0.5, 100)) return null;
   if (!inRange(km, 0.1, 80) || !inRange(tripMin, 1, 300) || !inRange(driveMin, 1, 300) || !inRange(fare, 2, 400)) return null;
   const pickup = cleanPoint(j.pickup_lat, j.pickup_lng);
   const drop = cleanPoint(j.drop_lat, j.drop_lng);
@@ -257,7 +261,7 @@ export function cleanJob(j, now = Date.now()) {
   return {
     id: j.id, ts: Math.round(ts / FIVE_MIN) * FIVE_MIN, ride, band: j.band ?? null, zone: j.zone ?? null,
     decision: j.decision ?? null, km: r2(km), trip_min: r2(tripMin), drive_min: r2(driveMin), fare: r2(fare),
-    payment: j.payment ?? null, pricing: j.pricing ?? null, pickup_lat: pickup[0], pickup_lng: pickup[1], drop_lat: drop[0], drop_lng: drop[1],
+    payment: j.payment ?? null, pricing: j.pricing ?? null, card_km: r2(cardKm), pickup_lat: pickup[0], pickup_lng: pickup[1], drop_lat: drop[0], drop_lng: drop[1],
   };
 }
 
@@ -269,13 +273,13 @@ async function hashIp(request, env) {
 }
 
 const UPSERT = `INSERT INTO jobs (id, device, ip_hash, received_at, updated_at, rev, ts, ride, band, zone, decision,
-    km, trip_min, drive_min, fare, payment, pickup_lat, pickup_lng, drop_lat, drop_lng, pricing)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM jobs), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+    km, trip_min, drive_min, fare, payment, pickup_lat, pickup_lng, drop_lat, drop_lng, pricing, card_km)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM jobs), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, ride = excluded.ride,
     band = excluded.band, zone = excluded.zone, decision = excluded.decision, km = excluded.km, trip_min = excluded.trip_min,
     drive_min = excluded.drive_min, fare = excluded.fare, payment = excluded.payment, pickup_lat = excluded.pickup_lat,
     pickup_lng = excluded.pickup_lng, drop_lat = excluded.drop_lat, drop_lng = excluded.drop_lng,
-    pricing = excluded.pricing
+    pricing = excluded.pricing, card_km = excluded.card_km
   WHERE jobs.device = excluded.device`;
 
 async function postJobs(request, env) {
@@ -312,7 +316,7 @@ async function postJobs(request, env) {
     }
     await env.DB.prepare(UPSERT).bind(
       row.id, device, ipHash, now, row.ts, row.ride, row.band, row.zone, row.decision, row.km, row.trip_min,
-      row.drive_min, row.fare, row.payment, row.pickup_lat, row.pickup_lng, row.drop_lat, row.drop_lng, row.pricing,
+      row.drive_min, row.fare, row.payment, row.pickup_lat, row.pickup_lng, row.drop_lat, row.drop_lng, row.pricing, row.card_km,
     ).run();
     accepted.push(row.id);
   }
@@ -325,7 +329,7 @@ async function getJobs(url, env) {
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
     `SELECT rev, id, ts, ride, band, zone, decision, km, trip_min, drive_min, fare, payment,
-       pickup_lat, pickup_lng, drop_lat, drop_lng, pricing FROM jobs WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
+       pickup_lat, pickup_lng, drop_lat, drop_lng, pricing, card_km FROM jobs WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
   const jobs = results.slice(0, limit);

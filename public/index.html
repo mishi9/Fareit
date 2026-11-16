@@ -32,8 +32,17 @@
         <button type="button" data-act="cancelled">Cancelled</button>
       </div>
       <div class="group">
-        <div class="label">Trip distance on the card (km)</div>
-        <div id="bands" class="grid g4"></div>
+        <div class="label">Trip distance on the card</div>
+        <div class="km-row">
+          <button type="button" class="nudge" data-nudge="-1" aria-label="1 km less">−</button>
+          <div class="km-read"><span id="km-val">—</span> km</div>
+          <button type="button" class="nudge" data-nudge="1" aria-label="1 km more">+</button>
+        </div>
+        <div id="km-track" class="km-track" role="slider" tabindex="0" aria-label="Trip distance on the card, in km" aria-valuemin="1" aria-valuemax="50">
+          <div class="km-rail"><div class="km-fill"></div></div>
+          <div class="km-thumb"></div>
+        </div>
+        <div class="km-ticks" aria-hidden="true"></div>
       </div>
     </div>
   </section>

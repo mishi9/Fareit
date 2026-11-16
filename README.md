@@ -8,7 +8,7 @@ Nothing touches the Grab phone. No screenshots, no screen capture, no voice, and
 
 ## How you use it
 
-1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–3`, `3–6` … `42–45`, `45+` km; 3.0 km goes in `3–6`) at the bottom of the screen. The predicted fare appears at the top, where your hand doesn't cover it. Changing the tap within 15 seconds corrects the same job instead of adding a new one.
+1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, slide to the card's trip distance (1 km steps, 1 to 50+). Touch anywhere on the track to jump there; the big − and + buttons fix it by 1 km. The predicted fare shows at the top while you slide, and the job is saved when you let go. Changing it within 15 seconds corrects the same job instead of adding a new one.
 2. **Then tap Took it or Cancelled.** Both are recorded with the exact time, and that moment is the job's time for learning, not when you reconcile it. Several cancels in a row each count as their own job. The job time and Phone 2's location (roughly the pickup area) are saved when you tap.
 3. **Reconcile tab, once you're parked.** Every job is waiting there, taken or cancelled.
    - **Pickup:** starts filled in with the nearest address to where Phone 2 was when you tapped, usually 1–5 km from the real pickup. Type over it if the pickup was far from there.
@@ -21,9 +21,9 @@ Nothing touches the Grab phone. No screenshots, no screen capture, no voice, and
 ## How a prediction is made
 
 ```
-prior     = max(S$6.20, S$2.40 + S$0.48 × km + S$0.18 × min)       km, min: typical for the band
+prior     = max(S$6.20, S$2.40 + S$0.48 × km + S$0.18 × min)       km from the card, min learned for that distance
 r (a job) = ln(fare paid ÷ prior for that job)                      capped at ±1.2
-weight    = band match (×2) × time of day and day type × pickup nearness
+weight    = km closeness (×2 at the same km) × time of day and day type × pickup nearness
 m         = (Σ weight × r + 3 × overall) ÷ (Σ weight + 3)
 fare      = max(S$6.20, prior × e^m)
 ```
@@ -31,14 +31,14 @@ fare      = max(S$6.20, prior × e^m)
 - **The card fare is already take-home** (before CPF), so there's no commission to model. Everything is predicted in take-home terms.
 - **Minimum fare:** no prediction goes below S$6.20 (adjustable in Settings).
 - **Day one:** a starting estimate of S$2.40 + S$0.48/km + S$0.18/min. Grab doesn't publish a driver rate card, so this is tuned so the recorded Tampines St 11 → Tuas View Close trip (45.8 km, S$33.20) lands within 2%.
-- **As you reconcile:** each job's actual fare divided by the formula's estimate becomes a correction. Corrections are weighted toward jobs like the current one: same band, same time of day, same kind of day, and started near where you are now. They're pulled toward the overall average until enough similar jobs exist, so one odd fare can't swing predictions. This is how surge and Grab's real cut get learned.
+- **As you reconcile:** each job's actual fare divided by the formula's estimate becomes a correction. Corrections are weighted toward jobs like the current one: a similar distance (counting fully within about 1.5 km for short trips, or 10% of the distance for long ones), same time of day, same kind of day, and started near where you are now. They're pulled toward the overall average until enough similar jobs exist, so one odd fare can't swing predictions. This is how surge and Grab's real cut get learned.
 - **Time of day carries the most weight.** Commute peaks, lunch, going home, and bar closing (around 2:45 on weekdays and 3:45 on weekends, Orchard especially) all change the yield. Time is matched tightly: a job 45 minutes away counts 61%, one hour 41%, two hours 3%. So 2:45 and 3:45 are learned as different moments.
 - **Late night belongs to the evening before.** 3:45 on Saturday morning counts as Friday night. Days are grouped as weekday (Mon–Thu), Friday, Saturday and Sunday, and nearby groups partly share what they learn.
 - **Where you are:** Orchard at 2:45 isn't Tampines at 2:45. Jobs that started within about 2 km of your current spot count up to twice as much. Once a job is reconciled, the exact pickup replaces the tap location. If location permission is refused, everything else still works.
 - **The drop-off doesn't set the price.** Surge is set where the passenger books, and the drop's effect on the fare is already in the distance, so there's no drop area to tap. A drop-off entered when reconciling only gives the road distance.
 - **Junk protection:** no single job, from you or the pool, can pull a prediction beyond 0.3× to 3.3× the starting estimate. It's diluted by every other job too.
 - **Took it / Cancelled isn't a judgement of the job.** A driver may cancel a good job simply because they don't want to go there. So the model never learns from the decision itself, only from what the job paid.
-- **Bands for now, exact km later:** each band's typical distance and time switch from the band midpoint to the median of reconciled trips once three fall in that band.
+- **Exact km:** the slider's km goes into the formula directly. Trip minutes for that distance come from reconciled jobs within a few km once there are three, otherwise about 5 + 1.1 min per km. Jobs saved under the old distance bands count at their real km, or the band's middle.
 
 ### Surge outlook
 
