@@ -4,7 +4,7 @@
 // they are never sent to the shared pool.
 import * as db from './db.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, MIN_PASSENGER,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, MIN_PASSENGER, PLATFORM_FEE, BASE_TRIPS,
 } from './formula.js';
 
 const KEY = 'formulaLab';
@@ -34,8 +34,12 @@ export async function buildLab(root) {
         <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="22"></div>
     </div>
     <div class="row2">
+      <div class="field"><label for="lab-fee">Platform &amp; partner fee (S$)</label>
+        <input id="lab-fee" type="number" inputmode="decimal" step="0.01" min="0" value="${PLATFORM_FEE.toFixed(2)}"></div>
       <div class="field"><label for="lab-erp">ERP / tolls (S$, if any)</label>
         <input id="lab-erp" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div>
+    </div>
+    <div class="row2">
       <div class="field"><span class="flabel">Pricing</span>
         <div id="lab-surge" class="seg g2">
           <button type="button" data-v="normal">Normal</button>
@@ -44,15 +48,15 @@ export async function buildLab(root) {
     </div>
 
     <div class="lab-predict" aria-live="polite">
-      <div class="k">Passenger fare by the formula</div>
+      <div class="k">Paid by passenger, by the formula</div>
       <div class="v" id="lab-pred">—</div>
       <div class="s" id="lab-pred-sub">Type the distance and time.</div>
     </div>
 
     <div class="row2">
-      <div class="field"><label for="lab-actual">Passenger actually paid (S$)</label>
+      <div class="field"><label for="lab-actual">Paid by passenger, actual (S$)</label>
         <input id="lab-actual" type="number" inputmode="decimal" step="0.01" min="0" placeholder="14.00"></div>
-      <div class="field"><label for="lab-earned">You took home (S$)</label>
+      <div class="field"><label for="lab-earned">You earned (S$)</label>
         <input id="lab-earned" type="number" inputmode="decimal" step="0.01" min="0" placeholder="11.20"></div>
     </div>
     <div class="lab-check" id="lab-check"></div>
@@ -71,7 +75,7 @@ export async function buildLab(root) {
     <div id="lab-list" class="stack"></div>
     <button type="button" class="ghost wide" id="lab-export">Export CSV</button>`;
 
-  for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
+  for (const id of ['lab-km', 'lab-min', 'lab-fee', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
   for (const b of root.querySelectorAll('#lab-surge button')) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
@@ -90,18 +94,19 @@ function renderAll() {
 
 function renderFormula() {
   const w = weights();
-  const basis = w.n ? `Fitted from ${w.n} normal trip${w.n === 1 ? '' : 's'}.` : 'Starting guess: no trips yet.';
+  const mine = w.n - BASE_TRIPS.length;
+  const basis = mine > 0 ? `Fitted from the base trip and ${mine} of yours.` : 'From the base trip only (11.58 km, paid S$16.80): it sets the level, more trips sort out the split.';
   $('#lab-formula', lab.root).innerHTML = `
-    <div class="k">Grab's published formula (normal GrabCar)</div>
-    <div class="f">Passenger fare = max(<b>${money(MIN_PASSENGER)}</b>,
-      <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min) + ERP</div>
+    <div class="k">Grab's published formula (Standard, normal pricing)</div>
+    <div class="f">Passenger fare = <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min</div>
+    <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, passenger fare + <b>${money(PLATFORM_FEE)}</b> fee) + ERP</div>
     <div class="s">${basis} Weights update every time you save a trip.</div>`;
 }
 
 function readForm() {
   const r = lab.root;
   return {
-    km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: num($('#lab-erp', r)) || 0,
+    km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: num($('#lab-erp', r)) || 0, fee: num($('#lab-fee', r)) ?? PLATFORM_FEE,
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
   };
 }
@@ -120,11 +125,11 @@ function update() {
     check.innerHTML = '';
     return;
   }
-  const p = passengerFare(weights(), f.km, f.min, f.erp);
+  const p = passengerFare(weights(), f.km, f.min, f.erp, f.fee);
   const c = commission();
   pred.textContent = money(p.fare);
-  const cutLabel = c.kind === 'seed' ? 'assuming Grab keeps 20%' : c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}`;
-  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}You'd take home about ${money(driverEarns(c, p.fare, f.erp))} (${cutLabel}).${f.surge === 'surge' ? ' Surge: the formula is for normal pricing, so expect the real fare to be higher.' : ''}`;
+  const cutLabel = c.kind === 'percent+fixed' ? `Grab's fee ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab's fee ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
+  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : `Passenger fare ${money(p.core)} + ${money(f.fee)} fee${f.erp ? ` + ${money(f.erp)} ERP` : ''}. `}You'd earn about ${money(driverEarns(c, p.fare, f.erp, f.fee))} (${cutLabel}).${f.surge === 'surge' ? ' Surge: the formula is for normal pricing, so expect the real fare to be higher.' : ''}`;
   const lines = [];
   if (f.actual > 0) {
     const off = p.fare - f.actual;
@@ -133,7 +138,7 @@ function update() {
   }
   if (f.actual > 0 && f.earned > 0) {
     const cut = cutOf(f);
-    lines.push(`Grab's cut on this trip: ${money(cut.cut)} (${pct(cut.rate)}).`);
+    lines.push(`Grab's service fee on this trip: ${money(cut.cut)} (${pct(cut.rate)} of the ${money(cut.fare)} passenger fare).`);
   }
   check.innerHTML = lines.join(' ');
 }
@@ -145,11 +150,11 @@ async function save() {
   if (!(f.actual > 0)) { msg.textContent = 'Add what the passenger actually paid.'; msg.classList.add('err'); return; }
   // The prediction is recorded before this trip changes the weights: an honest test each time.
   const w = weights();
-  const predicted = passengerFare(w, f.km, f.min, f.erp).fare;
+  const predicted = passengerFare(w, f.km, f.min, f.erp, f.fee).fare;
   const c = commission();
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ts: Date.now(), ...f,
-    predicted, predictedEarned: driverEarns(c, predicted, f.erp),
+    predicted, predictedEarned: driverEarns(c, predicted, f.erp, f.fee),
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
   });
   await db.setKV(KEY, lab.trips);
@@ -162,6 +167,7 @@ async function save() {
 
 function clearForm(keepMsg) {
   for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, lab.root).value = '';
+  $('#lab-fee', lab.root).value = PLATFORM_FEE.toFixed(2);
   lab.surge = 'normal';
   if (keepMsg !== true) $('#lab-msg', lab.root).textContent = '';
   update();
@@ -189,12 +195,11 @@ function renderStats() {
 function renderCut() {
   const box = $('#lab-cut', lab.root);
   const c = commission();
-  if (c.kind === 'seed') { box.innerHTML = '<p class="note">Add what you took home on a trip to measure Grab\'s cut.</p>'; return; }
   const verdict = c.kind === 'flat'
     ? `Looks like a flat <b>${pct(c.avgRate)}</b>.`
     : c.kind === 'percent+fixed'
       ? `Looks like <b>${pct(1 - c.keep)}</b> plus <b>${money(-c.fixed)}</b> per job.`
-      : `Average <b>${pct(c.avgRate)}</b> so far. 3 trips will show whether it's flat.`;
+      : `<b>${pct(c.avgRate)}</b> of the passenger fare so far${c.n === 1 ? ' (base trip: S$3.50 of S$15.60)' : ''}. 3 trips will show whether it's a flat % or not.`;
   const range = c.n > 1 ? (c.spread < 0.001 ? ` The same on all ${c.n} trips.` : ` Across ${c.n} trips it ranged ${pct(c.lo)}–${pct(c.hi)}.`) : '';
   box.innerHTML = `<p class="note">${verdict}${range}</p>`;
 }
@@ -202,7 +207,7 @@ function renderCut() {
 function renderList() {
   renderCut();
   const box = $('#lab-list', lab.root);
-  box.innerHTML = lab.trips.length ? '' : '<p class="empty">No trips yet.</p>';
+  box.innerHTML = lab.trips.length ? '' : '<p class="empty">No trips of yours yet.</p>';
   for (const t of [...lab.trips].reverse()) {
     const off = t.predicted - t.actual;
     const cut = cutOf(t);
@@ -211,7 +216,7 @@ function renderList() {
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
       <div class="meta">${t.km} km · ${t.min} min${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : ''}</div>
-      <div class="meta">Formula said ${money(t.predicted)} (${Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`})${cut ? ` · took home ${money(t.earned)}, Grab's cut ${pct(cut.rate)}` : ''}</div>`;
+      <div class="meta">Formula said ${money(t.predicted)} (${Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`})${cut ? ` · earned ${money(t.earned)}, Grab's fee ${pct(cut.rate)}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     let armed = false;
@@ -228,7 +233,19 @@ function renderList() {
     acts.append(del);
     card.append(acts);
     box.append(card);
-  }
+  }  box.append(baseCard());
+}
+
+// The built-in base trip, listed last so it's clear where the starting weights came from.
+function baseCard() {
+  const t = BASE_TRIPS[0];
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="line1"><span class="when">Base trip (built in)</span><span class="when">${money(t.actual)}</span></div>
+    <div class="meta">${t.km} km · ${t.min} min (OneMap) · fee ${money(t.fee)} · earned ${money(t.earned)}, Grab's fee ${money(cutOf(t).cut)}</div>
+    <div class="meta">${t.note}</div>`;
+  return card;
 }
 
 async function exportCsv() {

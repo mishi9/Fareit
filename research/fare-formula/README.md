@@ -12,9 +12,15 @@ driver earned  = passenger fare − Grab's commission
 
 ## Known facts
 
-- **Service:** the formula is for **standard GrabCar** (private hire). Only rows whose `ride_type` is
-  GrabCar / GrabCar Standard are fitted. GrabTaxi and JustGrab (which can be a taxi) are counted
+- **Service:** the formula is for **Standard** ("Standard | Car or taxi" in Grab's job details: one
+  price whichever vehicle comes), also written GrabCar. GrabTaxi, JustGrab and others are counted
   but never mixed in.
+- **How Grab's job details split a trip** (trip 1):
+  - paid by passenger S$16.80 = passenger fare S$15.60 + platform & partner fee S$1.20
+  - driver earned S$12.10 = pick-up fare S$3.50 + trip fare S$7.70 + fuel surcharge S$0.90
+  - Grab service fee S$3.50 = passenger fare − driver earned (22.4%)
+  So the published formula sets the **passenger fare**; the S$1.20 fee is on top. If the fee is
+  always S$1.20, the S$8.10 minimum is S$6.90 + S$1.20 (to be checked).
 - **Minimum passenger fare: S$8.10**, however short the trip. Tested several times as a passenger
   on normal GrabCar. Trips paying exactly S$8.10 are left out of the formula fit (the floor set
   the fare, not the formula) and used to find the distance where the minimum stops applying.
@@ -31,7 +37,8 @@ driver earned  = passenger fare − Grab's commission
 | actual_min | minutes actually driven, pickup to drop-off | if known |
 | passenger_fare | total the passenger paid | yes |
 | driver_earned | what the driver actually earned for the job | yes |
-| erp, tolls, platform_fee, other_surcharge | add-ons from the fare breakdown, S$ (blank = none shown) | if shown |
+| erp, tolls, platform_fee, other_surcharge | add-ons from the fare breakdown, S$ (blank = none shown). platform_fee = "Platform & partner fee" | if shown |
+| pickup_fare, trip_fare, fuel_surcharge | the driver's "Trip Earnings" breakdown | if shown |
 | surge_flag | normal / surge / promo / unsure | yes |
 | pickup_area, drop_area | rough area, e.g. Tampines | optional |
 | notes | anything odd (no commas) | optional |

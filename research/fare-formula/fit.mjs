@@ -10,12 +10,13 @@ const MIN_PASSENGER_FARE = 8.10;
 
 // Which service the formula is for. Only standard GrabCar (private hire) is fitted; GrabTaxi
 // (and anything else) runs on different rates and is reported separately, never mixed in.
-const FITTED = 'GrabCar';
+// Grab's job details call it "Standard | Car or taxi": one price whichever vehicle comes.
+const FITTED = 'Standard';
 function service(name) {
   const n = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!n) return 'unknown';
+  if (n.startsWith('standard') || ['grabcar', 'grabcarstandard', 'car'].includes(n)) return 'Standard';
   if (n.includes('taxi')) return 'GrabTaxi';
-  if (['grabcar', 'grabcarstandard', 'standard', 'car'].includes(n)) return 'GrabCar';
   if (n.includes('justgrab')) return 'JustGrab'; // can be a taxi or a car: kept apart
   return name;
 }
@@ -123,10 +124,11 @@ for (const m of models) {
 const paid = car.filter((t) => t.passenger_fare > 0 && t.driver_earned > 0);
 console.log(`\nGrab's cut (${FITTED}): ${paid.length} trips with both numbers`);
 if (paid.length) {
-  // ERP and tolls are usually passed straight to the driver, so measure the cut on the rest.
+  // As Grab's job details show it: passenger fare (paid − platform & partner fee) minus what the
+  // driver earned. ERP and tolls reach the driver untouched, so they're left out of both.
   const cuts = paid.map((t) => {
     const pass = (t.erp || 0) + (t.tolls || 0);
-    const fare = t.passenger_fare - pass;
+    const fare = t.passenger_fare - pass - (t.platform_fee || 0);
     const earned = t.driver_earned - pass;
     return { t, fare, earned, cut: fare - earned, rate: (fare - earned) / fare };
   });
