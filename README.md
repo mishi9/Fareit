@@ -6,9 +6,10 @@ Nothing touches the Grab phone. No screenshots, no screen capture, no voice, and
 
 ## How you use it
 
-1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–5` … `40+` km) and the drop area (`N` `S` `E` `W` `Airport` `Tuas` `WLC` `CF`). The verdict appears straight away. Tap the verdict to clear it. Changing a tap within 15 seconds corrects the same job instead of adding a new one.
-2. **Reconcile tab, once you're parked.** Every job you tapped is waiting there. Add the pickup and drop-off (exact address, postal code, or an area like `Tampines`), the estimated trip time, and the actual fare. Payment type is optional. Fareit looks up the official road distance on OneMap and records how far off its prediction was. Jobs you cancelled go under **Didn't take it** and aren't used for training.
-3. **Trips tab.** Shows reconciled trips, the average prediction error, and whether predictions run high or low.
+1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–5` … `40+` km) and the drop area (`N` `S` `E` `W` `Airport` `Tuas` `WLC` `CF`). The verdict appears straight away. Changing a tap within 15 seconds corrects the same job instead of adding a new one.
+2. **Then tap Took it or Cancelled.** Both are recorded with the exact time. The job time and Phone 2's location (roughly the pickup area) are saved when you tap.
+3. **Reconcile tab, once you're parked.** Every job is waiting there, taken or cancelled. Add the pickup and drop-off (exact address, postal code, or an area like `Tampines`), the job time (prefilled, editable), the estimated trip time, and the fare. For a cancelled job, that's the fare the card flashed when you rejected it. Taken or cancelled, a job with a fare trains the model the same way. Payment type is optional. Fareit looks up the official road distance on OneMap and records how far off its prediction was. If you never saw a cancelled job's fare, **No fare seen** keeps its time, band, area and decision, but it can't teach the price.
+4. **Trips tab.** Shows reconciled trips, the average prediction error, whether predictions run high or low, and how many jobs you took vs cancelled.
 
 ## How a prediction is made
 
@@ -19,7 +20,10 @@ TAKE   when $/hr ≥ your line (default S$30/hr)
 ```
 
 - **Day one:** a fare-structure estimate (S$3.00 base, S$0.60/km, S$0.22/min, 20% cut). Grab doesn't publish a driver rate card, so these come from public sources, tuned so the recorded Tampines St 11 → Tuas View Close trip (45.8 km, S$33.20) lands within about 1%.
-- **As you reconcile:** each trip's actual fare divided by the formula's estimate becomes a correction. Corrections are weighted toward trips like the current one: same drop area, same band, similar hour, and weekday vs weekend. They're pulled toward your overall average until enough similar trips exist, so one odd fare can't swing predictions. This is how surge and Grab's real cut get learned without ever being shown to you.
+- **As you reconcile:** each job's actual fare divided by the formula's estimate becomes a correction. Corrections are weighted toward jobs like the current one: same drop area, same band, same time of day, same kind of day, and started near where you are now. They're pulled toward your overall average until enough similar jobs exist, so one odd fare can't swing predictions. This is how surge and Grab's real cut get learned without ever being shown to you.
+- **Time of day carries the most weight.** Commute peaks, lunch, going home, and bar closing (around 2:45 on weekdays and 3:45 on weekends, Orchard especially) all change the yield. Time is matched tightly: a job 45 minutes away counts 61%, one hour 41%, two hours 3%. So 2:45 and 3:45 are learned as different moments.
+- **Late night belongs to the evening before.** 3:45 on Saturday morning counts as Friday night. Days are grouped as weekday (Mon–Thu), Friday, Saturday and Sunday, and nearby groups partly share what they learn.
+- **Where you are:** Orchard at 2:45 isn't Tampines at 2:45. Jobs that started within about 2 km of your current spot count up to twice as much. Once a job is reconciled, the exact pickup replaces the tap location. If location permission is refused, everything else still works.
 - **Dead drops:** Tuas (35 min) and Changi Far (25 min) carry an empty drive back that's counted in $/hr. Woodlands Checkpoint has 10 min and the airport 5. All of these can be changed in Settings.
 - **Bands for now, exact km later:** each band's typical distance and time switch from the band midpoint to the median of your own trips once three reconciled trips fall in that band. All trips store OneMap's exact km, so a later version can predict from exact distance without collecting anything new.
 
@@ -32,7 +36,7 @@ When you add a trip by hand, the drop area is suggested from the map. A drop you
 | Airport | within 1 km of Terminal 1–4 or Jewel |
 | WLC | within 1.5 km of Woodlands Checkpoint |
 | Tuas | west of about 103.675°E (Tuas industrial, Tuas Checkpoint) |
-| CF (Changi Far) | east of about 103.965°E outside the terminals (Loyang, Changi Village, airfreight, Changi coast) |
+| CF (Changi Far) | past Loyang/Pasir Ris: east of about 103.965°E outside the terminals (Loyang, Changi Village, airfreight, Changi coast). Changi City Point and Pasir Ris stay East. |
 | N / S / E / W | compass direction from the middle of the island (1.340, 103.835) |
 
 ## Set up

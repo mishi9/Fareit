@@ -88,8 +88,16 @@ main {
   border-radius: 16px; padding: 14px 16px; min-height: 150px; display: grid; gap: 4px; align-content: center;
   background: var(--surface); border: 1px solid var(--line); cursor: pointer;
 }
-.verdict .top-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.verdict .clear { font-size: 13px; opacity: 0.8; }
+.verdict .top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.verdict .clear { font-size: 13px; background: none; border: 0; color: inherit; opacity: 0.85; text-decoration: underline; cursor: pointer; padding: 6px 0 6px 10px; }
+.verdict .decide { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.verdict .decide button {
+  min-height: 46px; border-radius: 10px; font-weight: 800; font-size: 16px; cursor: pointer;
+  border: 2px solid currentColor; background: transparent; color: inherit;
+}
+.verdict .decide button:active { background: color-mix(in srgb, currentColor 18%, transparent); }
+.pill.took { background: var(--raised); color: var(--go); }
+.pill.cancelled { background: var(--raised); color: var(--stop); }
 .verdict.idle p { margin: 0; color: var(--muted); font-size: 17px; text-align: center; }
 .verdict.take { background: var(--go); color: var(--go-ink); border-color: var(--go); }
 .verdict.skip { background: var(--stop); color: var(--stop-ink); border-color: var(--stop); }
@@ -181,6 +189,7 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
   .verdict { min-height: 0; padding: 10px 14px; }
   .verdict .word { font-size: 36px; }
   .verdict .big { font-size: 20px; }
+  .verdict .decide button { min-height: 40px; }
   .tabs button { min-height: 42px; }
 }
 

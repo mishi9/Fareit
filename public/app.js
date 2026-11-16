@@ -17,6 +17,7 @@ const state = {
   view: 'window',
   form: null,
   wakeLock: null,
+  loc: null, // last known position of this phone, roughly where the pickup will be
 };
 
 // ---------- small helpers ----------
@@ -28,6 +29,14 @@ const zoneLabel = (id) => ZONES.find((z) => z.id === id)?.label ?? '—';
 const bandLabel = (id) => (BANDS.find((b) => b.id === id)?.label ?? '—') + ' km';
 const when = (ts) => new Date(ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 const placeLabel = (p, text) => (p && p.label) || text || '—';
+const clock = (ts) => new Date(ts).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: false });
+const decisionLabel = (d) => (d === 'took' ? 'Took it' : d === 'cancelled' ? 'Cancelled' : 'No decision');
+const DAY_NAMES = { weekday: 'weekday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' };
+function toLocalInput(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 function button(html, cls, onClick) {
   const b = document.createElement('button');
@@ -116,9 +125,12 @@ function buildWindow() {
     el.setAttribute('aria-label', `${z.label}${z.dead ? ', usually a dead drop' : ''}`);
     zones.append(el);
   }
-  const v = $('#verdict');
-  v.addEventListener('click', resetWindow);
-  v.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); resetWindow(); } });
+  $('#verdict').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    if (b.dataset.act === 'clear') resetWindow();
+    else recordDecision(b.dataset.act);
+  });
   renderVerdict(null);
 }
 
@@ -147,7 +159,8 @@ function resetWindow() {
 
 async function decide() {
   const now = Date.now();
-  const p = predict({ band: state.band, zone: state.zone, ts: now }, state.trips, state.settings);
+  const loc = state.loc && now - state.loc.at < 10 * 60 * 1000 ? state.loc : null;
+  const p = predict({ band: state.band, zone: state.zone, ts: now, loc }, state.trips, state.settings);
   renderVerdict(p);
 
   // A change within 15 seconds is a correction of the same job, not a new one.
@@ -160,6 +173,7 @@ async function decide() {
   }
   trip.band = state.band;
   trip.zone = state.zone;
+  if (loc && !trip.tapLoc) trip.tapLoc = { lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy };
   trip.prediction = {
     net: p.net, lo: p.lo, hi: p.hi, perHour: p.perHour, verdict: p.verdict,
     km: p.km, tripMin: p.tripMin, returnMin: p.returnMin, stage: p.stage, basis: p.basis,
@@ -179,16 +193,34 @@ function renderVerdict(p) {
   const why = [`${Math.round(p.tripMin)} min trip`];
   if (p.returnMin >= 10) why.push(`+ about ${p.returnMin} min empty drive back`);
   const stage = p.stage === 'seed'
-    ? 'Fare-structure estimate. No reconciled trips yet.'
-    : `${p.stage === 'trained' ? 'Based on' : 'Learning from'} ${p.basis} reconciled trip${p.basis === 1 ? '' : 's'}.`;
+    ? 'Fare-structure estimate. No reconciled jobs yet.'
+    : `${p.stage === 'trained' ? 'Based on' : 'Learning from'} ${p.basis} job${p.basis === 1 ? '' : 's'}, ${p.nearTime} within an hour of now on a ${DAY_NAMES[p.dayClass]}.`;
   v.className = `verdict ${p.verdict === 'TAKE' ? 'take' : 'skip'}`;
   v.innerHTML = `
-    <div class="top-row"><span class="word">${p.verdict}</span><span class="clear">Tap to clear</span></div>
+    <div class="top-row"><span class="word">${p.verdict}</span><button type="button" class="clear" data-act="clear">Clear</button></div>
     <div class="nums">
       <span><span class="big">${dollars(p.net)}</span> <span class="rng">${dollars(p.lo)}–${dollars(p.hi)}</span></span>
       <span><span class="big">${dollars(p.perHour)}/hr</span> <span class="rng">line ${dollars(state.settings.targetPerHour)}</span></span>
     </div>
-    <div class="why">${esc(why.join(' '))}. ${esc(stage)}</div>`;
+    <div class="why">${esc(why.join(' '))}. ${esc(stage)}</div>
+    <div class="decide">
+      <button type="button" data-act="took">Took it</button>
+      <button type="button" data-act="cancelled">Cancelled</button>
+    </div>`;
+}
+
+// Records what you did and when. Taken or cancelled, the job stays in Reconcile so its fare
+// can be added: a cancelled job whose fare you saw trains the model like any other.
+async function recordDecision(decision) {
+  const trip = state.trips.find((t) => t.id === state.currentId);
+  if (!trip) return;
+  const now = Date.now();
+  trip.decision = decision;
+  trip.decidedAt = now;
+  trip.decideSeconds = Math.round((now - trip.ts) / 1000);
+  resetWindow();
+  toast(`${decisionLabel(decision)} at ${clock(now)}. Add the fare later in Reconcile.`);
+  await db.putTrip(trip);
 }
 
 // ---------- reconcile ----------
@@ -199,32 +231,34 @@ function renderReconList() {
   $('#recon-form').hidden = true;
   box.innerHTML = `
     <div class="head"><h2>To reconcile</h2><button type="button" class="primary small" id="add-trip">Add a trip</button></div>
-    ${pending.length ? '' : '<p class="empty">Nothing waiting. Every job you tap on the Window tab lands here, so you can add the real fare once you are parked.</p>'}`;
+    ${pending.length ? '' : '<p class="empty">Nothing waiting. Every job you tap on the Window tab lands here, taken or cancelled, so you can add its fare once you are parked.</p>'}`;
   $('#add-trip').addEventListener('click', () => openForm(null));
   for (const t of pending) {
     const p = t.prediction;
     const card = document.createElement('div');
     card.className = 'card';
+    const decided = t.decision ? `<span class="pill ${t.decision}">${decisionLabel(t.decision)} ${clock(t.decidedAt)}</span>` : '';
     card.innerHTML = `
-      <div class="line1"><span class="when">${esc(when(t.ts))}</span>${p ? `<span class="pill ${p.verdict === 'TAKE' ? 'take' : 'skip'}">${p.verdict}</span>` : ''}</div>
+      <div class="line1"><span class="when">${esc(when(t.ts))}</span><span class="acts">${decided}${p ? `<span class="pill ${p.verdict === 'TAKE' ? 'take' : 'skip'}">${p.verdict}</span>` : ''}</span></div>
       <div class="meta">${esc(bandLabel(t.band))} · ${esc(zoneLabel(t.zone))}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     acts.append(
-      button('Add real fare', 'primary small', () => openForm(t)),
-      button('Didn’t take it', 'ghost small', () => markSkipped(t)),
+      button('Add fare', 'primary small', () => openForm(t)),
+      button('No fare seen', 'ghost small', () => markNoFare(t)),
     );
     card.append(acts);
     box.append(card);
   }
 }
 
-async function markSkipped(t) {
-  t.status = 'skipped';
+// Keeps the job (time, band, area, decision) but it can't teach the fare without one.
+async function markNoFare(t) {
+  t.status = 'nofare';
   await db.putTrip(t);
   renderBadge();
   renderReconList();
-  toast('Marked as not taken. It won’t be used for training.');
+  toast('Kept with its time and decision. Without a fare it can’t train the price.');
 }
 
 function buildReconForm() {
@@ -233,6 +267,12 @@ function buildReconForm() {
     const b = button(esc(z.short), '', () => { state.form.zone = z.id; markFormZone(); });
     b.dataset.v = z.id;
     zoneBox.append(b);
+  }
+  for (const b of $$('#rf-decision button')) {
+    b.addEventListener('click', () => {
+      state.form.decision = b.dataset.v;
+      markFormDecision();
+    });
   }
   for (const b of $$('#rf-pay button')) {
     b.addEventListener('click', () => {
@@ -244,6 +284,11 @@ function buildReconForm() {
   wirePlace('rf-drop', 'drop');
   $('#rf-back').addEventListener('click', () => { state.form = null; renderReconList(); });
   $('#recon-form').addEventListener('submit', saveRecon);
+}
+
+function markFormDecision() {
+  for (const b of $$('#rf-decision button')) b.classList.toggle('sel', b.dataset.v === state.form.decision);
+  $('#rf-fare-label').textContent = state.form.decision === 'cancelled' ? 'Fare shown when you cancelled (S$)' : 'Fare you were paid (S$)';
 }
 
 function markFormZone() {
@@ -260,7 +305,10 @@ function zoneHint() {
 }
 
 function openForm(trip) {
-  state.form = { id: trip ? trip.id : null, pickup: trip?.pickup || null, drop: trip?.drop || null, zone: trip?.zone || null, pay: trip?.payment || null };
+  state.form = {
+    id: trip ? trip.id : null, pickup: trip?.pickup || null, drop: trip?.drop || null,
+    zone: trip?.zone || null, pay: trip?.payment || null, decision: trip?.decision || 'took',
+  };
   $('#recon-list').hidden = true;
   const f = $('#recon-form');
   f.hidden = false;
@@ -272,6 +320,8 @@ function openForm(trip) {
   $('#rf-drop').value = trip?.dropText || '';
   $('#rf-min').value = trip?.tripMin || '';
   $('#rf-fare').value = trip?.fare || '';
+  $('#rf-when').value = toLocalInput(trip ? trip.ts : Date.now());
+  markFormDecision();
   $('#rf-pickup-s').innerHTML = '';
   $('#rf-drop-s').innerHTML = '';
   for (const x of $$('#rf-pay button')) x.classList.toggle('sel', x.dataset.v === state.form.pay);
@@ -378,8 +428,11 @@ async function saveRecon(ev) {
   const paid = parseFloat($('#rf-fare').value);
   const minRaw = $('#rf-min').value.trim();
   const mins = minRaw ? parseFloat(minRaw) : null;
+  const jobTs = new Date($('#rf-when').value).getTime();
   if (!pickupText || !dropText) return msg('Add both the pickup and the drop-off.', true);
-  if (!(paid > 0)) return msg('Add the fare you were actually paid.', true);
+  if (!(paid > 0)) return msg(state.form.decision === 'cancelled' ? 'Add the fare the card showed when you cancelled.' : 'Add the fare you were paid.', true);
+  if (!Number.isFinite(jobTs)) return msg('Add the job time. Time of day matters for the prediction.', true);
+  if (jobTs > Date.now() + 5 * 60 * 1000) return msg('The job time is in the future.', true);
   if (mins !== null && !(mins > 0 && mins <= 300)) return msg('Trip time should be between 1 and 300 minutes.', true);
 
   const save = $('#rf-save');
@@ -400,9 +453,12 @@ async function saveRecon(ev) {
     trip = { id: uid(), ts: Date.now(), source: 'manual' };
     state.trips.push(trip);
   }
+  // Keep the minute-level time from the window tap unless it was changed here.
+  if (toLocalInput(trip.ts) !== $('#rf-when').value) trip.ts = jobTs;
   Object.assign(trip, {
     status: 'reconciled',
     reconciledAt: Date.now(),
+    decision: state.form.decision,
     pickupText, dropText, pickup, drop,
     fare: paid,
     tripMin: mins,
@@ -428,6 +484,9 @@ function renderTrips() {
   const trainable = rec.filter(isTrainable).length;
   const acc = accuracy(state.trips);
   const pending = rec.filter((t) => t.distanceStatus === 'pending').length;
+  const decided = state.trips.filter((t) => t.decision);
+  const cancelled = decided.filter((t) => t.decision === 'cancelled').length;
+  const noFare = state.trips.filter((t) => t.status === 'nofare').length;
   const bias = acc.bias === null ? '' : acc.bias > 0.02 ? `Predictions run ${Math.round(acc.bias * 100)}% high` : acc.bias < -0.02 ? `Predictions run ${Math.round(-acc.bias * 100)}% low` : 'No consistent lean';
   box.innerHTML = `
     <div class="tiles">
@@ -437,6 +496,7 @@ function renderTrips() {
       <div class="tile"><span class="v">${pending}</span><span class="k">Waiting for road distance</span></div>
     </div>
     ${bias ? `<p class="note">${esc(bias)} across ${acc.count} trip${acc.count === 1 ? '' : 's'}.</p>` : ''}
+    ${decided.length ? `<p class="note">${decided.length} decision${decided.length === 1 ? '' : 's'} logged: ${decided.length - cancelled} taken, ${cancelled} cancelled.${noFare ? ` ${noFare} kept without a fare.` : ''}</p>` : ''}
     ${pending ? '<button type="button" class="primary wide" id="retry-dist">Fetch road distances now</button>' : ''}
     <h2>Reconciled</h2>
     ${rec.length ? '' : '<p class="empty">No reconciled trips yet. Add the real fare for a job on the Reconcile tab.</p>'}`;
@@ -449,7 +509,8 @@ function renderTrips() {
     card.innerHTML = `
       <div class="line1"><span class="when">${esc(when(t.ts))}</span><span class="when">${fare(t.fare)}</span></div>
       <div class="meta">${esc(placeLabel(t.pickup, t.pickupText))} → ${esc(placeLabel(t.drop, t.dropText))}</div>
-      <div class="meta">${esc(dist)} · ${esc(zoneLabel(t.zone))}${t.tripMin ? ` · ${t.tripMin} min trip` : ''}${t.payment ? ` · ${t.payment === 'cash' ? 'Cash' : 'Cashless'}` : ''}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>`;
+      <div class="meta">${esc(dist)} · ${esc(zoneLabel(t.zone))}${t.tripMin ? ` · ${t.tripMin} min trip` : ''}${t.payment ? ` · ${t.payment === 'cash' ? 'Cash' : 'Cashless'}` : ''}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>
+      ${t.decision ? `<div class="acts"><span class="pill ${t.decision}">${decisionLabel(t.decision)}${t.decidedAt ? ` ${clock(t.decidedAt)}` : ''}</span></div>` : ''}`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     acts.append(button('Edit', 'ghost small', () => { show('reconcile'); openForm(t); }));
@@ -644,6 +705,20 @@ async function boot() {
   if (db.isMemoryOnly()) toast('This browser is blocking storage, so trips won’t be kept. Add Fareit to your Home Screen.');
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  watchLocation();
+}
+
+// Where Phone 2 is when a job comes in is roughly the pickup area (Orchard at 2:45 is not
+// Tampines at 2:45). Low accuracy is plenty and saves battery. If refused, everything else works.
+function watchLocation() {
+  if (!('geolocation' in navigator)) return;
+  try {
+    navigator.geolocation.watchPosition(
+      (pos) => { state.loc = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy), at: Date.now() }; },
+      () => {},
+      { enableHighAccuracy: false, maximumAge: 60000, timeout: 30000 },
+    );
+  } catch { /* not available */ }
 }
 
 boot();

@@ -71,6 +71,8 @@ function median(xs) {
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
 
+// Taken or cancelled makes no difference: any job with a fare (paid, or seen on the card when
+// you cancelled) and an OneMap distance trains the model.
 export function isTrainable(t) {
   return t.status === 'reconciled' && t.fare > 0 && t.km > 0;
 }
@@ -101,28 +103,75 @@ export function bandProfile(bandId, trips) {
   return { km: band.km, min: estDriveMin(band.km), learned: false, count: inBand.length };
 }
 
+// ---- Time of day ----
+// Yield swings with the clock: commute peaks, lunch, going home, and bar closing (around 2:45
+// on weekdays, 3:45 on weekends, Orchard especially). So time is matched tightly: a trip 45 min
+// away counts 61%, 1 hour 41%, 2 hours 3%.
+const TIME_SD_H = 0.75;
+// Late night belongs to the evening before: 03:45 on Saturday morning is Friday night.
+const NIGHT_SHIFT_H = 5;
+
 function hourOf(ts) {
   const d = new Date(ts);
   return d.getHours() + d.getMinutes() / 60;
 }
 
-function isWeekend(ts) {
-  const day = new Date(ts).getDay();
-  return day === 0 || day === 6;
-}
-
-function hourGap(a, b) {
+export function hourGap(a, b) {
   const d = Math.abs(a - b) % 24;
   return Math.min(d, 24 - d);
+}
+
+// Day type of the "driving night" a moment belongs to: weekday (Mon–Thu), fri, sat, sun.
+export function dayClass(ts) {
+  const d = new Date(ts - NIGHT_SHIFT_H * 3600 * 1000).getDay();
+  if (d === 5) return 'fri';
+  if (d === 6) return 'sat';
+  if (d === 0) return 'sun';
+  return 'weekday';
+}
+
+const DAY_SIM = {
+  weekday: { weekday: 1, fri: 0.7, sat: 0.3, sun: 0.6 },
+  fri: { weekday: 0.7, fri: 1, sat: 0.6, sun: 0.3 },
+  sat: { weekday: 0.3, fri: 0.6, sat: 1, sun: 0.7 },
+  sun: { weekday: 0.6, fri: 0.3, sat: 0.7, sun: 1 },
+};
+
+export function timeSimilarity(tsA, tsB) {
+  const g = hourGap(hourOf(tsA), hourOf(tsB));
+  return Math.exp(-(g * g) / (2 * TIME_SD_H * TIME_SD_H)) * (0.5 + DAY_SIM[dayClass(tsA)][dayClass(tsB)]);
+}
+
+// ---- Where you were when the job came (≈ pickup area) ----
+function kmBetween(a, b) {
+  const R = 6371;
+  const rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function tripOrigin(t) {
+  if (t.pickup && t.pickup.lat) return t.pickup;
+  if (t.tapLoc && t.tapLoc.lat) return t.tapLoc;
+  return null;
+}
+
+export function placeSimilarity(t, q) {
+  const a = tripOrigin(t);
+  const b = q.loc && q.loc.lat ? q.loc : null;
+  if (!a || !b) return 1;
+  const d = kmBetween(a, b);
+  return 0.6 + 1.4 * Math.exp(-(d * d) / 8); // same area ×2, 4 km away ×0.79, far ×0.6
 }
 
 export function similarity(t, q) {
   let w = 1;
   if (t.zone && t.zone === q.zone) w *= 3;
   if (tripBand(t) === q.band) w *= 2;
-  const g = hourGap(hourOf(t.ts), hourOf(q.ts));
-  w *= Math.exp(-(g * g) / 8);
-  if (isWeekend(t.ts) === isWeekend(q.ts)) w *= 1.5;
+  w *= timeSimilarity(t.ts, q.ts);
+  w *= placeSimilarity(t, q);
   return w;
 }
 
@@ -143,10 +192,12 @@ export function predict(q, trips, settings) {
 
   let sw = 0;
   let swr = 0;
+  let nearTime = 0;
   for (const x of data) {
     x.w = similarity(x.t, q);
     sw += x.w;
     swr += x.w * x.r;
+    if (hourGap(hourOf(x.t.ts), hourOf(q.ts)) <= 1 && dayClass(x.t.ts) === dayClass(q.ts)) nearTime++;
   }
   const m = (swr + k * overall) / (sw + k);
   let sv = k * s.defaultSpread * s.defaultSpread;
@@ -176,9 +227,11 @@ export function predict(q, trips, settings) {
     returnMin,
     verdict: perHour >= s.targetPerHour ? 'TAKE' : 'SKIP',
     basis: n,
+    nearTime,
+    dayClass: dayClass(q.ts),
     weight: sw,
-    // One trip that matches on area, band, hour and day type weighs 9, so "trained" means
-    // roughly five closely matching trips (or many looser ones).
+    // One trip that matches on drop area, band, time and day type weighs 9 (18 if it also started
+    // where you are now), so "trained" means roughly five closely matching trips.
     stage: n === 0 ? 'seed' : sw < 45 ? 'learning' : 'trained',
   };
 }

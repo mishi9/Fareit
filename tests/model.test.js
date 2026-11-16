@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, DEFAULT_SETTINGS } from '../public/model.js';
+import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, DEFAULT_SETTINGS } from '../public/model.js';
 import { classifyZone, findArea, isPostal } from '../public/places.js';
 
 const at = (iso) => new Date(iso).getTime();
@@ -66,10 +66,67 @@ test('band profile switches to your own trips after three', () => {
   assert.equal(bandProfile('30-40', trips.slice(0, 2)).learned, false);
 });
 
-test('untrainable trips (pending, skipped, no distance) are ignored', () => {
+test('late night belongs to the evening before', () => {
+  assert.equal(dayClass(at('2026-11-21T03:45:00+08:00')), 'fri'); // Saturday 3:45am = Friday night
+  assert.equal(dayClass(at('2026-11-22T03:45:00+08:00')), 'sat'); // Sunday 3:45am = Saturday night
+  assert.equal(dayClass(at('2026-11-21T14:00:00+08:00')), 'sat');
+  assert.equal(dayClass(at('2026-11-18T02:45:00+08:00')), 'weekday'); // Wednesday 2:45am = Tuesday night
+  assert.equal(dayClass(at('2026-11-16T10:00:00+08:00')), 'weekday');
+});
+
+test('time matching is tight: 2:45 and 3:45 are not the same moment', () => {
+  const t245 = at('2026-11-18T02:45:00+08:00');
+  assert.ok(timeSimilarity(t245, at('2026-11-19T02:50:00+08:00')) > 1.4);
+  assert.ok(timeSimilarity(t245, at('2026-11-19T03:45:00+08:00')) < 0.65);
+  assert.ok(timeSimilarity(t245, at('2026-11-19T05:45:00+08:00')) < 0.01);
+});
+
+const ORCHARD = { lat: 1.3048, lng: 103.8318 };
+const TAMPINES = { lat: 1.3496, lng: 103.9568 };
+
+test('weekday bar-closing jobs and weekend ones are learned separately', () => {
+  const base = { band: '10-15', zone: 'S', km: 12, tripMin: 20, tapLoc: ORCHARD };
+  const hot = priorNet(12, 20, S) * 2;
+  const normal = priorNet(12, 20, S);
+  const trips = [
+    trip('2026-11-17T02:45:00+08:00', { ...base, fare: hot }),
+    trip('2026-11-18T02:45:00+08:00', { ...base, fare: hot }),
+    trip('2026-11-19T02:45:00+08:00', { ...base, fare: hot }),
+    trip('2026-11-21T03:45:00+08:00', { ...base, fare: normal }),
+    trip('2026-11-22T03:45:00+08:00', { ...base, fare: normal }),
+  ];
+  const weekdayNight = predict({ band: '10-15', zone: 'S', ts: at('2026-11-25T02:50:00+08:00'), loc: ORCHARD }, trips, S);
+  const weekendNight = predict({ band: '10-15', zone: 'S', ts: at('2026-11-28T03:50:00+08:00'), loc: ORCHARD }, trips, S);
+  const a = weekdayNight.net / weekdayNight.prior;
+  const b = weekendNight.net / weekendNight.prior;
+  assert.ok(a > 1.6, `weekday 2:50 ratio ${a.toFixed(2)}`);
+  assert.ok(b < 1.4, `weekend 3:50 ratio ${b.toFixed(2)}`);
+  assert.equal(weekdayNight.nearTime, 3);
+});
+
+test('where you are when the job comes in matters', () => {
+  const base = { band: '10-15', zone: 'E', km: 12, tripMin: 20 };
+  const trips = [];
+  for (const d of ['17', '18', '19']) {
+    trips.push(trip(`2026-11-${d}T02:45:00+08:00`, { ...base, tapLoc: ORCHARD, fare: priorNet(12, 20, S) * 2 }));
+    trips.push(trip(`2026-11-${d}T02:45:01+08:00`, { ...base, tapLoc: TAMPINES, fare: priorNet(12, 20, S) }));
+  }
+  const ts = at('2026-11-25T02:45:00+08:00');
+  const orchard = predict({ band: '10-15', zone: 'E', ts, loc: ORCHARD }, trips, S);
+  const tampines = predict({ band: '10-15', zone: 'E', ts, loc: TAMPINES }, trips, S);
+  assert.ok(orchard.net > tampines.net * 1.25, `${orchard.net.toFixed(2)} vs ${tampines.net.toFixed(2)}`);
+});
+
+test('a cancelled job with a fare trains the model just like a taken one', () => {
+  const trips = [trip('2026-11-16T18:00:00+08:00', { decision: 'cancelled', fare: 30 })];
+  const q = predict({ band: '10-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
+  assert.equal(q.basis, 1);
+});
+
+test('untrainable trips (pending, no fare seen, no distance) are ignored', () => {
   const trips = [
     trip('2026-11-16T18:00:00+08:00', { status: 'pending', fare: 99 }),
-    trip('2026-11-16T18:00:00+08:00', { status: 'skipped', fare: 99 }),
+    trip('2026-11-16T18:00:00+08:00', { status: 'nofare', decision: 'cancelled' }),
     trip('2026-11-16T18:00:00+08:00', { km: undefined, fare: 99 }),
   ];
   const q = predict({ band: '10-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
@@ -103,6 +160,9 @@ test('drop areas map to the eight buttons', () => {
   assert.equal(classifyZone(1.445, 103.769), 'WLC'); // Woodlands Checkpoint
   assert.equal(classifyZone(1.3893, 103.9876), 'CF'); // Changi Village
   assert.equal(classifyZone(1.37, 103.975), 'CF'); // Loyang
+  assert.equal(classifyZone(1.3705, 103.9746), 'CF'); // Loyang Avenue
+  assert.equal(classifyZone(1.3343, 103.962), 'E'); // Changi City Point stays East
+  assert.equal(classifyZone(1.381, 103.955), 'E'); // Pasir Ris Park stays East
   assert.equal(classifyZone(1.3469, 103.9474), 'E'); // 111 Tampines St 11
   assert.equal(classifyZone(1.2789, 103.8536), 'S'); // Raffles Place
   assert.equal(classifyZone(1.4304, 103.8354), 'N'); // Yishun

@@ -32,7 +32,7 @@
       <div class="label">Drop area</div>
       <div id="zones" class="grid g4"></div>
     </div>
-    <div id="verdict" class="verdict idle" role="button" tabindex="0" aria-live="polite" aria-label="Verdict. Tap to clear."></div>
+    <div id="verdict" class="verdict idle" aria-live="polite"></div>
   </section>
 
   <section id="view-reconcile" class="view" hidden>
@@ -57,13 +57,24 @@
         <input id="rf-drop" autocomplete="off" autocapitalize="words" placeholder="Address, postal code or area">
         <div class="suggest" id="rf-drop-s"></div>
       </div>
+      <div class="field">
+        <span class="flabel">What you did</span>
+        <div id="rf-decision" class="seg g2">
+          <button type="button" data-v="took">Took it</button>
+          <button type="button" data-v="cancelled">Cancelled</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="rf-when">Job time</label>
+        <input id="rf-when" type="datetime-local">
+      </div>
       <div class="row2">
         <div class="field">
           <label for="rf-min">Trip time (min, estimated)</label>
           <input id="rf-min" type="number" inputmode="numeric" min="1" max="300" placeholder="52">
         </div>
         <div class="field">
-          <label for="rf-fare">Actual fare (S$)</label>
+          <label for="rf-fare" id="rf-fare-label">Fare (S$)</label>
           <input id="rf-fare" type="number" inputmode="decimal" step="0.01" min="0" placeholder="33.20">
         </div>
       </div>
