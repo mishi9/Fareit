@@ -8,7 +8,7 @@ Nothing touches the Grab phone. No screenshots, no screen capture, no voice, and
 
 ## How you use it
 
-1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, slide to the card's trip distance (1 km steps, 1 to 50+). Touch anywhere on the track to jump there; the big − and + buttons fix it by 1 km. The predicted fare shows at the top while you slide, and the job is saved when you let go. Changing it within 15 seconds corrects the same job instead of adding a new one.
+1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, slide to the card's trip distance (1 km steps, 1 to 50+). Touch anywhere on the track to jump there; the big − and + buttons fix it by 1 km. The predicted fare shows at the top while you slide. Nothing is saved until you tap Took it or Cancelled, so you can slide back and forth freely.
 2. **Then tap Took it or Cancelled.** Both are recorded with the exact time, and that moment is the job's time for learning, not when you reconcile it. Several cancels in a row each count as their own job. The job time and Phone 2's location (roughly the pickup area) are saved when you tap.
 3. **Reconcile tab, once you're parked.** Every job is waiting there, taken or cancelled.
    - **Pickup:** starts filled in with the nearest address to where Phone 2 was when you tapped, usually 1–5 km from the real pickup. Type over it if the pickup was far from there.

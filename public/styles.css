@@ -204,7 +204,9 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
 .badge { background: var(--warn); color: #1b1300; border-radius: 999px; font-size: 11px; padding: 1px 6px; font-weight: 800; }
 
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 76px); z-index: 7;
+  /* Top of the screen, under the header: the bottom is where the slider and buttons are, and a
+     message there would block the next job. Touches pass through it. */
+  position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--top-h, 78px) + 4px); z-index: 7; pointer-events: none;
   background: var(--raised); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px;
   width: min(92vw, 480px); font-size: 14px;
 }

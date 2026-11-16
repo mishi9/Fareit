@@ -81,6 +81,15 @@ export async function putTrips(trips) {
   }
 }
 
+export async function deleteTrips(ids) {
+  try {
+    await withStore('trips', 'readwrite', (s) => { for (const id of ids) s.delete(id); });
+  } catch {
+    memoryOnly = true;
+  }
+  for (const id of ids) memory.trips.delete(id);
+}
+
 export async function clearTrips() {
   try {
     await withStore('trips', 'readwrite', (s) => s.clear());

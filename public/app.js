@@ -14,8 +14,7 @@ const state = {
   settings: mergeSettings(),
   apiKey: '',
   km: null, // the distance on the job card, from the slider
-  currentId: null,
-  currentAt: 0,
+  shown: null, // the prediction on screen, saved as a job only on Took it / Cancelled
   resetTimer: null,
   view: 'window',
   form: null,
@@ -203,34 +202,19 @@ function commitKm() {
 function resetWindow() {
   clearTimeout(state.resetTimer);
   state.km = null;
-  state.currentId = null;
+  state.shown = null;
   markKm();
   renderVerdict(null);
 }
 
-async function decide() {
+// Shows the fare for the km on the slider. Nothing is saved here: a job is only recorded when you
+// tap Took it or Cancelled, so trying a few km values never fills Reconcile.
+function decide() {
   const now = Date.now();
   const loc = nowLoc();
   const p = predict({ km: state.km, ts: now, loc }, trainingSet(), state.settings);
   renderVerdict(p);
-
-  // A change within 15 seconds is a correction of the same job, not a new one.
-  let trip = state.currentId && now - state.currentAt < 15000 ? state.trips.find((t) => t.id === state.currentId) : null;
-  if (!trip) {
-    trip = { id: uid(), ts: now, status: 'pending', source: 'window', rideType: 'standard' };
-    state.trips.push(trip);
-    state.currentId = trip.id;
-    state.currentAt = now;
-  }
-  trip.cardKm = state.km;
-  trip.band = bandFor(state.km).id;
-  if (loc && !trip.tapLoc) trip.tapLoc = { lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy };
-  trip.prediction = {
-    net: p.net, lo: p.lo, hi: p.hi, km: p.km, tripMin: p.tripMin, stage: p.stage, basis: p.basis,
-    surge: p.surge.likely, surgeChance: Math.round(p.surge.chance.surge * 100) / 100,
-  };
-  await db.putTrip(trip);
-  renderBadge();
+  state.shown = { km: state.km, p, loc, firstAt: state.shown?.firstAt ?? now };
 }
 
 function renderVerdict(p) {
@@ -264,18 +248,27 @@ function surgeLine(o) {
 // Records what you did and when. Taken or cancelled, the job stays in Reconcile so its fare
 // can be added: a cancelled job whose fare you saw trains the model like any other.
 async function recordDecision(decision) {
-  const trip = state.trips.find((t) => t.id === state.currentId);
-  if (!trip) return;
+  const shown = state.shown;
+  if (!shown) return;
   const now = Date.now();
-  trip.decision = decision;
-  trip.decideSeconds = Math.round((now - trip.ts) / 1000);
-  trip.decidedAt = now;
-  // The job's time is when you took or cancelled it, not when you tapped the distance or reconciled.
-  trip.tappedAt = trip.ts;
-  trip.ts = now;
+  const { p, loc } = shown;
+  // The job's time is when you took or cancelled it, not when you slid the km or reconciled.
+  const trip = {
+    id: uid(), ts: now, status: 'pending', source: 'window', rideType: 'standard',
+    cardKm: shown.km, band: bandFor(shown.km).id,
+    decision, decidedAt: now, decideSeconds: Math.round((now - shown.firstAt) / 1000),
+    prediction: {
+      net: p.net, lo: p.lo, hi: p.hi, km: p.km, tripMin: p.tripMin, stage: p.stage, basis: p.basis,
+      surge: p.surge.likely, surgeChance: Math.round(p.surge.chance.surge * 100) / 100,
+    },
+  };
+  const here = nowLoc() || loc;
+  if (here) trip.tapLoc = { lat: here.lat, lng: here.lng, accuracy: here.accuracy };
+  state.trips.push(trip);
   resetWindow();
   toast(`${decisionLabel(decision)} at ${clock(now)}. Add the fare later in Reconcile.`);
   await db.putTrip(trip);
+  renderBadge();
 }
 
 // ---------- reconcile ----------
@@ -805,6 +798,13 @@ async function boot() {
     db.allTrips(), db.getKV('settings'), db.getKV('apiKey'), db.allShared(), db.getKV('device'),
   ]);
   state.trips = trips || [];
+  // Earlier versions saved a job on every distance tap. Ones never taken or cancelled were just
+  // looks, not jobs: drop them so Reconcile only holds real decisions.
+  const looks = state.trips.filter((t) => t.source === 'window' && t.status === 'pending' && !t.decision);
+  if (looks.length) {
+    await db.deleteTrips(looks.map((t) => t.id));
+    state.trips = state.trips.filter((t) => !looks.includes(t));
+  }
   state.settings = mergeSettings(saved);
   state.apiKey = key || '';
   state.shared = shared || [];
