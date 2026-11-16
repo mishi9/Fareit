@@ -5,7 +5,8 @@
 //      Works with zero data.
 //   2. Learned correction: the log-ratio between what you were actually paid and what the
 //      prior said, averaged over reconciled trips and weighted by how similar each trip is
-//      (same band, similar hour and day type, started near where you are now). It shrinks toward the
+//      (same band, similar hour and day type, started near where you are now). The drop-off
+//      plays no part. It shrinks toward the
 //      overall correction when there are few similar trips, so it never jumps on one data point.
 
 export const BANDS = [
@@ -36,21 +37,10 @@ export const ZONES = [
 // these are estimates tuned so the recorded Tampines St 11 -> Tuas View Close trip (about
 // 45.8 km, 52 min, S$33.20) lands within 2%. Reconciled jobs correct them.
 export const DEFAULT_SETTINGS = {
-  targetPerHour: 30,
   minFare: 6.2, // Grab minimum fare: no prediction goes below this
-  // Dead drops are personal: the general view is Tuas and Changi Far, but a driver who never
-  // works the west can add West. Only your own verdict counts the empty drive back; what a job
-  // pays is learned from everyone.
-  deadZones: ['TUAS', 'CF'],
-  deadReturnMin: 30,
   base: 2.4,
   perKm: 0.48,
   perMin: 0.18,
-  pickupMin: 6,
-  // Trial: price from distance, time and pickup area only. Surge is set where the passenger books,
-  // and the drop's effect on price is already in the distance. The drop area still decides your
-  // dead-drop verdict. Set true to match fares on drop area again; dropAreaTrial() compares both.
-  matchDropArea: false,
   priorStrength: 3,
   defaultSpread: 0.25,
 };
@@ -58,14 +48,14 @@ export const DEFAULT_SETTINGS = {
 export function mergeSettings(saved) {
   const s = { ...DEFAULT_SETTINGS, ...(saved || {}) };
   // Fields from earlier versions: Grab's cut (the card fare is already take-home), ride type and
-  // the sharing switch (everyone is Standard and always shares), and the per-area return table.
-  for (const old of ['commission', 'rideType', 'share', 'returnMin']) delete s[old];
-  const valid = new Set(ZONES.map((z) => z.id));
-  s.deadZones = Array.isArray(s.deadZones) ? s.deadZones.filter((z) => valid.has(z)) : [...DEFAULT_SETTINGS.deadZones];
+  // the sharing switch (everyone is Standard and always shares), the per-area return table, and
+  // the $/hr verdict with dead drops (Fareit now predicts the fare only).
+  for (const old of ['commission', 'rideType', 'share', 'returnMin', 'targetPerHour', 'pickupMin', 'deadZones', 'deadReturnMin', 'matchDropArea']) delete s[old];
   return s;
 }
 
-export const isDeadDrop = (zone, s) => (s.deadZones || []).includes(zone);
+// How the fare felt when you reconciled it: surge, normal, or bad (below normal).
+export const PRICING = ['surge', 'normal', 'bad'];
 
 export function bandFor(km) {
   return BANDS.find((b) => km >= b.min && km < b.max) || BANDS[BANDS.length - 1];
@@ -184,9 +174,10 @@ export function placeSimilarity(t, q) {
   return 0.6 + 1.4 * Math.exp(-(d * d) / 8); // same area ×2, 4 km away ×0.79, far ×0.6
 }
 
-export function similarity(t, q, s = DEFAULT_SETTINGS) {
+// The drop-off doesn't count: surge is set where the passenger books, and the drop's effect on
+// the price is already in the distance.
+export function similarity(t, q) {
   let w = 1;
-  if (s.matchDropArea && t.zone && t.zone === q.zone) w *= 3;
   if (tripBand(t) === q.band) w *= 2;
   w *= timeSimilarity(t.ts, q.ts);
   w *= placeSimilarity(t, q);
@@ -199,7 +190,39 @@ export function similarity(t, q, s = DEFAULT_SETTINGS) {
 // prediction beyond 0.3x–3.3x of the formula.
 const MAX_LOG_RATIO = 1.2;
 
-// q = { band, zone, ts }
+// ---- Surge at this place and time ----
+// Every job tagged surge / normal / bad is a vote for what pricing was like where it started, at
+// that time of day and kind of day. Votes count by how close they are in time and place (not by
+// distance band or drop: surge is set where the passenger books). A few made-up "normal" votes
+// keep one tagged job from calling surge on its own: it takes two at the same place and time.
+// Place counts much more here than for the fare: Orchard surging says nothing about Tampines.
+const SURGE_PRIOR = { surge: 0.5, normal: 3, bad: 0.5 };
+
+function surgePlaceWeight(t, q) {
+  const a = tripOrigin(t);
+  const b = q.loc && q.loc.lat ? q.loc : null;
+  if (!a || !b) return 0.3; // no location on one side: weak evidence
+  const d = kmBetween(a, b);
+  return Math.exp(-(d * d) / 8); // same spot 1, 2 km 0.61, 4 km 0.14, 6 km 0.01
+}
+
+export function surgeOutlook(q, trips) {
+  const w = { surge: 0, normal: 0, bad: 0 };
+  const near = { surge: 0, normal: 0, bad: 0 };
+  for (const t of trips) {
+    if (!PRICING.includes(t.pricing)) continue;
+    const x = timeSimilarity(t.ts, q.ts) * surgePlaceWeight(t, q);
+    w[t.pricing] += x;
+    if (hourGap(hourOf(t.ts), hourOf(q.ts)) <= 1 && dayClass(t.ts) === dayClass(q.ts) && surgePlaceWeight(t, q) >= 0.3) near[t.pricing]++;
+  }
+  const total = PRICING.reduce((a, c) => a + w[c] + SURGE_PRIOR[c], 0);
+  const chance = Object.fromEntries(PRICING.map((c) => [c, (w[c] + SURGE_PRIOR[c]) / total]));
+  const evidence = PRICING.reduce((a, c) => a + w[c], 0);
+  const likely = chance.surge >= 0.5 ? 'surge' : chance.bad >= 0.5 ? 'bad' : 'normal';
+  return { chance, likely, near, evidence, tagged: near.surge + near.normal + near.bad };
+}
+
+// q = { band, ts, loc }
 export function predict(q, trips, settings) {
   const s = mergeSettings(settings);
   const profile = bandProfile(q.band, trips);
@@ -227,7 +250,7 @@ export function predict(q, trips, settings) {
   let swr = 0;
   let nearTime = 0;
   for (const x of data) {
-    x.w = similarity(x.t, q, s);
+    x.w = similarity(x.t, q);
     sw += x.w;
     swr += x.w * x.r;
     if (hourGap(hourOf(x.t.ts), hourOf(q.ts)) <= 1 && dayClass(x.t.ts) === dayClass(q.ts)) nearTime++;
@@ -242,34 +265,24 @@ export function predict(q, trips, settings) {
   const lo = Math.max(floor, prior * Math.exp(m - sd));
   const hi = Math.max(floor, prior * Math.exp(m + sd));
   const shared = data.filter((x) => x.t.shared).length;
-  const returnMin = isDeadDrop(q.zone, s) ? s.deadReturnMin : 0;
-  const totalMin = s.pickupMin + profile.min + returnMin;
-  const perHour = (net / totalMin) * 60;
 
   return {
     band: q.band,
-    zone: q.zone,
     km: profile.km,
     tripMin: profile.min,
     prior,
     net,
     lo,
     hi,
-    perHour,
-    perHourLo: (lo / totalMin) * 60,
-    perHourHi: (hi / totalMin) * 60,
-    totalMin,
-    returnMin,
-    deadDrop: isDeadDrop(q.zone, s),
-    verdict: perHour >= s.targetPerHour ? 'TAKE' : 'SKIP',
+    surge: surgeOutlook(q, trips),
     basis: n,
     shared,
     nearTime,
     dayClass: dayClass(q.ts),
     weight: sw,
-    // "Trained" means roughly five closely matching trips (same band, time and day type, plus
-    // drop area when that is matched).
-    stage: n === 0 ? 'seed' : sw < 5 * 3 * (s.matchDropArea ? 3 : 1) ? 'learning' : 'trained',
+    // One trip in the same band, at the same time and day type, weighs 3 (6 if it also started
+    // where you are now), so "trained" means roughly five closely matching trips.
+    stage: n === 0 ? 'seed' : sw < 15 ? 'learning' : 'trained',
   };
 }
 
@@ -283,25 +296,4 @@ export function accuracy(trips) {
     mape: errs.reduce((a, e) => a + Math.abs(e), 0) / errs.length,
     bias: errs.reduce((a, e) => a + e, 0) / errs.length,
   };
-}
-
-// The drop-area trial: predict each recent job from all the other jobs, once matching on drop
-// area and once ignoring it, and compare the average error against what the job really paid.
-// Each job is predicted the way the window would have: from its band, time and start point.
-export function dropAreaTrial(trips, settings, maxTests = 200) {
-  const s = mergeSettings(settings);
-  const all = trips.filter(isTrainable);
-  const tests = [...all].sort((a, b) => b.ts - a.ts).slice(0, maxTests);
-  if (tests.length < 2) return { count: tests.length, withDrop: null, withoutDrop: null };
-  const err = (useDrop) => {
-    const ss = { ...s, matchDropArea: useDrop };
-    let sum = 0;
-    for (const t of tests) {
-      const others = all.filter((o) => o !== t);
-      const p = predict({ band: tripBand(t), zone: t.zone, ts: t.ts, loc: tripOrigin(t) }, others, ss);
-      sum += Math.abs(p.net - t.fare) / t.fare;
-    }
-    return sum / tests.length;
-  };
-  return { count: tests.length, withDrop: err(true), withoutDrop: err(false) };
 }

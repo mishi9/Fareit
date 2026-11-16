@@ -1,5 +1,5 @@
-import { BANDS, ZONES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, estDriveMin, accuracy, isTrainable, dropAreaTrial } from './model.js';
-import { findArea, isPostal, classifyZone } from './places.js';
+import { BANDS, mergeSettings, predict, bandFor, estDriveMin, accuracy, isTrainable } from './model.js';
+import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
 
@@ -11,7 +11,6 @@ const state = {
   settings: mergeSettings(),
   apiKey: '',
   band: null,
-  zone: null,
   currentId: null,
   currentAt: 0,
   resetTimer: null,
@@ -37,7 +36,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 const dollars = (n) => `$${Math.round(n)}`;
 const fare = (n) => `S$${Number(n).toFixed(2)}`;
-const zoneLabel = (id) => ZONES.find((z) => z.id === id)?.label ?? '—';
+const PRICING_LABEL = { surge: 'Surge', normal: 'Normal', bad: 'Bad' };
 const bandLabel = (id) => (BANDS.find((b) => b.id === id)?.label ?? '—') + ' km';
 const when = (ts) => new Date(ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 const placeLabel = (p, text) => (p && p.label) || text || '—';
@@ -125,7 +124,7 @@ function show(view) {
   keepAwake();
 }
 
-// ---------- window: two taps -> verdict ----------
+// ---------- window: one tap -> predicted fare ----------
 function buildWindow() {
   const bands = $('#bands');
   bands.innerHTML = '';
@@ -135,14 +134,6 @@ function buildWindow() {
     el.setAttribute('aria-label', `${b.label} kilometres`);
     bands.append(el);
   }
-  const zones = $('#zones');
-  zones.innerHTML = '';
-  for (const z of ZONES) {
-    const el = button(esc(z.short), 'tap', () => pick('zone', z.id));
-    el.dataset.id = z.id;
-    zones.append(el);
-  }
-  markDeadDrops();
   $('#verdict').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
@@ -152,19 +143,8 @@ function buildWindow() {
   renderVerdict(null);
 }
 
-// The red dot marks your own dead drops (Settings), not a general rule.
-function markDeadDrops() {
-  for (const el of $$('#zones .tap')) {
-    const z = ZONES.find((x) => x.id === el.dataset.id);
-    const dead = state.settings.deadZones.includes(z.id);
-    el.classList.toggle('dead', dead);
-    el.setAttribute('aria-label', `${z.label}${dead ? ', a dead drop for you' : ''}`);
-  }
-}
-
 function markSelection() {
   for (const el of $$('#bands .tap')) el.classList.toggle('sel', el.dataset.id === state.band);
-  for (const el of $$('#zones .tap')) el.classList.toggle('sel', el.dataset.id === state.zone);
 }
 
 function pick(kind, id) {
@@ -172,14 +152,12 @@ function pick(kind, id) {
   markSelection();
   clearTimeout(state.resetTimer);
   state.resetTimer = setTimeout(resetWindow, 30000);
-  if (state.band && state.zone) decide();
-  else renderVerdict(null);
+  decide();
 }
 
 function resetWindow() {
   clearTimeout(state.resetTimer);
   state.band = null;
-  state.zone = null;
   state.currentId = null;
   markSelection();
   renderVerdict(null);
@@ -188,7 +166,7 @@ function resetWindow() {
 async function decide() {
   const now = Date.now();
   const loc = state.loc && now - state.loc.at < 10 * 60 * 1000 ? state.loc : null;
-  const p = predict({ band: state.band, zone: state.zone, ts: now, loc }, trainingSet(), state.settings);
+  const p = predict({ band: state.band, ts: now, loc }, trainingSet(), state.settings);
   renderVerdict(p);
 
   // A change within 15 seconds is a correction of the same job, not a new one.
@@ -200,11 +178,10 @@ async function decide() {
     state.currentAt = now;
   }
   trip.band = state.band;
-  trip.zone = state.zone;
   if (loc && !trip.tapLoc) trip.tapLoc = { lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy };
   trip.prediction = {
-    net: p.net, lo: p.lo, hi: p.hi, perHour: p.perHour, verdict: p.verdict,
-    km: p.km, tripMin: p.tripMin, returnMin: p.returnMin, stage: p.stage, basis: p.basis,
+    net: p.net, lo: p.lo, hi: p.hi, km: p.km, tripMin: p.tripMin, stage: p.stage, basis: p.basis,
+    surge: p.surge.likely, surgeChance: Math.round(p.surge.chance.surge * 100) / 100,
   };
   await db.putTrip(trip);
   renderBadge();
@@ -214,27 +191,30 @@ function renderVerdict(p) {
   const v = $('#verdict');
   if (!p) {
     v.className = 'verdict idle';
-    const ask = state.band ? 'Now tap the drop area.' : state.zone ? 'Now tap the distance band.' : 'Tap the distance band and the drop area from the job card.';
-    v.innerHTML = `<p>${ask}</p>`;
+    v.innerHTML = '<p>Tap the trip distance from the job card.</p>';
     return;
   }
-  const why = [`${Math.round(p.tripMin)} min trip`];
-  if (p.deadDrop && p.returnMin > 0) why.push(`+ about ${p.returnMin} min empty drive back (a dead drop for you)`);
   const stage = p.stage === 'seed'
     ? 'Fare-structure estimate. No reconciled jobs yet.'
     : `${p.stage === 'trained' ? 'Based on' : 'Learning from'} ${p.basis} job${p.basis === 1 ? '' : 's'}${p.shared ? ` (${p.shared} from other drivers)` : ''}, ${p.nearTime} within an hour of now on a ${DAY_NAMES[p.dayClass]}.`;
-  v.className = `verdict ${p.verdict === 'TAKE' ? 'take' : 'skip'}`;
+  v.className = `verdict fare ${p.surge.likely}`;
   v.innerHTML = `
-    <div class="top-row"><span class="word">${p.verdict}</span><button type="button" class="clear" data-act="clear">Clear</button></div>
-    <div class="nums">
-      <span><span class="big">${dollars(p.net)}</span> <span class="rng">${dollars(p.lo)}–${dollars(p.hi)}</span></span>
-      <span><span class="big">${dollars(p.perHour)}/hr</span> <span class="rng">line ${dollars(state.settings.targetPerHour)}</span></span>
-    </div>
-    <div class="why">${esc(why.join(' '))}. ${esc(stage)}</div>
+    <div class="top-row"><span class="word">${dollars(p.net)}</span><button type="button" class="clear" data-act="clear">Clear</button></div>
+    <div class="nums"><span class="rng">likely ${dollars(p.lo)}–${dollars(p.hi)} · ${esc(bandLabel(p.band))}, about ${Math.round(p.tripMin)} min</span></div>
+    <div class="why">${esc(surgeLine(p.surge))} ${esc(stage)}</div>
     <div class="decide">
       <button type="button" data-act="took">Took it</button>
       <button type="button" data-act="cancelled">Cancelled</button>
     </div>`;
+}
+
+// What surge / normal / bad tags from around here, at this time, say about pricing right now.
+function surgeLine(o) {
+  const tags = o.near.surge + o.near.normal + o.near.bad;
+  const counts = tags ? ` (${o.near.surge} surge, ${o.near.normal} normal, ${o.near.bad} bad tagged near here within an hour)` : '';
+  if (o.likely === 'surge') return `Surge likely here now, ${Math.round(o.chance.surge * 100)}%${counts}.`;
+  if (o.likely === 'bad') return `Pricing usually low here now${counts}.`;
+  return tags ? `Usually normal pricing here now${counts}.` : 'No surge tags near here at this time yet.';
 }
 
 // Records what you did and when. Taken or cancelled, the job stays in Reconcile so its fare
@@ -267,8 +247,8 @@ function renderReconList() {
     card.className = 'card';
     const decided = t.decision ? `<span class="pill ${t.decision}">${decisionLabel(t.decision)} ${clock(t.decidedAt)}</span>` : '';
     card.innerHTML = `
-      <div class="line1"><span class="when">${esc(when(t.ts))}</span><span class="acts">${decided}${p ? `<span class="pill ${p.verdict === 'TAKE' ? 'take' : 'skip'}">${p.verdict}</span>` : ''}</span></div>
-      <div class="meta">${esc(bandLabel(t.band))} · ${esc(zoneLabel(t.zone))}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>`;
+      <div class="line1"><span class="when">${esc(when(t.ts))}</span><span class="acts">${decided}${p && p.surge === 'surge' ? '<span class="pill surge">Surge likely</span>' : ''}</span></div>
+      <div class="meta">${esc(bandLabel(t.band))}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     acts.append(
@@ -280,7 +260,7 @@ function renderReconList() {
   }
 }
 
-// Keeps the job (time, band, area, decision) but it can't teach the fare without one.
+// Keeps the job (time, band, decision) but it can't teach the fare without one.
 async function markNoFare(t) {
   t.status = 'nofare';
   await db.putTrip(t);
@@ -291,22 +271,16 @@ async function markNoFare(t) {
 }
 
 function buildReconForm() {
-  const zoneBox = $('#rf-zone');
-  for (const z of ZONES) {
-    const b = button(esc(z.short), '', () => { state.form.zone = z.id; markFormZone(); });
-    b.dataset.v = z.id;
-    zoneBox.append(b);
-  }
   for (const b of $$('#rf-decision button')) {
     b.addEventListener('click', () => {
       state.form.decision = b.dataset.v;
       markFormDecision();
     });
   }
-  for (const b of $$('#rf-pay button')) {
+  for (const b of $$('#rf-pricing button')) {
     b.addEventListener('click', () => {
-      state.form.pay = state.form.pay === b.dataset.v ? null : b.dataset.v;
-      for (const x of $$('#rf-pay button')) x.classList.toggle('sel', x.dataset.v === state.form.pay);
+      state.form.pricing = state.form.pricing === b.dataset.v ? null : b.dataset.v;
+      markFormPricing();
     });
   }
   wirePlace('rf-pickup', 'pickup');
@@ -320,30 +294,21 @@ function markFormDecision() {
   $('#rf-fare-label').textContent = state.form.decision === 'cancelled' ? 'Fare shown when you cancelled (S$)' : 'Fare you were paid (S$)';
 }
 
-function markFormZone() {
-  for (const b of $$('#rf-zone button')) b.classList.toggle('sel', b.dataset.v === state.form.zone);
-  zoneHint();
-}
-
-function zoneHint() {
-  const hint = $('#rf-zone-hint');
-  const d = state.form && state.form.drop;
-  if (!d || !(d.lat > 0) || !state.form.zone) { hint.textContent = ''; return; }
-  const suggested = classifyZone(d.lat, d.lng);
-  hint.textContent = suggested !== state.form.zone ? `On the map this drop-off sits in ${zoneLabel(suggested)}. Change it if you tapped the wrong area.` : '';
+function markFormPricing() {
+  for (const b of $$('#rf-pricing button')) b.classList.toggle('sel', b.dataset.v === state.form.pricing);
 }
 
 function openForm(trip) {
   state.form = {
     id: trip ? trip.id : null, pickup: trip?.pickup || null, drop: trip?.drop || null,
-    zone: trip?.zone || null, pay: trip?.payment || null, decision: trip?.decision || 'took',
+    pricing: trip?.pricing || null, decision: trip?.decision || 'took',
   };
   $('#recon-list').hidden = true;
   const f = $('#recon-form');
   f.hidden = false;
   $('#rf-title').textContent = trip ? 'Add the real fare' : 'Add a trip';
   $('#rf-sub').textContent = trip
-    ? `${when(trip.ts)} · ${bandLabel(trip.band)} · ${zoneLabel(trip.zone)}${trip.prediction ? ` · predicted ${dollars(trip.prediction.net)}` : ''}`
+    ? `${when(trip.ts)} · ${bandLabel(trip.band)}${trip.prediction ? ` · predicted ${dollars(trip.prediction.net)}` : ''}`
     : 'A trip you didn’t tap in the window.';
   $('#rf-pickup').value = trip?.pickupText || '';
   $('#rf-pickup-hint').textContent = '';
@@ -356,8 +321,7 @@ function openForm(trip) {
   markFormDecision();
   $('#rf-pickup-s').innerHTML = '';
   $('#rf-drop-s').innerHTML = '';
-  for (const x of $$('#rf-pay button')) x.classList.toggle('sel', x.dataset.v === state.form.pay);
-  markFormZone();
+  markFormPricing();
   msg('');
   $('#rf-save').disabled = false;
   if (!state.form.pickup) $('#rf-pickup').focus();
@@ -422,10 +386,6 @@ function renderSuggestions(list, items, key, input) {
       state.form[key] = it;
       input.value = it.label;
       list.innerHTML = '';
-      if (key === 'drop') {
-        if (!state.form.zone) { state.form.zone = classifyZone(it.lat, it.lng); markFormZone(); }
-        else zoneHint();
-      }
     });
     list.append(b);
   }
@@ -453,7 +413,6 @@ async function resolvePlace(text, chosen) {
 async function fetchDistance(trip) {
   if (trip.pickup?.pending) trip.pickup = await resolvePlace(trip.pickupText, null).catch(() => trip.pickup);
   if (trip.drop?.pending) trip.drop = await resolvePlace(trip.dropText, null).catch(() => trip.drop);
-  if (!trip.zone && trip.drop?.lat) trip.zone = classifyZone(trip.drop.lat, trip.drop.lng);
   // No drop-off: the km you typed, or failing that the middle of the band you tapped.
   if (!trip.dropText) {
     const band = BANDS.find((b) => b.id === trip.band);
@@ -543,8 +502,7 @@ async function saveRecon(ev) {
     pickupText, dropText, pickup, drop, kmTyped,
     fare: paid,
     tripMin: mins,
-    payment: state.form.pay || null,
-    zone: state.form.zone || trip.zone || null,
+    pricing: state.form.pricing || null,
   });
   const gotDistance = await fetchDistance(trip);
   await db.putTrip(trip);
@@ -624,7 +582,6 @@ function renderTrips() {
     ${bias ? `<p class="note">${esc(bias)} across ${acc.count} trip${acc.count === 1 ? '' : 's'}.</p>` : ''}
     <p class="note">${state.syncError ? esc(state.syncError) : state.lastSync ? `Shared pool synced at ${clock(state.lastSync)}.` : 'Shared pool not synced yet.'}</p>
     ${decided.length ? `<p class="note">${decided.length} decision${decided.length === 1 ? '' : 's'} logged: ${decided.length - cancelled} taken, ${cancelled} cancelled.${noFare ? ` ${noFare} kept without a fare.` : ''}</p>` : ''}
-    ${trialNote()}
     ${pending ? '<button type="button" class="primary wide" id="retry-dist">Fetch road distances now</button>' : ''}
     <h2>Reconciled</h2>
     ${rec.length ? '' : '<p class="empty">No reconciled trips yet. Add the real fare for a job on the Reconcile tab.</p>'}`;
@@ -637,7 +594,7 @@ function renderTrips() {
     card.innerHTML = `
       <div class="line1"><span class="when">${esc(when(t.ts))}</span><span class="when">${fare(t.fare)}</span></div>
       <div class="meta">${esc(placeLabel(t.pickup, t.pickupText))} → ${esc(placeLabel(t.drop, t.dropText))}</div>
-      <div class="meta">${esc(dist)} · ${esc(zoneLabel(t.zone))}${t.tripMin ? ` · ${t.tripMin} min trip` : ''}${t.payment ? ` · ${t.payment === 'cash' ? 'Cash' : 'Cashless'}` : ''}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>
+      <div class="meta">${esc(dist)}${t.tripMin ? ` · ${t.tripMin} min trip` : ''}${t.pricing ? ` · ${PRICING_LABEL[t.pricing]}` : ''}${p ? ` · predicted ${dollars(p.net)}` : ''}</div>
       ${t.decision ? `<div class="acts"><span class="pill ${t.decision}">${decisionLabel(t.decision)}${t.decidedAt ? ` ${clock(t.decidedAt)}` : ''}</span></div>` : ''}`;
     const acts = document.createElement('div');
     acts.className = 'acts';
@@ -645,26 +602,6 @@ function renderTrips() {
     card.append(acts);
     box.append(card);
   }
-}
-
-// The drop-area trial: would predictions have been closer matching on drop area, or ignoring it?
-let trialCache = { key: '', html: '' };
-function trialNote() {
-  const data = trainingSet();
-  const key = `${data.length}:${state.settings.matchDropArea}`;
-  if (trialCache.key === key) return trialCache.html;
-  const r = dropAreaTrial(data, state.settings);
-  let html = '';
-  if (r.count < 10) {
-    html = `<p class="note">Drop-area trial: fares are predicted from distance, time and pickup area, ignoring the drop area. A comparison shows here after 10 jobs with a fare (${r.count} so far).</p>`;
-  } else {
-    const a = Math.round(r.withoutDrop * 100);
-    const b = Math.round(r.withDrop * 100);
-    const verdict = Math.abs(a - b) < 2 ? 'About the same so far.' : a < b ? 'Ignoring the drop area is closer.' : 'Matching on the drop area is closer.';
-    html = `<p class="note">Drop-area trial on your last ${r.count} jobs: ignoring the drop area is ${a}% off on average, matching on it is ${b}% off. ${verdict}</p>`;
-  }
-  trialCache = { key, html };
-  return html;
 }
 
 async function retryDistances() {
@@ -683,31 +620,13 @@ async function retryDistances() {
 
 // ---------- settings ----------
 const settingInputs = {
-  'st-target': ['targetPerHour', 1],
-  'st-pickup': ['pickupMin', 1],
   'st-minfare': ['minFare', 1],
   'st-base': ['base', 1],
   'st-km': ['perKm', 1],
   'st-min': ['perMin', 1],
-  'st-deadmin': ['deadReturnMin', 1],
 };
 
 function buildSettings() {
-  const dead = $('#st-dead');
-  for (const z of ZONES) {
-    const b = button(esc(z.short), '', async () => {
-      const set = new Set(state.settings.deadZones);
-      if (set.has(z.id)) set.delete(z.id);
-      else set.add(z.id);
-      state.settings = { ...state.settings, deadZones: ZONES.map((x) => x.id).filter((id) => set.has(id)) };
-      await db.setKV('settings', state.settings);
-      fillSettings();
-      markDeadDrops();
-      settingsMsg(set.has(z.id) ? `${z.label} is now a dead drop for you.` : `${z.label} is no longer a dead drop for you.`);
-    });
-    b.dataset.v = z.id;
-    dead.append(b);
-  }
   fillSettings();
   $('#settings-form').addEventListener('change', onSettingsChange);
   $('#settings-form').addEventListener('submit', (e) => e.preventDefault());
@@ -715,7 +634,6 @@ function buildSettings() {
     state.settings = mergeSettings();
     await db.setKV('settings', state.settings);
     fillSettings();
-    markDeadDrops();
     settingsMsg('Starting values restored.');
   });
   $('#st-export').addEventListener('click', exportData);
@@ -743,7 +661,6 @@ function buildSettings() {
 
 function fillSettings() {
   for (const [id, [key, scale]] of Object.entries(settingInputs)) $(`#${id}`).value = +(state.settings[key] * scale).toFixed(2);
-  for (const b of $$('#st-dead button')) b.classList.toggle('sel', state.settings.deadZones.includes(b.dataset.v));
   $('#st-key').value = state.apiKey;
 }
 
@@ -767,7 +684,6 @@ async function onSettingsChange(e) {
     const v = parseFloat($(`#${id}`).value);
     if (Number.isFinite(v) && v >= 0) next[key] = v / scale;
   }
-  if (!(next.targetPerHour > 0)) next.targetPerHour = DEFAULT_SETTINGS.targetPerHour;
   state.settings = next;
   await db.setKV('settings', next);
   settingsMsg('Saved.');
@@ -813,7 +729,6 @@ async function importData(e) {
       state.settings = mergeSettings(data.settings);
       await db.setKV('settings', state.settings);
       fillSettings();
-      markDeadDrops();
     }
     renderBadge();
     settingsMsg(`Imported ${valid.length} trips.`);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, dropAreaTrial, DEFAULT_SETTINGS } from '../public/model.js';
+import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, surgeOutlook, DEFAULT_SETTINGS } from '../public/model.js';
 import { classifyZone, findArea, isPostal } from '../public/places.js';
 
 const at = (iso) => new Date(iso).getTime();
@@ -19,17 +19,15 @@ test('bands cover every distance', () => {
   assert.equal(bandFor(300).id, '40+');
 });
 
-test('with no data, a long Tuas run is a SKIP and the same run east is a TAKE', () => {
+test('with no data, the fare comes from the formula with a range, and no band means no drop needed', () => {
   const ts = at('2026-11-16T09:01:00+08:00');
   const tuas = predict({ band: '40+', zone: 'TUAS', ts }, [], S);
-  const east = predict({ band: '40+', zone: 'E', ts }, [], S);
+  const noDrop = predict({ band: '40+', zone: null, ts }, [], S);
   assert.equal(tuas.stage, 'seed');
-  assert.equal(tuas.verdict, 'SKIP');
-  assert.equal(tuas.returnMin, 30);
-  assert.equal(tuas.deadDrop, true);
-  assert.equal(east.verdict, 'TAKE');
-  assert.ok(tuas.perHour < east.perHour);
+  assert.equal(tuas.net, noDrop.net);
+  assert.ok(Math.abs(tuas.net - priorNet(45, 54.5, S)) < 0.01);
   assert.ok(tuas.lo < tuas.net && tuas.net < tuas.hi);
+  for (const gone of ['perHour', 'verdict', 'returnMin', 'deadDrop']) assert.equal(gone in tuas, false, gone);
 });
 
 function trip(iso, over = {}) {
@@ -44,7 +42,6 @@ test('reconciled trips pull predictions toward what you were actually paid', () 
   assert.equal(q.stage, 'trained');
   assert.ok(Math.abs(q.net - paid) / paid < 0.08, `net ${q.net.toFixed(2)} should be close to ${paid.toFixed(2)}`);
   assert.ok(q.hi / q.lo < 1.35, 'consistent history should give a narrow range');
-  assert.equal(q.verdict, 'TAKE');
 
   // Far from the data (other area, 3am) the correction is weaker but still leans the same way.
   const far = predict({ band: '10-15', zone: 'TUAS', ts: at('2026-11-17T03:00:00+08:00') }, trips, S);
@@ -135,24 +132,11 @@ test('untrainable trips (pending, no fare seen, no distance) are ignored', () =>
   assert.equal(q.stage, 'seed');
 });
 
-test('settings merge keeps your dead drops and drops old fields', () => {
-  const s = mergeSettings({ targetPerHour: 35, deadZones: ['TUAS', 'W', 'MARS'], commission: 0.2, share: false, rideType: 'taxi', returnMin: {} });
-  assert.equal(s.targetPerHour, 35);
-  assert.deepEqual(s.deadZones, ['TUAS', 'W']);
-  for (const old of ['commission', 'share', 'rideType', 'returnMin']) assert.equal(old in s, false, old);
-  assert.deepEqual(mergeSettings().deadZones, ['TUAS', 'CF']);
-});
-
-test('dead drops are personal: they change your verdict, not what the job pays', () => {
-  const ts = at('2026-11-16T18:00:00+08:00');
-  const q = { band: '20-30', zone: 'W', ts };
-  const general = predict(q, [], S);
-  const avoidsWest = predict(q, [], mergeSettings({ deadZones: ['TUAS', 'CF', 'W'] }));
-  assert.equal(general.net, avoidsWest.net);
-  assert.equal(general.returnMin, 0);
-  assert.equal(avoidsWest.returnMin, 30);
-  assert.equal(general.verdict, 'TAKE');
-  assert.equal(avoidsWest.verdict, 'SKIP');
+test('settings merge keeps your fare structure and drops old fields', () => {
+  const old = { base: 3, targetPerHour: 35, deadZones: ['TUAS'], deadReturnMin: 30, pickupMin: 6, commission: 0.2, share: false, rideType: 'taxi', returnMin: {} };
+  const s = mergeSettings(old);
+  assert.equal(s.base, 3);
+  for (const k of ['targetPerHour', 'deadZones', 'deadReturnMin', 'pickupMin', 'commission', 'share', 'rideType', 'returnMin']) assert.equal(k in s, false, k);
 });
 
 test('accuracy reports error and lean', () => {
@@ -195,7 +179,7 @@ test('area names and postal codes are recognised', () => {
   assert.ok(!isPostal('52111'));
 });
 
-test('by default the drop area does not change the predicted fare, only the dead-drop verdict', () => {
+test('by default the drop area does not change the predicted fare', () => {
   const ts = at('2026-11-16T18:00:00+08:00');
   // East drops paid double, North drops paid the formula, all else equal.
   const trips = [
@@ -205,22 +189,27 @@ test('by default the drop area does not change the predicted fare, only the dead
   const east = predict({ band: '10-15', zone: 'E', ts }, trips, S);
   const north = predict({ band: '10-15', zone: 'N', ts }, trips, S);
   assert.ok(Math.abs(east.net - north.net) < 0.01, 'same fare whichever area the drop is in');
-
-  const on = { ...S, matchDropArea: true };
-  assert.ok(predict({ band: '10-15', zone: 'E', ts }, trips, on).net > predict({ band: '10-15', zone: 'N', ts }, trips, on).net + 1);
-
-  const tuas = predict({ band: '10-15', zone: 'TUAS', ts }, trips, S);
-  assert.ok(Math.abs(tuas.net - east.net) < 0.01);
-  assert.ok(tuas.perHour < east.perHour, 'a dead drop still lowers your $/hr');
+  const none = predict({ band: '10-15', ts }, trips, S);
+  assert.ok(Math.abs(east.net - none.net) < 0.01, 'no drop area needed at all');
 });
 
-test('the drop-area trial compares both ways on past jobs', () => {
-  const trips = [
-    ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:00:00+08:00`, { zone: 'E', fare: priorNet(12, 20, S) * 2 })),
-    ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:05:00+08:00`, { zone: 'N', fare: priorNet(12, 20, S) })),
-  ];
-  const r = dropAreaTrial(trips, S);
-  assert.equal(r.count, 12);
-  assert.ok(r.withDrop < r.withoutDrop, 'when drop area really matters, matching on it predicts better');
-  assert.deepEqual(dropAreaTrial([], S), { count: 0, withDrop: null, withoutDrop: null });
+test('surge tags predict surge at the same place, time and day type', () => {
+  const ORCHARD = { lat: 1.304, lng: 103.832 };
+  const TAMPINES = { lat: 1.353, lng: 103.945 };
+  // Three weekday nights at 2:45 from Orchard were surge.
+  const trips = ['2026-11-17', '2026-11-18', '2026-11-19'].map((d) => trip(`${d}T02:45:00+08:00`, { pricing: 'surge', pickup: ORCHARD, fare: priorNet(12, 20, S) * 1.6 }));
+  const q = { band: '10-15', zone: 'E', ts: at('2026-11-24T02:45:00+08:00'), loc: ORCHARD };
+  const there = surgeOutlook(q, trips);
+  assert.equal(there.likely, 'surge');
+  assert.equal(there.near.surge, 3);
+  assert.equal(predict(q, trips, S).surge.likely, 'surge');
+
+  // Same time in Tampines, or Orchard at lunch: not enough to call surge.
+  assert.equal(surgeOutlook({ ...q, loc: TAMPINES }, trips).likely, 'normal');
+  assert.equal(surgeOutlook({ ...q, ts: at('2026-11-24T12:45:00+08:00') }, trips).likely, 'normal');
+
+  // One tag on its own doesn't call surge.
+  assert.equal(surgeOutlook(q, trips.slice(0, 1)).likely, 'normal');
+  // Untagged jobs don't vote.
+  assert.equal(surgeOutlook(q, trips.map((t) => ({ ...t, pricing: null }))).evidence, 0);
 });

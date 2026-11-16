@@ -28,10 +28,6 @@
       <div class="label">Trip distance on the card (km)</div>
       <div id="bands" class="grid g4"></div>
     </div>
-    <div class="group">
-      <div class="label">Drop area</div>
-      <div id="zones" class="grid g3"></div>
-    </div>
     <div id="verdict" class="verdict idle" aria-live="polite"></div>
   </section>
 
@@ -87,16 +83,13 @@
         </div>
       </div>
       <div class="field">
-        <span class="flabel">Drop area</span>
-        <div id="rf-zone" class="seg g3"></div>
-        <div id="rf-zone-hint" class="hint"></div>
-      </div>
-      <div class="field">
-        <span class="flabel">Payment (optional)</span>
-        <div id="rf-pay" class="seg g2">
-          <button type="button" data-v="cash">Cash</button>
-          <button type="button" data-v="cashless">Cashless</button>
+        <span class="flabel">Pricing (optional)</span>
+        <div id="rf-pricing" class="seg g3">
+          <button type="button" data-v="surge">Surge</button>
+          <button type="button" data-v="normal">Normal</button>
+          <button type="button" data-v="bad">Bad</button>
         </div>
+        <div class="hint">Was the fare surged, normal, or worse than normal? Tagged jobs tell every driver when surge usually hits near this pickup.</div>
       </div>
       <p id="rf-msg" class="msg" role="status"></p>
       <button type="submit" class="primary wide" id="rf-save">Save trip</button>
@@ -107,37 +100,17 @@
 
   <section id="view-settings" class="view" hidden>
     <form id="settings-form" class="stack" novalidate>
-      <h2>Your line</h2>
+      <h2>Shared pool</h2>
+      <p class="note">Everyone learns from the pool, with no accounts. Every reconciled job goes in as: time to the nearest 5 minutes, distance band, km and minutes, fare, surge / normal / bad if you tagged it, taken or cancelled, and pickup and drop-off rounded to about 1 km. Addresses, postal codes and names never leave this phone.</p>
+
+      <h2>Take-home starting point</h2>
+      <p class="note">What the card shows is already your take-home, so these are in take-home terms. They're estimates, and reconciled jobs from you and the shared pool correct them automatically, so you rarely need to touch them.</p>
       <div class="row2">
-        <div class="field">
-          <label for="st-target">TAKE at or above (S$/hr)</label>
-          <input id="st-target" type="number" inputmode="decimal" min="1" step="1">
-        </div>
-        <div class="field">
-          <label for="st-pickup">Pickup drive (min)</label>
-          <input id="st-pickup" type="number" inputmode="decimal" min="0" step="1">
-        </div>
         <div class="field">
           <label for="st-minfare">Minimum fare (S$)</label>
           <input id="st-minfare" type="number" inputmode="decimal" min="0" step="0.01">
         </div>
       </div>
-
-      <h2>My dead drops</h2>
-      <p class="note">Areas you'd rather not end up in. Your verdict adds the empty drive back for these. This only affects you: what a job pays is still learned from everyone.</p>
-      <div id="st-dead" class="seg g3"></div>
-      <div class="row2">
-        <div class="field">
-          <label for="st-deadmin">Empty drive back from a dead drop (min)</label>
-          <input id="st-deadmin" type="number" inputmode="numeric" min="0" max="120" step="1">
-        </div>
-      </div>
-
-      <h2>Shared pool</h2>
-      <p class="note">Everyone learns from the pool, with no accounts. Every reconciled job goes in as: time to the nearest 5 minutes, distance band, drop area, OneMap km and minutes, fare, taken or cancelled, ride type, payment type, and pickup and drop-off rounded to about 1 km. Addresses, postal codes and names never leave this phone.</p>
-
-      <h2>Take-home starting point</h2>
-      <p class="note">What the card shows is already your take-home, so these are in take-home terms. They're estimates, and reconciled jobs from you and the shared pool correct them automatically, so you rarely need to touch them.</p>
       <div class="row2">
         <div class="field"><label for="st-base">Base (S$)</label><input id="st-base" type="number" inputmode="decimal" step="0.01" min="0"></div>
         <div class="field"><label for="st-km">Per km (S$)</label><input id="st-km" type="number" inputmode="decimal" step="0.01" min="0"></div>

@@ -77,8 +77,6 @@ main {
   display: flex; align-items: center; justify-content: center; text-align: center; line-height: 1.1;
 }
 .tap.mono { font-family: var(--mono); font-size: 18px; }
-.tap.dead { border-color: color-mix(in srgb, var(--dead) 55%, var(--line)); }
-.tap.dead::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dead); margin-left: 6px; flex: none; }
 .tap.sel { background: var(--sel); color: var(--sel-ink); border-color: var(--sel); }
 .tap.sel.dead::after { background: var(--sel-ink); }
 .tap:active { transform: scale(0.97); }
@@ -100,8 +98,9 @@ main {
 .pill.took { background: var(--raised); color: var(--go); }
 .pill.cancelled { background: var(--raised); color: var(--stop); }
 .verdict.idle p { margin: 0; color: var(--muted); font-size: 17px; text-align: center; }
-.verdict.take { background: var(--go); color: var(--go-ink); border-color: var(--go); }
-.verdict.skip { background: var(--stop); color: var(--stop-ink); border-color: var(--stop); }
+.verdict.fare { border-width: 2px; border-color: var(--accent); }
+.verdict.fare.surge { background: var(--warn); color: #1a1003; border-color: var(--warn); }
+.verdict.fare.bad { border-color: var(--stop); }
 .verdict .word { font-family: var(--display); font-weight: 800; font-size: 46px; line-height: 1; letter-spacing: -0.02em; }
 .verdict .nums { display: flex; align-items: baseline; gap: 8px 16px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
 .verdict .big { font-family: var(--mono); font-size: 24px; font-weight: 700; }
@@ -129,8 +128,7 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
 .card .meta { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
 .card .acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .pill { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
-.pill.take { background: var(--go); color: var(--go-ink); }
-.pill.skip { background: var(--stop); color: var(--stop-ink); }
+.pill.surge { background: var(--warn); color: #1a1003; }
 .pill.wait { background: var(--raised); color: var(--warn); }
 
 .form-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
