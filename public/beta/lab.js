@@ -250,7 +250,7 @@ function update() {
   }
   if (f.actual > 0 && f.earned > 0) {
     const cut = cutOf(f);
-    lines.push(`Grab kept ${money(cut.cut)} (${pct(cut.rate)} of what the passenger paid).`);
+    lines.push(`Grab kept ${money(cut.cut)} (${pct(cut.rate)} of what the passenger paid).${cut.rate < 0.15 ? ' <b>Low-cut trip:</b> counted separately, not in the usual rule.' : ''}`);
   }
   check.innerHTML = lines.join('<br>');
 }
@@ -327,7 +327,11 @@ function renderCut() {
       ? `Looks like <b>${pct(1 - c.keep)}</b> plus <b>${money(-c.fixed)}</b> per job.`
       : `<b>${pct(c.avgRate)}</b> of what the passenger paid so far${c.n === 1 ? ' (base trip: S$4.70 of S$16.80)' : ''}. 3 trips will show whether it's a flat % or not.`;
   const range = c.n > 1 ? (c.spread < 0.001 ? ` The same on all ${c.n} trips.` : ` Across ${c.n} trips it ranged ${pct(c.lo)}–${pct(c.hi)}.`) : '';
-  box.innerHTML = `<p class="note">${verdict}${range}</p>`;
+  const hm = (ts) => new Date(ts).toLocaleString('en-SG', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  const low = c.low.length
+    ? `<p class="note"><b>Low-cut trips: ${c.low.length}</b> (Grab kept under 15%, left out of the usual rule): ${c.low.map((t) => `${hm(t.ts)}, ${t.km} km, kept ${money(cutOf(t).cut)} of ${money(t.actual)}`).join('; ')}.</p>`
+    : '';
+  box.innerHTML = `<p class="note">${verdict}${range}</p>${low}`;
 }
 
 function renderList() {
@@ -342,7 +346,7 @@ function renderList() {
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
       <div class="meta">${t.km} km · ${t.min} min${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : ''}</div>
-      <div class="meta">Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})${t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}` : ''}</div>`;
+      <div class="meta">Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})${t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     let armed = false;

@@ -28,6 +28,13 @@ driver earned     = paid by passenger − what Grab keeps
   on normal GrabCar. Trips paying exactly S$8.10 are left out of the formula fit (the floor set
   the fare, not the formula) and used to find the distance where the minimum stops applying.
 
+- **Grab's cut (7 trips, 17 Nov):** usually about **20% of what the passenger paid plus about
+  S$1.45 per trip** (driver earns ≈ 79.8% × paid − S$1.45, every usual trip within 20 cents). So
+  short trips lose a bigger share (32–34%) than long ones (28%).
+- **Low-cut trips happen:** trip 7 (20.34 km, 04:14) paid S$23.90 and the driver earned S$23.80,
+  so Grab kept S$0.10. Confirmed by the driver; the theory is Grab lowers its cut when a job goes
+  untaken. These are listed separately and left out of the usual cut rule.
+
 ## trips.csv, one row per job
 
 | Column | What | Required |

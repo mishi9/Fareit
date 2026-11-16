@@ -89,3 +89,16 @@ test('time of day: how fares near an hour ran against the formula, surge trips i
   assert.equal(blocks[0].n, 1, '00:00–03:00 holds the base trip');
   assert.ok(blocks[6].lift > 0.15);
 });
+
+test('low-cut trips (Grab keeps almost nothing) are counted apart, not fitted into the usual cut', async () => {
+  const { isLowCut } = await import('../public/beta/formula.js');
+  // The real trips from 17 Nov (base trip built in). #7: S$23.90 paid, S$23.80 earned.
+  const real = [[17.76, 16, 17, 12.3], [3.93, 15, 11.43, 7.5], [10.77, 17, 18.7, 13.3], [12.39, 24, 16, 11.2], [2.38, 12, 10.82, 7.3], [20.34, 34, 23.9, 23.8]]
+    .map(([km, min, actual, earned]) => ({ ts: Date.now(), km, min, erp: 0, surge: 'normal', actual, earned }));
+  assert.equal(isLowCut(real[5]), true);
+  const c = fitCommission(real);
+  assert.equal(c.low.length, 1);
+  assert.equal(c.kind, 'percent+fixed');
+  // Usual rule from the other 6: about 79.8% of paid − S$1.45, every trip within 20 cents.
+  for (const t of real.slice(0, 5)) assert.ok(Math.abs(driverEarns(c, t.actual) - t.earned) < 0.2, `${t.actual} → ${driverEarns(c, t.actual)} vs ${t.earned}`);
+});

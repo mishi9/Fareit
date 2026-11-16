@@ -139,12 +139,18 @@ if (paid.length) {
   }
   const rates = cuts.map((c) => c.rate).sort((a, b) => a - b);
   console.log(`  average ${pct(rates.reduce((s, r) => s + r, 0) / rates.length)}, middle ${pct(rates[Math.floor(rates.length / 2)])}, range ${pct(rates[0])}–${pct(rates[rates.length - 1])}`);
-  if (cuts.length >= 3) {
+  // Low-cut trips (Grab kept under 15%, e.g. S$0.10 of S$23.90) are real but follow a different
+  // rule: perhaps the cut is lowered when a job goes untaken. Listed, not fitted.
+  const low = cuts.filter((c) => c.rate < 0.15);
+  for (const c of low) console.log(`  low-cut trip #${c.t.id} ${c.t.date} ${c.t.time} ${c.t.grab_km} km: Grab kept ${$(c.cut)} — left out of the rule below`);
+  const usual = cuts.filter((c) => c.rate >= 0.15);
+  if (usual.length >= 3) {
     // earned = k × fare + c. A flat % has c ≈ 0; a % plus a fixed fee has c < 0.
-    const w = lsq(cuts.map((c) => [1, c.fare]), cuts.map((c) => c.earned));
+    const w = lsq(usual.map((c) => [1, c.fare]), usual.map((c) => c.earned));
     if (w) {
       const fixed = Math.abs(w[0]) >= 0.05 ? ` ${w[0] < 0 ? '− a fixed' : '+ a fixed'} ${$(Math.abs(w[0]))}` : '';
-      console.log(`  as a formula: driver gets ${pct(w[1])} of the fare${fixed}  →  Grab keeps ${pct(1 - w[1])}${fixed ? ` and ${w[0] < 0 ? 'takes' : 'adds back'} ${$(Math.abs(w[0]))} per job` : ''}`);
+      const worst = Math.max(...usual.map((c) => Math.abs(w[1] * c.fare + w[0] - c.earned)));
+      console.log(`  as a formula (${usual.length} usual trips): driver gets ${pct(w[1])} of the fare${fixed}  →  Grab keeps ${pct(1 - w[1])}${fixed ? ` and ${w[0] < 0 ? 'takes' : 'adds back'} ${$(Math.abs(w[0]))} per job` : ''}; every trip within ${$(worst)}`);
     }
   }
 }

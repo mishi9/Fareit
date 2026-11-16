@@ -117,13 +117,22 @@ export function cutOf(t) {
 }
 
 // A fixed % or a % plus a fixed amount? With 3+ trips, fits earned = keep × paid + fixed.
+// Low-cut trips: Grab sometimes keeps almost nothing (e.g. S$0.10 of S$23.90), perhaps when a
+// job sits untaken and Grab lowers its cut until someone accepts. They're real, but they'd drag
+// the usual rule off, so they're counted separately instead of fitted.
+export const LOW_CUT = 0.15;
+export const isLowCut = (t) => { const c = cutOf(t); return Boolean(c) && c.rate < LOW_CUT; };
+
 export function fitCommission(trips) {
-  const cuts = withBase(trips).map(cutOf).filter(Boolean);
+  const all = withBase(trips).filter((t) => cutOf(t));
+  const low = all.filter(isLowCut);
+  const cuts = all.filter((t) => !isLowCut(t)).map(cutOf);
+  if (!cuts.length) return { kind: 'average', keep: 1 - SEED_CUT_FALLBACK, fixed: 0, n: 0, avgRate: SEED_CUT_FALLBACK, spread: 0, lo: SEED_CUT_FALLBACK, hi: SEED_CUT_FALLBACK, low };
   const rates = cuts.map((c) => c.rate);
   const avgRate = rates.reduce((s, r) => s + r, 0) / rates.length;
   const lo = Math.min(...rates);
   const hi = Math.max(...rates);
-  const info = { n: cuts.length, avgRate, spread: hi - lo, lo, hi };
+  const info = { n: cuts.length, avgRate, spread: hi - lo, lo, hi, low };
   if (cuts.length < 3) return { kind: 'average', keep: 1 - avgRate, fixed: 0, ...info };
   const w = lsq(cuts.map((c) => [1, c.paid]), cuts.map((c) => c.earned));
   if (!w) return { kind: 'average', keep: 1 - avgRate, fixed: 0, ...info };
@@ -133,7 +142,9 @@ export function fitCommission(trips) {
     : { kind: 'percent+fixed', keep: w[1], fixed: w[0], ...info };
 }
 
-// What the driver would earn on a trip the passenger paid `paid` for.
+const SEED_CUT_FALLBACK = 0.28;
+
+// What the driver would earn on a trip the passenger paid `paid` for (usual cut).
 export function driverEarns(model, paid, erp = 0) {
   return r2(model.keep * (paid - (erp || 0)) + model.fixed + (erp || 0));
 }
