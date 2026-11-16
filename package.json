@@ -1,0 +1,15 @@
+{
+  "name": "fareit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fareit: two-tap fare copilot for Grab drivers in Singapore",
+  "scripts": {
+    "test": "TZ=Asia/Singapore node --test tests/*.test.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.160.0"
+  }
+}

@@ -1,0 +1,196 @@
+// Fareit prediction model. Pure functions, no DOM, shared by the PWA and the tests.
+//
+// A prediction has two layers:
+//   1. Prior: a published-style fare formula (base + per km + per minute, minus commission).
+//      Works with zero data.
+//   2. Learned correction: the log-ratio between what you were actually paid and what the
+//      prior said, averaged over your reconciled trips and weighted by how similar each trip
+//      is (same drop area, same band, similar hour, weekday vs weekend). It shrinks toward the
+//      overall correction when there are few similar trips, so it never jumps on one data point.
+
+export const BANDS = [
+  { id: '0-5', label: '0–5', min: 0, max: 5, km: 3 },
+  { id: '5-10', label: '5–10', min: 5, max: 10, km: 7.5 },
+  { id: '10-15', label: '10–15', min: 10, max: 15, km: 12.5 },
+  { id: '15-20', label: '15–20', min: 15, max: 20, km: 17.5 },
+  { id: '20-30', label: '20–30', min: 20, max: 30, km: 25 },
+  { id: '30-40', label: '30–40', min: 30, max: 40, km: 35 },
+  { id: '40+', label: '40+', min: 40, max: Infinity, km: 45 },
+];
+
+export const ZONES = [
+  { id: 'N', label: 'North', short: 'N' },
+  { id: 'S', label: 'South', short: 'S' },
+  { id: 'E', label: 'East', short: 'E' },
+  { id: 'W', label: 'West', short: 'W' },
+  { id: 'AIRPORT', label: 'Airport', short: 'Airport' },
+  { id: 'TUAS', label: 'Tuas', short: 'Tuas', dead: true },
+  { id: 'WLC', label: 'Woodlands CP', short: 'WLC' },
+  { id: 'CF', label: 'Changi Far', short: 'CF', dead: true },
+];
+
+// Seed values. Grab publishes no driver rate card, so these are estimates from public sources,
+// tuned so the recorded Tampines St 11 -> Tuas View Close trip (about 45.8 km, 52 min, S$33.20 net)
+// lands within about 1%. Every value can be changed in Settings; your reconciled trips correct them.
+export const DEFAULT_SETTINGS = {
+  targetPerHour: 30,
+  base: 3.0,
+  perKm: 0.6,
+  perMin: 0.22,
+  commission: 0.2,
+  pickupMin: 6,
+  returnMin: { N: 0, S: 0, E: 0, W: 0, AIRPORT: 5, TUAS: 35, WLC: 10, CF: 25 },
+  priorStrength: 3,
+  defaultSpread: 0.25,
+};
+
+export function mergeSettings(saved) {
+  const s = { ...DEFAULT_SETTINGS, ...(saved || {}) };
+  s.returnMin = { ...DEFAULT_SETTINGS.returnMin, ...((saved && saved.returnMin) || {}) };
+  return s;
+}
+
+export function bandFor(km) {
+  return BANDS.find((b) => km >= b.min && km < b.max) || BANDS[BANDS.length - 1];
+}
+
+// Rough Singapore drive time when OneMap has not given one: a few minutes of town driving plus
+// about 1.1 min per km. Only used before you have trips in a band.
+export function estDriveMin(km) {
+  return 5 + 1.1 * km;
+}
+
+export function priorNet(km, min, s) {
+  const gross = s.base + s.perKm * Math.max(0, km) + s.perMin * Math.max(0, min);
+  return gross * (1 - s.commission);
+}
+
+function median(xs) {
+  const a = [...xs].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+export function isTrainable(t) {
+  return t.status === 'reconciled' && t.fare > 0 && t.km > 0;
+}
+
+export function tripMinutes(t) {
+  if (t.tripMin > 0) return t.tripMin;
+  if (t.driveMin > 0) return t.driveMin;
+  return estDriveMin(t.km);
+}
+
+function tripBand(t) {
+  return t.band || bandFor(t.km).id;
+}
+
+// Typical distance and time for a band: from your own trips once there are 3 or more,
+// otherwise the band midpoint.
+export function bandProfile(bandId, trips) {
+  const band = BANDS.find((b) => b.id === bandId) || BANDS[0];
+  const inBand = trips.filter(isTrainable).filter((t) => tripBand(t) === band.id);
+  if (inBand.length >= 3) {
+    return {
+      km: median(inBand.map((t) => t.km)),
+      min: median(inBand.map(tripMinutes)),
+      learned: true,
+      count: inBand.length,
+    };
+  }
+  return { km: band.km, min: estDriveMin(band.km), learned: false, count: inBand.length };
+}
+
+function hourOf(ts) {
+  const d = new Date(ts);
+  return d.getHours() + d.getMinutes() / 60;
+}
+
+function isWeekend(ts) {
+  const day = new Date(ts).getDay();
+  return day === 0 || day === 6;
+}
+
+function hourGap(a, b) {
+  const d = Math.abs(a - b) % 24;
+  return Math.min(d, 24 - d);
+}
+
+export function similarity(t, q) {
+  let w = 1;
+  if (t.zone && t.zone === q.zone) w *= 3;
+  if (tripBand(t) === q.band) w *= 2;
+  const g = hourGap(hourOf(t.ts), hourOf(q.ts));
+  w *= Math.exp(-(g * g) / 8);
+  if (isWeekend(t.ts) === isWeekend(q.ts)) w *= 1.5;
+  return w;
+}
+
+// q = { band, zone, ts }
+export function predict(q, trips, settings) {
+  const s = mergeSettings(settings);
+  const profile = bandProfile(q.band, trips);
+  const prior = priorNet(profile.km, profile.min, s);
+
+  const data = trips
+    .filter(isTrainable)
+    .map((t) => ({ t, r: Math.log(t.fare / priorNet(t.km, tripMinutes(t), s)) }))
+    .filter((x) => Number.isFinite(x.r));
+
+  const k = s.priorStrength;
+  const n = data.length;
+  const overall = n ? data.reduce((sum, x) => sum + x.r, 0) / (n + k) : 0;
+
+  let sw = 0;
+  let swr = 0;
+  for (const x of data) {
+    x.w = similarity(x.t, q);
+    sw += x.w;
+    swr += x.w * x.r;
+  }
+  const m = (swr + k * overall) / (sw + k);
+  let sv = k * s.defaultSpread * s.defaultSpread;
+  for (const x of data) sv += x.w * (x.r - m) ** 2;
+  const sd = Math.sqrt(sv / (sw + k));
+
+  const net = prior * Math.exp(m);
+  const lo = prior * Math.exp(m - sd);
+  const hi = prior * Math.exp(m + sd);
+  const returnMin = s.returnMin[q.zone] ?? 0;
+  const totalMin = s.pickupMin + profile.min + returnMin;
+  const perHour = (net / totalMin) * 60;
+
+  return {
+    band: q.band,
+    zone: q.zone,
+    km: profile.km,
+    tripMin: profile.min,
+    prior,
+    net,
+    lo,
+    hi,
+    perHour,
+    perHourLo: (lo / totalMin) * 60,
+    perHourHi: (hi / totalMin) * 60,
+    totalMin,
+    returnMin,
+    verdict: perHour >= s.targetPerHour ? 'TAKE' : 'SKIP',
+    basis: n,
+    weight: sw,
+    // One trip that matches on area, band, hour and day type weighs 9, so "trained" means
+    // roughly five closely matching trips (or many looser ones).
+    stage: n === 0 ? 'seed' : sw < 45 ? 'learning' : 'trained',
+  };
+}
+
+// How good past predictions were, for trips that had a prediction and were then reconciled.
+export function accuracy(trips) {
+  const xs = trips.filter((t) => t.status === 'reconciled' && t.fare > 0 && t.prediction && t.prediction.net > 0);
+  if (!xs.length) return { count: 0, mape: null, bias: null };
+  const errs = xs.map((t) => (t.prediction.net - t.fare) / t.fare);
+  return {
+    count: xs.length,
+    mape: errs.reduce((a, e) => a + Math.abs(e), 0) / errs.length,
+    bias: errs.reduce((a, e) => a + e, 0) / errs.length,
+  };
+}

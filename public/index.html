@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fareit</title>
+<meta name="description" content="Two-tap fare copilot for the 8-second job window.">
+<meta name="theme-color" content="#131615">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fareit">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">Fareit</div>
+  <div id="status" class="chip">Starting</div>
+</header>
+
+<main>
+  <section id="view-window" class="view">
+    <div class="group">
+      <div class="label">Trip distance on the card (km)</div>
+      <div id="bands" class="grid g4"></div>
+    </div>
+    <div class="group">
+      <div class="label">Drop area</div>
+      <div id="zones" class="grid g4"></div>
+    </div>
+    <div id="verdict" class="verdict idle" role="button" tabindex="0" aria-live="polite" aria-label="Verdict. Tap to clear."></div>
+  </section>
+
+  <section id="view-reconcile" class="view" hidden>
+    <div id="recon-list" class="stack"></div>
+
+    <form id="recon-form" class="stack" hidden novalidate>
+      <div class="form-head">
+        <div>
+          <h2 id="rf-title">Reconcile trip</h2>
+          <div id="rf-sub" class="sub"></div>
+        </div>
+        <button type="button" class="ghost" id="rf-back">Back</button>
+      </div>
+
+      <div class="field">
+        <label for="rf-pickup">Pickup</label>
+        <input id="rf-pickup" autocomplete="off" autocapitalize="words" placeholder="Address, postal code or area (Tampines)">
+        <div class="suggest" id="rf-pickup-s"></div>
+      </div>
+      <div class="field">
+        <label for="rf-drop">Drop-off</label>
+        <input id="rf-drop" autocomplete="off" autocapitalize="words" placeholder="Address, postal code or area">
+        <div class="suggest" id="rf-drop-s"></div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="rf-min">Trip time (min, estimated)</label>
+          <input id="rf-min" type="number" inputmode="numeric" min="1" max="300" placeholder="52">
+        </div>
+        <div class="field">
+          <label for="rf-fare">Actual fare (S$)</label>
+          <input id="rf-fare" type="number" inputmode="decimal" step="0.01" min="0" placeholder="33.20">
+        </div>
+      </div>
+      <div class="field">
+        <span class="flabel">Drop area</span>
+        <div id="rf-zone" class="seg g4"></div>
+        <div id="rf-zone-hint" class="hint"></div>
+      </div>
+      <div class="field">
+        <span class="flabel">Payment (optional)</span>
+        <div id="rf-pay" class="seg g2">
+          <button type="button" data-v="cash">Cash</button>
+          <button type="button" data-v="cashless">Cashless</button>
+        </div>
+      </div>
+      <p id="rf-msg" class="msg" role="status"></p>
+      <button type="submit" class="primary wide" id="rf-save">Save trip</button>
+    </form>
+  </section>
+
+  <section id="view-trips" class="view stack" hidden></section>
+
+  <section id="view-settings" class="view" hidden>
+    <form id="settings-form" class="stack" novalidate>
+      <h2>Your line</h2>
+      <div class="row2">
+        <div class="field">
+          <label for="st-target">TAKE at or above (S$/hr)</label>
+          <input id="st-target" type="number" inputmode="decimal" min="1" step="1">
+        </div>
+        <div class="field">
+          <label for="st-pickup">Pickup drive (min)</label>
+          <input id="st-pickup" type="number" inputmode="decimal" min="0" step="1">
+        </div>
+      </div>
+
+      <h2>Empty drive back after the drop (min)</h2>
+      <div id="st-returns" class="grid g4 small-fields"></div>
+
+      <h2>Fare-structure starting point</h2>
+      <p class="note">Estimates from public sources. Your reconciled trips correct these automatically, so you rarely need to touch them.</p>
+      <div class="row2">
+        <div class="field"><label for="st-base">Base fare (S$)</label><input id="st-base" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div class="field"><label for="st-km">Per km (S$)</label><input id="st-km" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div class="field"><label for="st-min">Per minute (S$)</label><input id="st-min" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div class="field"><label for="st-comm">Grab's cut (%)</label><input id="st-comm" type="number" inputmode="decimal" step="1" min="0" max="60"></div>
+      </div>
+      <button type="button" class="ghost" id="st-reset">Restore starting values</button>
+
+      <h2>Server</h2>
+      <div class="field">
+        <label for="st-key">Access key</label>
+        <input id="st-key" type="password" autocomplete="off" placeholder="Only if your Fareit server asks for one">
+      </div>
+
+      <h2>Your data</h2>
+      <p class="note">Trips are stored on this phone only. Export a copy every week or so.</p>
+      <div class="row2">
+        <button type="button" class="primary" id="st-export">Export trips</button>
+        <label class="button ghost" for="st-import">Import trips</label>
+      </div>
+      <input id="st-import" type="file" accept="application/json,.json" hidden>
+      <button type="button" class="danger" id="st-clear">Delete all trips</button>
+      <p id="st-msg" class="msg" role="status"></p>
+    </form>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status" hidden></div>
+
+<nav class="tabs">
+  <button type="button" data-view="window">Window</button>
+  <button type="button" data-view="reconcile">Reconcile<span id="badge" class="badge" hidden></span></button>
+  <button type="button" data-view="trips">Trips</button>
+  <button type="button" data-view="settings">Settings</button>
+</nav>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  // Fareit on Cloudflare Workers: static PWA in ./public, OneMap proxy in worker/index.js
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fareit",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true }
+  // Secrets (dashboard > Variables and Secrets, or `npx wrangler secret put NAME`):
+  //   ONEMAP_EMAIL, ONEMAP_PASSWORD   free account from onemap.gov.sg, used for driving routes
+  //   APP_KEY (optional)              shared key the app sends; stops strangers using your OneMap quota
+}
