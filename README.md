@@ -64,7 +64,7 @@ Driving routes need a OneMap API token. Register at <https://www.onemap.gov.sg/a
 
 ### 2. Deploy to Cloudflare Workers
 
-Same setup as Haru: connect this repo in **Cloudflare dashboard → Workers & Pages → Create → Import a repository**, or from a computer:
+Connect this repo in **Cloudflare dashboard → Workers & Pages → Create → Import a repository**, or from a computer:
 
 ```
 npm install

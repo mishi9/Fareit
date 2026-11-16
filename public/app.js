@@ -515,6 +515,14 @@ function syncNow() {
   if (!navigator.onLine) return Promise.resolve();
   state.syncing = (async () => {
     try {
+      // Jobs saved while OneMap was unreachable or not set up are held on the phone without a
+      // road distance, and the pool only takes jobs with one. Retry them here so they reach the
+      // pool without anyone tapping a button.
+      const waiting = state.trips.filter((t) => t.status === 'reconciled' && t.distanceStatus === 'pending').slice(0, 20);
+      for (const t of waiting) {
+        if (await fetchDistance(t)) await db.putTrip(t);
+        else if (/isn’t set up|Signing in to OneMap failed/.test(t.distanceError || '')) break; // server not ready; try next sync
+      }
       await pushJobs({
         trips: state.trips,
         device: state.device,
