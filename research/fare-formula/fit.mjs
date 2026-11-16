@@ -31,8 +31,10 @@ const trips = lines.filter((l) => l.trim()).map((l) => {
   const r = Object.fromEntries(cols.map((c, i) => [c, (v[i] ?? '').trim()]));
   for (const c of NUMERIC) r[c] = num(r[c]);
   r.min = r.grab_min ?? r.actual_min;
-  r.addons = (r.erp || 0) + (r.tolls || 0) + (r.platform_fee || 0) + (r.other_surcharge || 0);
-  r.core = r.passenger_fare - r.addons; // the part the distance/time formula sets
+  // Fitted on what the passenger paid: fees and extras (platform fee, insurance …) fold into the
+  // base. Only ERP and tolls, which vary by route and pass to the driver, are taken out.
+  r.addons = (r.erp || 0) + (r.tolls || 0);
+  r.core = r.passenger_fare - r.addons;
   r.service = service(r.ride_type);
   // Paid exactly the minimum: the formula didn't set this fare, the floor did.
   r.atMinimum = Math.abs(r.passenger_fare - MIN_PASSENGER_FARE) < 0.005;
@@ -84,7 +86,7 @@ const models = [
   { name: 'base + km', rows: normal, x: (t) => [1, t.grab_km], terms: ['base', 'per km'] },
   { name: 'base + km + min', rows: withMin, x: (t) => [1, t.grab_km, t.min], terms: ['base', 'per km', 'per min'] },
 ];
-console.log(`\nPassenger formula (normal trips, fare minus add-ons): ${normal.length} trips, ${withMin.length} with minutes`);
+console.log(`\nPaid-by-passenger formula (normal trips, minus ERP / tolls): ${normal.length} trips, ${withMin.length} with minutes`);
 for (const m of models) {
   const need = m.terms.length + 1;
   if (m.rows.length < need) { console.log(`  ${m.name}: needs at least ${need} trips (has ${m.rows.length})`); continue; }
@@ -122,13 +124,13 @@ for (const m of models) {
 
 // ---- Grab's cut ----
 const paid = car.filter((t) => t.passenger_fare > 0 && t.driver_earned > 0);
-console.log(`\nGrab's cut (${FITTED}): ${paid.length} trips with both numbers`);
+console.log(`\nWhat Grab keeps of what the passenger paid (${FITTED}): ${paid.length} trips with both numbers`);
 if (paid.length) {
-  // As Grab's job details show it: passenger fare (paid − platform & partner fee) minus what the
-  // driver earned. ERP and tolls reach the driver untouched, so they're left out of both.
+  // What Grab keeps out of what the passenger paid. ERP and tolls reach the driver untouched, so
+  // they're left out of both.
   const cuts = paid.map((t) => {
     const pass = (t.erp || 0) + (t.tolls || 0);
-    const fare = t.passenger_fare - pass - (t.platform_fee || 0);
+    const fare = t.passenger_fare - pass;
     const earned = t.driver_earned - pass;
     return { t, fare, earned, cut: fare - earned, rate: (fare - earned) / fare };
   });

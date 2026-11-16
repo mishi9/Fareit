@@ -6,8 +6,8 @@ the shared pool, and nothing here changes predictions until we decide it should.
 Goal: what drivers are paid, from
 
 ```
-passenger fare = base + a × km + b × min  (+ ERP, tolls, fees, surcharges)     non-surged trips only
-driver earned  = passenger fare − Grab's commission
+paid by passenger = max(S$8.10, base + a × km + b × min) + ERP / tolls     non-surged trips only
+driver earned     = paid by passenger − what Grab keeps
 ```
 
 ## Known facts
@@ -19,8 +19,11 @@ driver earned  = passenger fare − Grab's commission
   - paid by passenger S$16.80 = passenger fare S$15.60 + platform & partner fee S$1.20
   - driver earned S$12.10 = pick-up fare S$3.50 + trip fare S$7.70 + fuel surcharge S$0.90
   - Grab service fee S$3.50 = passenger fare − driver earned (22.4%)
-  So the published formula sets the **passenger fare**; the S$1.20 fee is on top. If the fee is
-  always S$1.20, the S$8.10 minimum is S$6.90 + S$1.20 (to be checked).
+- **Everything is fitted on "Paid by passenger"** (S$16.80 on trip 1), the one number the passenger
+  actually pays. The platform fee and any extras (e.g. opt-in insurance) fold into the base; a trip
+  with an unusual extra shows up as an outlier. Only ERP and tolls are taken out, since they vary
+  by route and go to the driver. Grab keeps = paid by passenger − driver earned (S$4.70, 28.0% on
+  trip 1).
 - **Minimum passenger fare: S$8.10**, however short the trip. Tested several times as a passenger
   on normal GrabCar. Trips paying exactly S$8.10 are left out of the formula fit (the floor set
   the fare, not the formula) and used to find the distance where the minimum stops applying.
