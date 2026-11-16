@@ -134,12 +134,14 @@ function buildWindow() {
     el.setAttribute('aria-label', `${b.label} kilometres`);
     bands.append(el);
   }
-  $('#verdict').addEventListener('click', (e) => {
+  const onAct = (e) => {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
     if (b.dataset.act === 'clear') resetWindow();
     else recordDecision(b.dataset.act);
-  });
+  };
+  $('#verdict').addEventListener('click', onAct);
+  $('#decide').addEventListener('click', onAct);
   renderVerdict(null);
 }
 
@@ -189,6 +191,7 @@ async function decide() {
 
 function renderVerdict(p) {
   const v = $('#verdict');
+  $('#decide').hidden = !p;
   if (!p) {
     v.className = 'verdict idle';
     v.innerHTML = '<p>Tap the trip distance from the job card.</p>';
@@ -201,11 +204,7 @@ function renderVerdict(p) {
   v.innerHTML = `
     <div class="top-row"><span class="word">${dollars(p.net)}</span><button type="button" class="clear" data-act="clear">Clear</button></div>
     <div class="nums"><span class="rng">likely ${dollars(p.lo)}–${dollars(p.hi)} · ${esc(bandLabel(p.band))}, about ${Math.round(p.tripMin)} min</span></div>
-    <div class="why">${esc(surgeLine(p.surge))} ${esc(stage)}</div>
-    <div class="decide">
-      <button type="button" data-act="took">Took it</button>
-      <button type="button" data-act="cancelled">Cancelled</button>
-    </div>`;
+    <div class="why">${esc(surgeLine(p.surge))} ${esc(stage)}</div>`;
 }
 
 // What surge / normal / bad tags from around here, at this time, say about pricing right now.
@@ -764,6 +763,13 @@ async function boot() {
   state.device = device || uid();
   if (!device) await db.setKV('device', state.device);
 
+  // The Window fills the screen below the header so the distance buttons sit just above the tabs.
+  const sizeWindow = () => {
+    const top = $('.top').offsetHeight + parseFloat(getComputedStyle($('main')).paddingTop || '0');
+    document.documentElement.style.setProperty('--top-h', `${top}px`);
+  };
+  sizeWindow();
+  window.addEventListener('resize', sizeWindow);
   buildWindow();
   buildReconForm();
   buildSettings();

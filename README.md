@@ -8,7 +8,7 @@ Nothing touches the Grab phone. No screenshots, no screen capture, no voice, and
 
 ## How you use it
 
-1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–5` … `40+` km). The predicted fare appears straight away. Changing the tap within 15 seconds corrects the same job instead of adding a new one.
+1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–5` … `40+` km) at the bottom of the screen. The predicted fare appears at the top, where your hand doesn't cover it. Changing the tap within 15 seconds corrects the same job instead of adding a new one.
 2. **Then tap Took it or Cancelled.** Both are recorded with the exact time. The job time and Phone 2's location (roughly the pickup area) are saved when you tap.
 3. **Reconcile tab, once you're parked.** Every job is waiting there, taken or cancelled.
    - **Pickup:** starts filled in with the nearest address to where Phone 2 was when you tapped, usually 1–5 km from the real pickup. Type over it if the pickup was far from there.

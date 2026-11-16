@@ -24,11 +24,18 @@
 
 <main>
   <section id="view-window" class="view">
-    <div class="group">
-      <div class="label">Trip distance on the card (km)</div>
-      <div id="bands" class="grid g4"></div>
-    </div>
+    <!-- Prediction on top where it's easy to read; every tap sits at the bottom by the thumb. -->
     <div id="verdict" class="verdict idle" aria-live="polite"></div>
+    <div class="thumb">
+      <div id="decide" class="decide" hidden>
+        <button type="button" data-act="took">Took it</button>
+        <button type="button" data-act="cancelled">Cancelled</button>
+      </div>
+      <div class="group">
+        <div class="label">Trip distance on the card (km)</div>
+        <div id="bands" class="grid g4"></div>
+      </div>
+    </div>
   </section>
 
   <section id="view-reconcile" class="view" hidden>

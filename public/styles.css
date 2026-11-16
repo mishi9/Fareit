@@ -81,7 +81,13 @@ main {
 .tap.sel.dead::after { background: var(--sel-ink); }
 .tap:active { transform: scale(0.97); }
 
-#view-window { gap: 12px; }
+/* Window: prediction at the top, every tap at the bottom just above the tab bar. The view fills
+   the screen between the header and the tabs, and the thumb area is pushed to the bottom. */
+#view-window:not([hidden]) {
+  display: flex; flex-direction: column; gap: 12px;
+  min-height: calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px));
+}
+#view-window .thumb { margin-top: auto; display: grid; gap: 12px; }
 #view-window .group { gap: 6px; }
 .verdict {
   border-radius: 16px; padding: 14px 16px; min-height: 150px; display: grid; gap: 4px; align-content: center;
@@ -89,12 +95,12 @@ main {
 }
 .verdict .top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .verdict .clear { font-size: 13px; background: none; border: 0; color: inherit; opacity: 0.85; text-decoration: underline; cursor: pointer; padding: 6px 0 6px 10px; }
-.verdict .decide { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
-.verdict .decide button {
-  min-height: 46px; border-radius: 10px; font-weight: 800; font-size: 16px; cursor: pointer;
-  border: 2px solid currentColor; background: transparent; color: inherit;
+.decide { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.decide button {
+  min-height: 52px; border-radius: 12px; font-weight: 800; font-size: 17px; cursor: pointer;
+  border: 2px solid var(--ink); background: var(--surface); color: var(--ink);
 }
-.verdict .decide button:active { background: color-mix(in srgb, currentColor 18%, transparent); }
+.decide button:active { background: var(--raised); }
 .pill.took { background: var(--raised); color: var(--go); }
 .pill.cancelled { background: var(--raised); color: var(--stop); }
 .verdict.idle p { margin: 0; color: var(--muted); font-size: 17px; text-align: center; }
@@ -182,14 +188,14 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
 @media (max-height: 720px) {
   .top { padding-top: calc(env(safe-area-inset-top, 0px) + 6px); padding-bottom: 6px; }
   main { padding-top: 8px; }
-  #view-window { gap: 8px; }
+  #view-window:not([hidden]), #view-window .thumb { gap: 8px; }
   #view-window .group { gap: 4px; }
   #view-window .label { font-size: 11px; }
   .tap { min-height: 50px; }
   .verdict { min-height: 0; padding: 10px 14px; gap: 2px; }
   .verdict .word { font-size: 36px; }
   .verdict .big { font-size: 20px; }
-  .verdict .decide button { min-height: 40px; }
+  .decide button { min-height: 44px; }
   .tabs button { min-height: 44px; }
 }
 @media (max-height: 600px) {
@@ -198,8 +204,7 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
   .tap.mono { font-size: 16px; }
   .verdict .why { font-size: 12px; }
   .verdict .word { font-size: 30px; }
-  .verdict .decide { margin-top: 2px; }
-  .verdict .decide button { min-height: 36px; }
+  .decide button { min-height: 40px; }
   .tabs button { min-height: 40px; }
 }
 
