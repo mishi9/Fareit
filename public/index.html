@@ -54,8 +54,9 @@
         <div id="rf-pickup-hint" class="hint"></div>
       </div>
       <div class="field">
-        <label for="rf-drop">Drop-off</label>
+        <label for="rf-drop">Drop-off <small>(optional)</small></label>
         <input id="rf-drop" autocomplete="off" autocapitalize="words" placeholder="Address, postal code or area">
+        <div class="hint">With a drop-off, Fareit gets the road distance from OneMap. Without one, it uses the trip km below, or your band.</div>
         <div class="suggest" id="rf-drop-s"></div>
       </div>
       <div class="field">
@@ -71,9 +72,15 @@
       </div>
       <div class="row2">
         <div class="field">
+          <label for="rf-km">Trip km (optional)</label>
+          <input id="rf-km" type="number" inputmode="decimal" step="0.1" min="0.1" max="150" placeholder="45.8">
+        </div>
+        <div class="field">
           <label for="rf-min">Trip time (min, estimated)</label>
           <input id="rf-min" type="number" inputmode="numeric" min="1" max="300" placeholder="52">
         </div>
+      </div>
+      <div class="row2">
         <div class="field">
           <label for="rf-fare" id="rf-fare-label">Fare (S$)</label>
           <input id="rf-fare" type="number" inputmode="decimal" step="0.01" min="0" placeholder="33.20">

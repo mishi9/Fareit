@@ -1,4 +1,4 @@
-import { BANDS, ZONES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, accuracy, isTrainable, dropAreaTrial } from './model.js';
+import { BANDS, ZONES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, estDriveMin, accuracy, isTrainable, dropAreaTrial } from './model.js';
 import { findArea, isPostal, classifyZone } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
@@ -350,6 +350,7 @@ function openForm(trip) {
   if (trip && !trip.pickupText && trip.tapLoc?.lat) prefillPickup(trip);
   $('#rf-drop').value = trip?.dropText || '';
   $('#rf-min').value = trip?.tripMin || '';
+  $('#rf-km').value = trip?.kmTyped || '';
   $('#rf-fare').value = trip?.fare || '';
   $('#rf-when').value = toLocalInput(trip ? trip.ts : Date.now());
   markFormDecision();
@@ -453,7 +454,33 @@ async function fetchDistance(trip) {
   if (trip.pickup?.pending) trip.pickup = await resolvePlace(trip.pickupText, null).catch(() => trip.pickup);
   if (trip.drop?.pending) trip.drop = await resolvePlace(trip.dropText, null).catch(() => trip.drop);
   if (!trip.zone && trip.drop?.lat) trip.zone = classifyZone(trip.drop.lat, trip.drop.lng);
+  // No drop-off: the km you typed, or failing that the middle of the band you tapped.
+  if (!trip.dropText) {
+    const band = BANDS.find((b) => b.id === trip.band);
+    const km = trip.kmTyped > 0 ? trip.kmTyped : band ? band.km : null;
+    if (!km) { trip.distanceStatus = 'failed'; trip.distanceError = 'No drop-off, trip km or band.'; return false; }
+    trip.km = km;
+    trip.driveMin = estDriveMin(km);
+    trip.distanceStatus = 'ok';
+    trip.distanceSource = trip.kmTyped > 0 ? 'typed' : 'band';
+    delete trip.distanceError;
+    if (!trip.band) trip.band = bandFor(km).id;
+    return true;
+  }
   if (!(trip.pickup?.lat && trip.drop?.lat)) { trip.distanceStatus = 'pending'; return false; }
+  if (trip.kmTyped > 0) {
+    // You read the km off Grab's trip details: that beats a route guess. OneMap still gives the time.
+    try {
+      const r = await api(`/api/route?from=${trip.pickup.lat},${trip.pickup.lng}&to=${trip.drop.lat},${trip.drop.lng}`);
+      trip.driveMin = r.min;
+    } catch { trip.driveMin = estDriveMin(trip.kmTyped); }
+    trip.km = trip.kmTyped;
+    trip.distanceStatus = 'ok';
+    trip.distanceSource = 'typed';
+    delete trip.distanceError;
+    if (!trip.band) trip.band = bandFor(trip.km).id;
+    return true;
+  }
   try {
     const r = await api(`/api/route?from=${trip.pickup.lat},${trip.pickup.lng}&to=${trip.drop.lat},${trip.drop.lng}`);
     trip.km = r.km;
@@ -476,9 +503,14 @@ async function saveRecon(ev) {
   const dropText = $('#rf-drop').value.trim();
   const paid = parseFloat($('#rf-fare').value);
   const minRaw = $('#rf-min').value.trim();
+  const kmRaw = $('#rf-km').value.trim();
+  const kmTyped = kmRaw ? parseFloat(kmRaw) : null;
   const mins = minRaw ? parseFloat(minRaw) : null;
   const jobTs = new Date($('#rf-when').value).getTime();
-  if (!pickupText || !dropText) return msg('Add both the pickup and the drop-off.', true);
+  if (!pickupText) return msg('Add the pickup.', true);
+  if (kmTyped !== null && !(kmTyped > 0 && kmTyped <= 150)) return msg('Trip km should be between 0.1 and 150.', true);
+  const formTrip = state.form.id ? state.trips.find((t) => t.id === state.form.id) : null;
+  if (!dropText && !kmTyped && !formTrip?.band) return msg('Add the drop-off or the trip km, so Fareit knows the distance.', true);
   if (!(paid > 0)) return msg(state.form.decision === 'cancelled' ? 'Add the fare the card showed when you cancelled.' : 'Add the fare you were paid.', true);
   if (!Number.isFinite(jobTs)) return msg('Add the job time. Time of day matters for the prediction.', true);
   if (jobTs > Date.now() + 5 * 60 * 1000) return msg('The job time is in the future.', true);
@@ -491,7 +523,7 @@ async function saveRecon(ev) {
   let drop;
   try {
     pickup = await resolvePlace(pickupText, state.form.pickup);
-    drop = await resolvePlace(dropText, state.form.drop);
+    drop = dropText ? await resolvePlace(dropText, state.form.drop) : null;
   } catch (e) {
     save.disabled = false;
     return msg(e.message, true);
@@ -508,7 +540,7 @@ async function saveRecon(ev) {
     status: 'reconciled',
     reconciledAt: Date.now(),
     decision: state.form.decision,
-    pickupText, dropText, pickup, drop,
+    pickupText, dropText, pickup, drop, kmTyped,
     fare: paid,
     tripMin: mins,
     payment: state.form.pay || null,
@@ -523,7 +555,8 @@ async function saveRecon(ev) {
   const p = trip.prediction;
   const off = p ? Math.round(((p.net - paid) / paid) * 100) : null;
   const vs = p ? ` Predicted ${dollars(p.net)}, paid ${fare(paid)} (${off === 0 ? 'spot on' : `${Math.abs(off)}% ${off > 0 ? 'high' : 'low'}`}).` : '';
-  toast(gotDistance ? `Saved with OneMap road distance ${trip.km} km.${vs}` : `Saved. Road distance will be fetched when OneMap is reachable.${vs}`);
+  const how = { onemap: `OneMap road distance ${trip.km} km`, typed: `your trip km (${trip.km} km)`, band: `the ${bandLabel(trip.band)} band (about ${trip.km} km)` }[trip.distanceSource];
+  toast(gotDistance ? `Saved with ${how}.${vs}` : `Saved. Road distance will be fetched when OneMap is reachable.${vs}`);
   syncNow();
 }
 
