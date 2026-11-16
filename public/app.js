@@ -210,10 +210,11 @@ function renderVerdict(p) {
 // What surge / normal / bad tags from around here, at this time, say about pricing right now.
 function surgeLine(o) {
   const tags = o.near.surge + o.near.normal + o.near.bad;
-  const counts = tags ? ` (${o.near.surge} surge, ${o.near.normal} normal, ${o.near.bad} bad tagged near here within an hour)` : '';
+  const how = o.inferredNear === tags ? 'judged from fares' : o.inferredNear ? 'tagged or judged from fares' : 'tagged';
+  const counts = tags ? ` (${o.near.surge} surge, ${o.near.normal} normal, ${o.near.bad} bad near here within an hour, ${how})` : '';
   if (o.likely === 'surge') return `Surge likely here now, ${Math.round(o.chance.surge * 100)}%${counts}.`;
   if (o.likely === 'bad') return `Pricing usually low here now${counts}.`;
-  return tags ? `Usually normal pricing here now${counts}.` : 'No surge tags near here at this time yet.';
+  return tags ? `Usually normal pricing here now${counts}.` : 'No jobs near here at this time yet to judge surge.';
 }
 
 // Records what you did and when. Taken or cancelled, the job stays in Reconcile so its fare
@@ -223,8 +224,11 @@ async function recordDecision(decision) {
   if (!trip) return;
   const now = Date.now();
   trip.decision = decision;
-  trip.decidedAt = now;
   trip.decideSeconds = Math.round((now - trip.ts) / 1000);
+  trip.decidedAt = now;
+  // The job's time is when you took or cancelled it, not when you tapped the distance or reconciled.
+  trip.tappedAt = trip.ts;
+  trip.ts = now;
   resetWindow();
   toast(`${decisionLabel(decision)} at ${clock(now)}. Add the fare later in Reconcile.`);
   await db.putTrip(trip);

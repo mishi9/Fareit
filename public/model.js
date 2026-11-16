@@ -206,20 +206,58 @@ function surgePlaceWeight(t, q) {
   return Math.exp(-(d * d) / 8); // same spot 1, 2 km 0.61, 4 km 0.14, 6 km 0.01
 }
 
-export function surgeOutlook(q, trips) {
+// Untagged jobs still say something: once there are enough fares to know what "normal" pays, a
+// job that paid 30% or more above the typical ratio to the formula (for that distance) reads as surge, and 20% or
+// more below as bad. These inferred votes count half as much as a driver's own tag.
+const INFER_MIN_JOBS = 8;
+const INFER_SURGE = Math.log(1.3);
+const INFER_BAD = Math.log(0.8);
+const INFERRED_WEIGHT = 0.5;
+
+export function inferPricing(trips, settings) {
+  const s = mergeSettings(settings);
+  const rs = trips.filter(isTrainable).map((t) => ({ t, r: Math.log(t.fare / priorNet(t.km, tripMinutes(t), s)) })).filter((x) => Number.isFinite(x.r));
+  const out = new Map();
+  if (rs.length < INFER_MIN_JOBS) return out;
+  // Compare with jobs of a similar length: short trips pay more per km than long ones, which is
+  // the fare structure, not surge. Use the band's own typical once it has 3 jobs.
+  const overall = median(rs.map((x) => x.r));
+  const byBand = new Map();
+  for (const x of rs) {
+    const id = tripBand(x.t);
+    if (!byBand.has(id)) byBand.set(id, []);
+    byBand.get(id).push(x.r);
+  }
+  for (const { t, r } of rs) {
+    if (PRICING.includes(t.pricing)) continue;
+    const inBand = byBand.get(tripBand(t));
+    const d = r - (inBand.length >= 3 ? median(inBand) : overall);
+    out.set(t, d >= INFER_SURGE ? 'surge' : d <= INFER_BAD ? 'bad' : 'normal');
+  }
+  return out;
+}
+
+export function surgeOutlook(q, trips, settings) {
   const w = { surge: 0, normal: 0, bad: 0 };
   const near = { surge: 0, normal: 0, bad: 0 };
+  let inferredNear = 0;
+  const inferred = inferPricing(trips, settings);
   for (const t of trips) {
-    if (!PRICING.includes(t.pricing)) continue;
-    const x = timeSimilarity(t.ts, q.ts) * surgePlaceWeight(t, q);
-    w[t.pricing] += x;
-    if (hourGap(hourOf(t.ts), hourOf(q.ts)) <= 1 && dayClass(t.ts) === dayClass(q.ts) && surgePlaceWeight(t, q) >= 0.3) near[t.pricing]++;
+    const tagged = PRICING.includes(t.pricing);
+    const c = tagged ? t.pricing : inferred.get(t);
+    if (!c) continue;
+    const x = timeSimilarity(t.ts, q.ts) * surgePlaceWeight(t, q) * (tagged ? 1 : INFERRED_WEIGHT);
+    w[c] += x;
+    if (hourGap(hourOf(t.ts), hourOf(q.ts)) <= 1 && dayClass(t.ts) === dayClass(q.ts) && surgePlaceWeight(t, q) >= 0.3) {
+      near[c]++;
+      if (!tagged) inferredNear++;
+    }
   }
   const total = PRICING.reduce((a, c) => a + w[c] + SURGE_PRIOR[c], 0);
   const chance = Object.fromEntries(PRICING.map((c) => [c, (w[c] + SURGE_PRIOR[c]) / total]));
   const evidence = PRICING.reduce((a, c) => a + w[c], 0);
   const likely = chance.surge >= 0.5 ? 'surge' : chance.bad >= 0.5 ? 'bad' : 'normal';
-  return { chance, likely, near, evidence, tagged: near.surge + near.normal + near.bad };
+  return { chance, likely, near, evidence, inferredNear };
 }
 
 // q = { band, ts, loc }
@@ -274,7 +312,7 @@ export function predict(q, trips, settings) {
     net,
     lo,
     hi,
-    surge: surgeOutlook(q, trips),
+    surge: surgeOutlook(q, trips, s),
     basis: n,
     shared,
     nearTime,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, surgeOutlook, DEFAULT_SETTINGS } from '../public/model.js';
+import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, surgeOutlook, inferPricing, DEFAULT_SETTINGS } from '../public/model.js';
 import { classifyZone, findArea, isPostal } from '../public/places.js';
 
 const at = (iso) => new Date(iso).getTime();
@@ -212,4 +212,24 @@ test('surge tags predict surge at the same place, time and day type', () => {
   assert.equal(surgeOutlook(q, trips.slice(0, 1)).likely, 'normal');
   // Untagged jobs don't vote.
   assert.equal(surgeOutlook(q, trips.map((t) => ({ ...t, pricing: null }))).evidence, 0);
+});
+
+test('with enough fares, untagged jobs that paid well above normal count as surge, at half weight', () => {
+  const ORCHARD = { lat: 1.304, lng: 103.832 };
+  const TAMPINES = { lat: 1.353, lng: 103.945 };
+  const normal = (d) => trip(`${d}T12:00:00+08:00`, { pickup: TAMPINES, fare: priorNet(12, 20, S) });
+  const hot = (d) => trip(`${d}T02:45:00+08:00`, { pickup: ORCHARD, fare: priorNet(12, 20, S) * 1.6 });
+  const days = ['2026-11-17', '2026-11-18', '2026-11-19', '2026-11-24', '2026-11-25', '2026-11-26'];
+  const trips = [...days.map(normal), ...days.slice(0, 4).map(hot)];
+  const inferred = inferPricing(trips, S);
+  assert.equal([...inferred.values()].filter((c) => c === 'surge').length, 4);
+  assert.equal([...inferred.values()].filter((c) => c === 'normal').length, 6);
+  const q = { band: '10-15', ts: at('2026-12-01T02:45:00+08:00'), loc: ORCHARD };
+  const o = surgeOutlook(q, trips, S);
+  assert.equal(o.likely, 'surge');
+  assert.equal(o.inferredNear, 4);
+  // A driver's own tag wins over the inference.
+  assert.equal(inferPricing(trips.map((t) => ({ ...t, pricing: 'normal' })), S).size, 0);
+  // Too few fares to know what normal is: no inference.
+  assert.equal(inferPricing(trips.slice(0, 7), S).size, 0);
 });

@@ -9,7 +9,7 @@ Nothing touches the Grab phone. No screenshots, no screen capture, no voice, and
 ## How you use it
 
 1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–5` … `40+` km) at the bottom of the screen. The predicted fare appears at the top, where your hand doesn't cover it. Changing the tap within 15 seconds corrects the same job instead of adding a new one.
-2. **Then tap Took it or Cancelled.** Both are recorded with the exact time. The job time and Phone 2's location (roughly the pickup area) are saved when you tap.
+2. **Then tap Took it or Cancelled.** Both are recorded with the exact time, and that moment is the job's time for learning, not when you reconcile it. Several cancels in a row each count as their own job. The job time and Phone 2's location (roughly the pickup area) are saved when you tap.
 3. **Reconcile tab, once you're parked.** Every job is waiting there, taken or cancelled.
    - **Pickup:** starts filled in with the nearest address to where Phone 2 was when you tapped, usually 1–5 km from the real pickup. Type over it if the pickup was far from there.
    - **Drop-off (optional):** with one, Fareit gets the road distance from OneMap. Without one, it uses the **trip km** if you type it (from Grab's trip details), otherwise the middle of the band you tapped.
@@ -49,6 +49,7 @@ vote weight = time of day and day type × e^(−km from your spot² ÷ 8)     2 
 chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prior: surge 0.5, normal 3, bad 0.5
 ```
 
+- **Surge is also judged from fares, without tags.** Once there are 8 jobs with fares, an untagged job that paid 30% or more above what's typical for its distance band counts as a surge vote, and 20% or more below as bad, at half the weight of a driver's own tag. It's compared within the band because short trips pay more per km than long ones; that's the fare structure, not surge.
 - Surge is shown as likely when its chance reaches 50%. One tagged job can't do it alone; it takes two at the same place and time.
 - Place counts much more here than for the fare: Orchard surging says nothing about Tampines.
 - The Window shows the chance and the counts, like "Surge likely here now, 59% (3 surge, 0 normal, 0 bad tagged near here within an hour)", and turns amber.
