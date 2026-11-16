@@ -1,4 +1,4 @@
-import { BANDS, mergeSettings, predict, bandFor, estDriveMin, accuracy, isTrainable } from './model.js';
+import { BANDS, mergeSettings, predict, bandFor, bandMidKm, estDriveMin, accuracy, isTrainable } from './model.js';
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
@@ -37,7 +37,7 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toStr
 const dollars = (n) => `$${Math.round(n)}`;
 const fare = (n) => `S$${Number(n).toFixed(2)}`;
 const PRICING_LABEL = { surge: 'Surge', normal: 'Normal', bad: 'Bad' };
-const bandLabel = (id) => (BANDS.find((b) => b.id === id)?.label ?? '—') + ' km';
+const bandLabel = (id) => (BANDS.find((b) => b.id === id)?.label ?? (id ? id.replace('-', '–') : '—')) + ' km';
 const when = (ts) => new Date(ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 const placeLabel = (p, text) => (p && p.label) || text || '—';
 const clock = (ts) => new Date(ts).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -418,8 +418,7 @@ async function fetchDistance(trip) {
   if (trip.drop?.pending) trip.drop = await resolvePlace(trip.dropText, null).catch(() => trip.drop);
   // No drop-off: the km you typed, or failing that the middle of the band you tapped.
   if (!trip.dropText) {
-    const band = BANDS.find((b) => b.id === trip.band);
-    const km = trip.kmTyped > 0 ? trip.kmTyped : band ? band.km : null;
+    const km = trip.kmTyped > 0 ? trip.kmTyped : bandMidKm(trip.band);
     if (!km) { trip.distanceStatus = 'failed'; trip.distanceError = 'No drop-off, trip km or band.'; return false; }
     trip.km = km;
     trip.driveMin = estDriveMin(km);

@@ -9,15 +9,30 @@
 //      plays no part. It shrinks toward the
 //      overall correction when there are few similar trips, so it never jumps on one data point.
 
+// 3 km bands from the card's distance: 0–3 means 0 to 2.9 km, and 3.0 goes in 3–6. Then 45+.
 export const BANDS = [
-  { id: '0-5', label: '0–5', min: 0, max: 5, km: 3 },
-  { id: '5-10', label: '5–10', min: 5, max: 10, km: 7.5 },
-  { id: '10-15', label: '10–15', min: 10, max: 15, km: 12.5 },
-  { id: '15-20', label: '15–20', min: 15, max: 20, km: 17.5 },
-  { id: '20-30', label: '20–30', min: 20, max: 30, km: 25 },
-  { id: '30-40', label: '30–40', min: 30, max: 40, km: 35 },
-  { id: '40+', label: '40+', min: 40, max: Infinity, km: 45 },
+  ...Array.from({ length: 15 }, (_, i) => ({ id: `${i * 3}-${i * 3 + 3}`, label: `${i * 3}–${i * 3 + 3}`, min: i * 3, max: i * 3 + 3, km: i * 3 + 1.5 })),
+  { id: '45+', label: '45+', min: 45, max: Infinity, km: 48 },
 ];
+
+// Bands from before 3 km bands, with their middle distance. Old jobs are moved to the new band
+// their real km falls in (or, without a km, the band of the old middle), so nothing is wasted.
+const LEGACY_BANDS = { '0-5': 3, '5-10': 7.5, '10-15': 12.5, '15-20': 17.5, '20-30': 25, '30-40': 35, '40+': 45 };
+const CURRENT = new Set(BANDS.map((b) => b.id));
+
+export function normalizeBand(id, km) {
+  if (CURRENT.has(id)) return id;
+  if (km > 0) return bandFor(km).id;
+  if (id in LEGACY_BANDS) return bandFor(LEGACY_BANDS[id]).id;
+  return null;
+}
+
+// Typical distance for a band id, old or new.
+export function bandMidKm(id) {
+  const b = BANDS.find((x) => x.id === id);
+  if (b) return b.km;
+  return LEGACY_BANDS[id] ?? null;
+}
 
 // Button order on the phone: three per row, Tuas and Changi Far last.
 export const ZONES = [
@@ -92,7 +107,7 @@ export function tripMinutes(t) {
 }
 
 function tripBand(t) {
-  return t.band || bandFor(t.km).id;
+  return normalizeBand(t.band, t.km) || bandFor(t.km).id;
 }
 
 // Typical distance and time for a band: from your own trips once there are 3 or more,

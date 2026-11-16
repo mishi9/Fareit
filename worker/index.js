@@ -179,7 +179,8 @@ async function near(at, env) {
 }
 
 // ---------- shared training pool ----------
-const BANDS = ['0-5', '5-10', '10-15', '15-20', '20-30', '30-40', '40+'];
+// 3 km bands (0-3 … 42-45, 45+), plus the old 5/10 km bands still on phones and in the pool.
+const BANDS = [...Array.from({ length: 15 }, (_, i) => `${i * 3}-${i * 3 + 3}`), '45+', '0-5', '5-10', '10-15', '15-20', '20-30', '30-40', '40+'];
 const ZONES = ['N', 'S', 'E', 'W', 'C', 'AIRPORT', 'WLC', 'TUAS', 'CF'];
 const RIDES = ['standard', 'premium', 'xl', 'taxi'];
 const MAX_JOBS_PER_POST = 50;

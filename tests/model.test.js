@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, surgeOutlook, inferPricing, DEFAULT_SETTINGS } from '../public/model.js';
+import { predict, priorNet, bandFor, mergeSettings, accuracy, bandProfile, dayClass, timeSimilarity, normalizeBand, bandMidKm, surgeOutlook, inferPricing, DEFAULT_SETTINGS } from '../public/model.js';
 import { classifyZone, findArea, isPostal } from '../public/places.js';
 
 const at = (iso) => new Date(iso).getTime();
@@ -11,57 +11,73 @@ test('starting fare structure lands near the recorded Tampines -> Tuas trip', ()
   assert.ok(Math.abs(p - 33.2) / 33.2 < 0.02, `prior ${p.toFixed(2)} should be within 2% of 33.20`);
 });
 
-test('bands cover every distance', () => {
-  assert.equal(bandFor(0).id, '0-5');
-  assert.equal(bandFor(4.99).id, '0-5');
-  assert.equal(bandFor(5).id, '5-10');
-  assert.equal(bandFor(46.1).id, '40+');
-  assert.equal(bandFor(300).id, '40+');
+test('3 km bands cover every distance', () => {
+  assert.equal(bandFor(0).id, '0-3');
+  assert.equal(bandFor(2.99).id, '0-3');
+  assert.equal(bandFor(3).id, '3-6');
+  assert.equal(bandFor(14.9).id, '12-15');
+  assert.equal(bandFor(44.9).id, '42-45');
+  assert.equal(bandFor(46.1).id, '45+');
+  assert.equal(bandFor(300).id, '45+');
+});
+
+test('jobs saved under the old 5/10 km bands move to the new band of their km', () => {
+  assert.equal(normalizeBand('12-15', 20), '12-15', 'a current band is kept as tapped');
+  assert.equal(normalizeBand('10-15', 14.9), '12-15');
+  assert.equal(normalizeBand('10-15', 10.2), '9-12');
+  assert.equal(normalizeBand('20-30'), '24-27', 'no km: the old middle, 25 km');
+  assert.equal(normalizeBand('40+', null), '45+');
+  assert.equal(bandMidKm('10-15'), 12.5);
+  assert.equal(bandMidKm('12-15'), 13.5);
+  // An old 10-15 job at 14 km counts as a 12-15 job.
+  const old = trip('2026-11-16T18:00:00+08:00', { band: '12-15', km: 14, fare: priorNet(14, 20, S) * 2 });
+  const q = { band: '12-15', ts: at('2026-11-16T18:00:00+08:00') };
+  assert.ok(predict(q, [old], S).weight > predict({ ...q, band: '9-12' }, [old], S).weight);
 });
 
 test('with no data, the fare comes from the formula with a range, and no band means no drop needed', () => {
   const ts = at('2026-11-16T09:01:00+08:00');
-  const tuas = predict({ band: '40+', zone: 'TUAS', ts }, [], S);
-  const noDrop = predict({ band: '40+', zone: null, ts }, [], S);
+  const tuas = predict({ band: '45+', zone: 'TUAS', ts }, [], S);
+  const noDrop = predict({ band: '45+', zone: null, ts }, [], S);
   assert.equal(tuas.stage, 'seed');
   assert.equal(tuas.net, noDrop.net);
-  assert.ok(Math.abs(tuas.net - priorNet(45, 54.5, S)) < 0.01);
+  assert.ok(Math.abs(tuas.net - priorNet(48, 5 + 1.1 * 48, S)) < 0.01);
   assert.ok(tuas.lo < tuas.net && tuas.net < tuas.hi);
   for (const gone of ['perHour', 'verdict', 'returnMin', 'deadDrop']) assert.equal(gone in tuas, false, gone);
 });
 
 function trip(iso, over = {}) {
-  return { id: iso + JSON.stringify(over), ts: at(iso), status: 'reconciled', km: 12, tripMin: 20, zone: 'E', band: '10-15', ...over };
+  return { id: iso + JSON.stringify(over), ts: at(iso), status: 'reconciled', km: 12, tripMin: 20, zone: 'E', band: '12-15', ...over };
 }
 
 test('reconciled trips pull predictions toward what you were actually paid', () => {
   const paid = priorNet(12, 20, S) * 2; // every logged trip paid double the formula
   const trips = Array.from({ length: 8 }, (_, i) => trip(`2026-11-1${i % 5 + 1}T18:00:00+08:00`, { fare: paid }));
   // Nov 11-15 2026 includes a weekend; keep the query on a weekday evening.
-  const q = predict({ band: '10-15', zone: 'E', ts: at('2026-11-16T18:30:00+08:00') }, trips, S);
+  const q = predict({ band: '12-15', zone: 'E', ts: at('2026-11-16T18:30:00+08:00') }, trips, S);
   assert.equal(q.stage, 'trained');
   assert.ok(Math.abs(q.net - paid) / paid < 0.08, `net ${q.net.toFixed(2)} should be close to ${paid.toFixed(2)}`);
   assert.ok(q.hi / q.lo < 1.35, 'consistent history should give a narrow range');
 
   // Far from the data (other area, 3am) the correction is weaker but still leans the same way.
-  const far = predict({ band: '10-15', zone: 'TUAS', ts: at('2026-11-17T03:00:00+08:00') }, trips, S);
+  const far = predict({ band: '12-15', zone: 'TUAS', ts: at('2026-11-17T03:00:00+08:00') }, trips, S);
   const farRatio = far.net / far.prior;
   assert.ok(farRatio > 1.2 && farRatio < q.net / q.prior, `far ratio ${farRatio.toFixed(2)}`);
 });
 
 test('one trip cannot swing the prediction wildly', () => {
   const trips = [trip('2026-11-16T18:00:00+08:00', { fare: priorNet(12, 20, S) * 3 })];
-  const q = predict({ band: '10-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
+  const q = predict({ band: '12-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
   assert.equal(q.stage, 'learning');
   assert.ok(q.net / q.prior < 3, 'a single trip is shrunk toward the formula');
 });
 
 test('band profile switches to your own trips after three', () => {
-  const trips = [30, 32, 38].map((km, i) => trip(`2026-11-1${i + 1}T10:00:00+08:00`, { km, tripMin: 40, band: '30-40', fare: 30 }));
-  const prof = bandProfile('30-40', trips);
+  const trips = [30, 32, 38].map((km, i) => trip(`2026-11-1${i + 1}T10:00:00+08:00`, { km, tripMin: 40, band: '30-33', fare: 30 }));
+  const prof = bandProfile('30-33', trips);
   assert.equal(prof.learned, true);
   assert.equal(prof.km, 32);
-  assert.equal(bandProfile('30-40', trips.slice(0, 2)).learned, false);
+  assert.equal(bandProfile('30-33', trips.slice(0, 2)).learned, false);
 });
 
 test('late night belongs to the evening before', () => {
@@ -83,7 +99,7 @@ const ORCHARD = { lat: 1.3048, lng: 103.8318 };
 const TAMPINES = { lat: 1.3496, lng: 103.9568 };
 
 test('weekday bar-closing jobs and weekend ones are learned separately', () => {
-  const base = { band: '10-15', zone: 'S', km: 12, tripMin: 20, tapLoc: ORCHARD };
+  const base = { band: '12-15', zone: 'S', km: 12, tripMin: 20, tapLoc: ORCHARD };
   const hot = priorNet(12, 20, S) * 2;
   const normal = priorNet(12, 20, S);
   const trips = [
@@ -93,8 +109,8 @@ test('weekday bar-closing jobs and weekend ones are learned separately', () => {
     trip('2026-11-21T03:45:00+08:00', { ...base, fare: normal }),
     trip('2026-11-22T03:45:00+08:00', { ...base, fare: normal }),
   ];
-  const weekdayNight = predict({ band: '10-15', zone: 'S', ts: at('2026-11-25T02:50:00+08:00'), loc: ORCHARD }, trips, S);
-  const weekendNight = predict({ band: '10-15', zone: 'S', ts: at('2026-11-28T03:50:00+08:00'), loc: ORCHARD }, trips, S);
+  const weekdayNight = predict({ band: '12-15', zone: 'S', ts: at('2026-11-25T02:50:00+08:00'), loc: ORCHARD }, trips, S);
+  const weekendNight = predict({ band: '12-15', zone: 'S', ts: at('2026-11-28T03:50:00+08:00'), loc: ORCHARD }, trips, S);
   const a = weekdayNight.net / weekdayNight.prior;
   const b = weekendNight.net / weekendNight.prior;
   assert.ok(a > 1.6, `weekday 2:50 ratio ${a.toFixed(2)}`);
@@ -103,21 +119,21 @@ test('weekday bar-closing jobs and weekend ones are learned separately', () => {
 });
 
 test('where you are when the job comes in matters', () => {
-  const base = { band: '10-15', zone: 'E', km: 12, tripMin: 20 };
+  const base = { band: '12-15', zone: 'E', km: 12, tripMin: 20 };
   const trips = [];
   for (const d of ['17', '18', '19']) {
     trips.push(trip(`2026-11-${d}T02:45:00+08:00`, { ...base, tapLoc: ORCHARD, fare: priorNet(12, 20, S) * 2 }));
     trips.push(trip(`2026-11-${d}T02:45:01+08:00`, { ...base, tapLoc: TAMPINES, fare: priorNet(12, 20, S) }));
   }
   const ts = at('2026-11-25T02:45:00+08:00');
-  const orchard = predict({ band: '10-15', zone: 'E', ts, loc: ORCHARD }, trips, S);
-  const tampines = predict({ band: '10-15', zone: 'E', ts, loc: TAMPINES }, trips, S);
+  const orchard = predict({ band: '12-15', zone: 'E', ts, loc: ORCHARD }, trips, S);
+  const tampines = predict({ band: '12-15', zone: 'E', ts, loc: TAMPINES }, trips, S);
   assert.ok(orchard.net > tampines.net * 1.25, `${orchard.net.toFixed(2)} vs ${tampines.net.toFixed(2)}`);
 });
 
 test('a cancelled job with a fare trains the model just like a taken one', () => {
   const trips = [trip('2026-11-16T18:00:00+08:00', { decision: 'cancelled', fare: 30 })];
-  const q = predict({ band: '10-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
+  const q = predict({ band: '12-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
   assert.equal(q.basis, 1);
 });
 
@@ -127,7 +143,7 @@ test('untrainable trips (pending, no fare seen, no distance) are ignored', () =>
     trip('2026-11-16T18:00:00+08:00', { status: 'nofare', decision: 'cancelled' }),
     trip('2026-11-16T18:00:00+08:00', { km: undefined, fare: 99 }),
   ];
-  const q = predict({ band: '10-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
+  const q = predict({ band: '12-15', zone: 'E', ts: at('2026-11-16T18:00:00+08:00') }, trips, S);
   assert.equal(q.basis, 0);
   assert.equal(q.stage, 'seed');
 });
@@ -186,10 +202,10 @@ test('by default the drop area does not change the predicted fare', () => {
     ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:00:00+08:00`, { zone: 'E', fare: priorNet(12, 20, S) * 2 })),
     ...Array.from({ length: 6 }, (_, i) => trip(`2026-11-1${i % 4 + 6}T18:05:00+08:00`, { zone: 'N', fare: priorNet(12, 20, S) })),
   ];
-  const east = predict({ band: '10-15', zone: 'E', ts }, trips, S);
-  const north = predict({ band: '10-15', zone: 'N', ts }, trips, S);
+  const east = predict({ band: '12-15', zone: 'E', ts }, trips, S);
+  const north = predict({ band: '12-15', zone: 'N', ts }, trips, S);
   assert.ok(Math.abs(east.net - north.net) < 0.01, 'same fare whichever area the drop is in');
-  const none = predict({ band: '10-15', ts }, trips, S);
+  const none = predict({ band: '12-15', ts }, trips, S);
   assert.ok(Math.abs(east.net - none.net) < 0.01, 'no drop area needed at all');
 });
 
@@ -198,7 +214,7 @@ test('surge tags predict surge at the same place, time and day type', () => {
   const TAMPINES = { lat: 1.353, lng: 103.945 };
   // Three weekday nights at 2:45 from Orchard were surge.
   const trips = ['2026-11-17', '2026-11-18', '2026-11-19'].map((d) => trip(`${d}T02:45:00+08:00`, { pricing: 'surge', pickup: ORCHARD, fare: priorNet(12, 20, S) * 1.6 }));
-  const q = { band: '10-15', zone: 'E', ts: at('2026-11-24T02:45:00+08:00'), loc: ORCHARD };
+  const q = { band: '12-15', zone: 'E', ts: at('2026-11-24T02:45:00+08:00'), loc: ORCHARD };
   const there = surgeOutlook(q, trips);
   assert.equal(there.likely, 'surge');
   assert.equal(there.near.surge, 3);
@@ -224,7 +240,7 @@ test('with enough fares, untagged jobs that paid well above normal count as surg
   const inferred = inferPricing(trips, S);
   assert.equal([...inferred.values()].filter((c) => c === 'surge').length, 4);
   assert.equal([...inferred.values()].filter((c) => c === 'normal').length, 6);
-  const q = { band: '10-15', ts: at('2026-12-01T02:45:00+08:00'), loc: ORCHARD };
+  const q = { band: '12-15', ts: at('2026-12-01T02:45:00+08:00'), loc: ORCHARD };
   const o = surgeOutlook(q, trips, S);
   assert.equal(o.likely, 'surge');
   assert.equal(o.inferredNear, 4);

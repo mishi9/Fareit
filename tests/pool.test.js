@@ -46,7 +46,7 @@ test.beforeEach(() => resetSchemaFlag());
 
 test('no prediction goes below the S$6.20 minimum fare', () => {
   assert.equal(priorNet(1, 3, S), 6.2);
-  const p = predict({ band: '0-5', zone: 'E', ts: at('2026-11-16T14:00:00+08:00') }, [], S);
+  const p = predict({ band: '0-3', zone: 'E', ts: at('2026-11-16T14:00:00+08:00') }, [], S);
   assert.equal(p.net, 6.2);
   assert.ok(p.lo >= 6.2 && p.hi >= 6.2);
 });
@@ -59,17 +59,17 @@ test('the card fare is take-home: no commission in the formula', () => {
 
 test('other ride types count for much less', () => {
   const ts = at('2026-11-16T18:00:00+08:00');
-  const base = { status: 'reconciled', km: 12, tripMin: 20, zone: 'E', band: '10-15', ts };
+  const base = { status: 'reconciled', km: 12, tripMin: 20, zone: 'E', band: '12-15', ts };
   const trips = [1, 2, 3, 4, 5].map((i) => ({ ...base, id: `p${i}`, rideType: 'premium', fare: priorNet(12, 20, S) * 2 }));
-  const asStandard = predict({ band: '10-15', zone: 'E', ts, ride: 'standard' }, trips, S);
-  const asPremium = predict({ band: '10-15', zone: 'E', ts, ride: 'premium' }, trips, S);
+  const asStandard = predict({ band: '12-15', zone: 'E', ts, ride: 'standard' }, trips, S);
+  const asPremium = predict({ band: '12-15', zone: 'E', ts, ride: 'premium' }, trips, S);
   assert.ok(asPremium.net / asPremium.prior > asStandard.net / asStandard.prior + 0.15);
 });
 
 test('one absurd shared fare cannot blow up a prediction', () => {
   const ts = at('2026-11-16T18:00:00+08:00');
-  const junk = { id: 'x', status: 'reconciled', shared: true, km: 3, tripMin: 8, zone: 'E', band: '0-5', ts, fare: 400 };
-  const p = predict({ band: '0-5', zone: 'E', ts }, [junk], S);
+  const junk = { id: 'x', status: 'reconciled', shared: true, km: 3, tripMin: 8, zone: 'E', band: '3-6', ts, fare: 400 };
+  const p = predict({ band: '0-3', zone: 'E', ts }, [junk], S);
   assert.ok(p.net < p.prior * 3.4, `net ${p.net.toFixed(2)}`);
   assert.equal(p.shared, 1);
 });
@@ -200,7 +200,7 @@ test('phones push their jobs and learn from each other', async () => {
   assert.equal(total, 1);
   assert.ok(cursor > 0);
   assert.equal(stored[0].shared, true);
-  const p = predict({ band: '10-15', zone: 'E', ts: now }, stored, S);
+  const p = predict({ band: '12-15', zone: 'E', ts: now }, stored, S);
   assert.equal(p.basis, 1);
   assert.equal(p.shared, 1);
 });
