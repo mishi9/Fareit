@@ -118,3 +118,14 @@ test('trip time: the job card total (which includes the way to the pickup) is ne
   assert.equal(usable(cardOnly), true);
   assert.equal(fitWeights([cardOnly]).n, 2);
 });
+
+test('a driver never earns less than S$6.20, and trips at that floor stay out of the cut rule', async () => {
+  const { MIN_DRIVER } = await import('../public/beta/formula.js');
+  assert.equal(MIN_DRIVER, 6.2);
+  const rule = { keep: 0.768, fixed: -1.02 };
+  assert.equal(driverEarns(rule, 8.1), 6.2, 'minimum-fare trip: rule gives 5.20, floor lifts it');
+  assert.equal(driverEarns(rule, 8.1, 1.5), 7.7, 'ERP on top of the floor');
+  assert.equal(driverEarns(rule, 20), 14.34);
+  const atFloor = { km: 2, min: 6, erp: 0, surge: 'normal', actual: 8.1, earned: 6.2, ts: Date.now() };
+  assert.equal(fitCommission([atFloor]).n, 1, 'only the base trip counts');
+});

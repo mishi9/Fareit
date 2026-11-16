@@ -12,6 +12,8 @@
 // (tested as a passenger).
 
 export const MIN_PASSENGER = 8.10;
+// The least a driver earns on a trip (a minimum-fare guarantee), whatever the passenger paid.
+export const MIN_DRIVER = 6.20;
 
 // The first real trip, from Grab's job details. Time isn't shown there, so it's OneMap's drive time.
 // Grab's own split, for reference: S$16.80 paid = S$15.60 passenger fare + S$1.20 platform &
@@ -145,7 +147,8 @@ export const LOW_CUT = 0.15;
 export const isLowCut = (t) => { const c = cutOf(t); return Boolean(c) && c.rate < LOW_CUT; };
 
 export function fitCommission(trips) {
-  const all = withBase(trips).filter((t) => cutOf(t));
+  // Trips paid at the driver's S$6.20 floor follow the floor, not the usual rule: leave them out.
+  const all = withBase(trips).filter((t) => cutOf(t) && !(Math.abs(t.earned - (t.erp || 0) - MIN_DRIVER) < 0.005));
   const low = all.filter(isLowCut);
   const cuts = all.filter((t) => !isLowCut(t)).map(cutOf);
   if (!cuts.length) return { kind: 'average', keep: 1 - SEED_CUT_FALLBACK, fixed: 0, n: 0, avgRate: SEED_CUT_FALLBACK, spread: 0, lo: SEED_CUT_FALLBACK, hi: SEED_CUT_FALLBACK, low };
@@ -167,7 +170,7 @@ const SEED_CUT_FALLBACK = 0.28;
 
 // What the driver would earn on a trip the passenger paid `paid` for (usual cut).
 export function driverEarns(model, paid, erp = 0) {
-  return r2(model.keep * (paid - (erp || 0)) + model.fixed + (erp || 0));
+  return r2(Math.max(MIN_DRIVER, model.keep * (paid - (erp || 0)) + model.fixed) + (erp || 0));
 }
 
 // CSV in the research dataset's column order, ready to add to research/fare-formula/trips.csv.

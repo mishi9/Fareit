@@ -31,6 +31,9 @@ driver earned     = paid by passenger − what Grab keeps
 - **Grab's cut (7 trips, 17 Nov):** usually about **20% of what the passenger paid plus about
   S$1.45 per trip** (driver earns ≈ 79.8% × paid − S$1.45, every usual trip within 20 cents). So
   short trips lose a bigger share (32–34%) than long ones (28%).
+- **Driver minimum: S$6.20.** A driver never earns less than S$6.20 on a trip (a minimum-fare
+  guarantee), so on a S$8.10 minimum-fare trip the usual rule (≈ S$5.20) is lifted to S$6.20.
+  Trips paid exactly S$6.20 are left out of the cut rule.
 - **Low-cut trips happen:** trip 7 (20.34 km, 04:14) paid S$23.90 and the driver earned S$23.80,
   so Grab kept S$0.10. Confirmed by the driver; the theory is Grab lowers its cut when a job goes
   untaken. These are listed separately and left out of the usual cut rule.

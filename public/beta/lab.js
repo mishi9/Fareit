@@ -7,7 +7,7 @@
 import * as db from './db.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase,
-  MIN_PASSENGER, BASE_TRIPS,
+  MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
 const KEY = 'formulaLab';
@@ -210,6 +210,7 @@ function renderFormula() {
   $('#lab-formula', lab.root).innerHTML = `
     <div class="k">Grab's published formula (Standard, normal pricing)</div>
     <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min) + ERP</div>
+    <div class="f">You earn = max(<b>${money(MIN_DRIVER)}</b>, ${(() => { const c = commission(); return c.kind === 'percent+fixed' ? `<b>${(c.keep * 100).toFixed(1)}%</b> × paid ${c.fixed < 0 ? '−' : '+'} <b>${money(Math.abs(c.fixed))}</b>` : `<b>${(c.keep * 100).toFixed(1)}%</b> × paid`; })()}) + ERP</div>
     <div class="s">${basis} Weights update every time you save a trip.</div>`;
 }
 
