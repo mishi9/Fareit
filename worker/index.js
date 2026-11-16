@@ -1,14 +1,22 @@
-// Fareit Worker: serves the PWA from ./public and proxies OneMap (Singapore Land Authority).
+// Fareit Worker: serves the PWA from ./public, proxies OneMap (Singapore Land Authority), and
+// keeps the shared training pool that every phone contributes to and learns from.
 //
-//   GET /api/status                      -> { map, keyRequired, authorized }
-//   GET /api/search?q=...                -> { results: [{ label, address, postal, lat, lng }] }
-//   GET /api/route?from=lat,lng&to=lat,lng -> { km, min, source: "onemap" }
+//   GET  /api/status                         -> { map, pool, keyRequired, authorized }
+//   GET  /api/search?q=...                   -> { results: [{ label, address, postal, lat, lng }] }
+//   GET  /api/route?from=lat,lng&to=lat,lng  -> { km, min, source: "onemap" }
+//   POST /api/jobs   { device, jobs: [...] } -> { accepted, rejected }   add/update anonymous jobs
+//   GET  /api/jobs?since=REV&limit=N         -> { jobs, next, more }     page through the pool
 //
-// Secrets (npx wrangler secret put NAME):
-//   ONEMAP_EMAIL, ONEMAP_PASSWORD  your free OneMap account, used to get and refresh the API token
-//   APP_KEY (optional)             if set, the app must send it as the x-fareit-key header
+// No accounts. Each phone sends a random device id so it can correct its own rows and nobody
+// else's. The pool holds no addresses, names or exact places: pickup and drop are rounded to
+// about 1 km and times to 5 minutes before they leave the phone, and again here.
 //
-// Nothing about trips is stored here. Trips live on the phone.
+// Bindings and secrets:
+//   DB (D1)                        the shared pool, created on deploy
+//   ONEMAP_EMAIL, ONEMAP_PASSWORD  free OneMap account, used to get and refresh the API token
+//   HASH_SALT (optional)           salt for the hashed IP used only for rate limiting
+//   APP_KEY (optional)             if set, the app must send it as x-fareit-key. Leave it unset
+//                                  for an open, collective app.
 
 const OM = 'https://www.onemap.gov.sg';
 const SG = { latMin: 1.15, latMax: 1.48, lngMin: 103.55, lngMax: 104.1 };
@@ -133,18 +141,179 @@ async function route(from, to, env) {
   return out;
 }
 
+// ---------- shared training pool ----------
+const BANDS = ['0-5', '5-10', '10-15', '15-20', '20-30', '30-40', '40+'];
+const ZONES = ['N', 'S', 'E', 'W', 'AIRPORT', 'TUAS', 'WLC', 'CF'];
+const RIDES = ['standard', 'premium', 'xl', 'taxi'];
+const MAX_JOBS_PER_POST = 50;
+const MAX_NEW_JOBS_PER_IP_PER_DAY = 300;
+const MAX_PAGE = 2000;
+const FIVE_MIN = 5 * 60 * 1000;
+
+const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    device TEXT NOT NULL,
+    ip_hash TEXT,
+    received_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    rev INTEGER NOT NULL,
+    ts INTEGER NOT NULL,
+    ride TEXT NOT NULL,
+    band TEXT, zone TEXT, decision TEXT,
+    km REAL, trip_min REAL, drive_min REAL, fare REAL, payment TEXT,
+    pickup_lat REAL, pickup_lng REAL, drop_lat REAL, drop_lng REAL
+  )`,
+  'CREATE INDEX IF NOT EXISTS jobs_rev ON jobs(rev)',
+  'CREATE INDEX IF NOT EXISTS jobs_ip ON jobs(ip_hash, received_at)',
+];
+let schemaReady = null;
+function ensureSchema(db) {
+  if (!schemaReady) {
+    schemaReady = db.batch(SCHEMA.map((s) => db.prepare(s))).catch((e) => {
+      schemaReady = null;
+      throw e;
+    });
+  }
+  return schemaReady;
+}
+export function resetSchemaFlag() {
+  schemaReady = null;
+}
+
+const ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+const inRange = (v, lo, hi) => v === null || v === undefined || (Number.isFinite(v) && v >= lo && v <= hi);
+const r2 = (v) => (v === null || v === undefined ? null : Math.round(v * 100) / 100);
+
+function cleanPoint(lat, lng) {
+  if (lat === null || lat === undefined || lng === null || lng === undefined) return [null, null];
+  if (!(lat >= SG.latMin && lat <= SG.latMax && lng >= SG.lngMin && lng <= SG.lngMax)) return undefined;
+  return [r2(lat), r2(lng)];
+}
+
+// Returns a cleaned row, or null if anything is out of range.
+export function cleanJob(j, now = Date.now()) {
+  if (!j || typeof j !== 'object' || !ID_RE.test(String(j.id || ''))) return null;
+  const ts = Number(j.ts);
+  if (!Number.isFinite(ts) || ts < now - 180 * 86400 * 1000 || ts > now + 10 * 60 * 1000) return null;
+  const ride = j.ride || 'standard';
+  if (!RIDES.includes(ride)) return null;
+  if (j.band != null && !BANDS.includes(j.band)) return null;
+  if (j.zone != null && !ZONES.includes(j.zone)) return null;
+  if (j.decision != null && !['took', 'cancelled'].includes(j.decision)) return null;
+  if (j.payment != null && !['cash', 'cashless'].includes(j.payment)) return null;
+  const km = j.km == null ? null : Number(j.km);
+  const tripMin = j.trip_min == null ? null : Number(j.trip_min);
+  const driveMin = j.drive_min == null ? null : Number(j.drive_min);
+  const fare = j.fare == null ? null : Number(j.fare);
+  if (!inRange(km, 0.1, 80) || !inRange(tripMin, 1, 300) || !inRange(driveMin, 1, 300) || !inRange(fare, 2, 400)) return null;
+  const pickup = cleanPoint(j.pickup_lat, j.pickup_lng);
+  const drop = cleanPoint(j.drop_lat, j.drop_lng);
+  if (!pickup || !drop) return null;
+  const trainable = fare !== null && km !== null;
+  if (!trainable && !j.decision) return null; // nothing useful in it
+  return {
+    id: j.id, ts: Math.round(ts / FIVE_MIN) * FIVE_MIN, ride, band: j.band ?? null, zone: j.zone ?? null,
+    decision: j.decision ?? null, km: r2(km), trip_min: r2(tripMin), drive_min: r2(driveMin), fare: r2(fare),
+    payment: j.payment ?? null, pickup_lat: pickup[0], pickup_lng: pickup[1], drop_lat: drop[0], drop_lng: drop[1],
+  };
+}
+
+async function hashIp(request, env) {
+  const ip = request.headers.get('cf-connecting-ip') || '';
+  const data = new TextEncoder().encode(`${env.HASH_SALT || 'fareit'}:${ip}`);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+const UPSERT = `INSERT INTO jobs (id, device, ip_hash, received_at, updated_at, rev, ts, ride, band, zone, decision,
+    km, trip_min, drive_min, fare, payment, pickup_lat, pickup_lng, drop_lat, drop_lng)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM jobs), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+  ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, ride = excluded.ride,
+    band = excluded.band, zone = excluded.zone, decision = excluded.decision, km = excluded.km, trip_min = excluded.trip_min,
+    drive_min = excluded.drive_min, fare = excluded.fare, payment = excluded.payment, pickup_lat = excluded.pickup_lat,
+    pickup_lng = excluded.pickup_lng, drop_lat = excluded.drop_lat, drop_lng = excluded.drop_lng
+  WHERE jobs.device = excluded.device`;
+
+async function postJobs(request, env) {
+  const text = await request.text();
+  if (text.length > 100 * 1024) return json({ error: 'Too much data in one upload.' }, 413);
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return json({ error: 'Upload must be JSON.' }, 400);
+  }
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  const jobs = Array.isArray(body.jobs) ? body.jobs.slice(0, MAX_JOBS_PER_POST) : [];
+  if (!jobs.length) return json({ accepted: [], rejected: [] });
+
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const ipHash = await hashIp(request, env);
+  const recent = await env.DB.prepare('SELECT COUNT(*) AS n FROM jobs WHERE ip_hash = ?1 AND received_at > ?2')
+    .bind(ipHash, now - 86400 * 1000).first();
+  let budget = MAX_NEW_JOBS_PER_IP_PER_DAY - Number((recent && recent.n) || 0);
+
+  const accepted = [];
+  const rejected = [];
+  for (const raw of jobs) {
+    const row = cleanJob(raw, now);
+    if (!row) { rejected.push(raw && raw.id); continue; }
+    const existing = await env.DB.prepare('SELECT device FROM jobs WHERE id = ?1').bind(row.id).first();
+    if (existing && existing.device !== device) { rejected.push(row.id); continue; }
+    if (!existing) {
+      if (budget <= 0) { rejected.push(row.id); continue; }
+      budget--;
+    }
+    await env.DB.prepare(UPSERT).bind(
+      row.id, device, ipHash, now, row.ts, row.ride, row.band, row.zone, row.decision, row.km, row.trip_min,
+      row.drive_min, row.fare, row.payment, row.pickup_lat, row.pickup_lng, row.drop_lat, row.drop_lng,
+    ).run();
+    accepted.push(row.id);
+  }
+  return json({ accepted, rejected });
+}
+
+async function getJobs(url, env) {
+  const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
+  const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
+  await ensureSchema(env.DB);
+  const { results } = await env.DB.prepare(
+    `SELECT rev, id, ts, ride, band, zone, decision, km, trip_min, drive_min, fare, payment,
+       pickup_lat, pickup_lng, drop_lat, drop_lng FROM jobs WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
+  ).bind(since, limit + 1).all();
+  const more = results.length > limit;
+  const jobs = results.slice(0, limit);
+  return json({ jobs, next: jobs.length ? jobs[jobs.length - 1].rev : since, more });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
     }
-    if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+    const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
+    if (request.method !== 'GET' && !isJobsPost) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
-      return json({ ok: true, map: Boolean(env.ONEMAP_EMAIL && env.ONEMAP_PASSWORD), keyRequired: Boolean(env.APP_KEY), authorized: authorized(request, env) });
+      return json({
+        ok: true, map: Boolean(env.ONEMAP_EMAIL && env.ONEMAP_PASSWORD), pool: Boolean(env.DB),
+        keyRequired: Boolean(env.APP_KEY), authorized: authorized(request, env),
+      });
     }
     if (!authorized(request, env)) return json({ error: 'Access key missing or wrong. Set it in Fareit under Settings.' }, 401);
+
+    if (url.pathname === '/api/jobs') {
+      if (!env.DB) return json({ error: 'The shared pool isn’t set up on the server yet.' }, 503);
+      try {
+        return isJobsPost ? await postJobs(request, env) : await getJobs(url, env);
+      } catch {
+        return json({ error: 'The shared pool couldn’t be reached.' }, 502);
+      }
+    }
 
     try {
       if (url.pathname === '/api/search') {

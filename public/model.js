@@ -1,7 +1,7 @@
 // Fareit prediction model. Pure functions, no DOM, shared by the PWA and the tests.
 //
 // A prediction has two layers:
-//   1. Prior: a published-style fare formula (base + per km + per minute, minus commission).
+//   1. Prior: a take-home fare formula (base + per km + per minute, at least the minimum fare).
 //      Works with zero data.
 //   2. Learned correction: the log-ratio between what you were actually paid and what the
 //      prior said, averaged over your reconciled trips and weighted by how similar each trip
@@ -29,15 +29,25 @@ export const ZONES = [
   { id: 'CF', label: 'Changi Far', short: 'CF', dead: true },
 ];
 
-// Seed values. Grab publishes no driver rate card, so these are estimates from public sources,
-// tuned so the recorded Tampines St 11 -> Tuas View Close trip (about 45.8 km, 52 min, S$33.20 net)
-// lands within about 1%. Every value can be changed in Settings; your reconciled trips correct them.
+// Seed values, all in take-home terms: the fare on the job card is already what the driver
+// keeps (before CPF), so there is no commission to model. Grab publishes no driver rate card;
+// these are estimates tuned so the recorded Tampines St 11 -> Tuas View Close trip (about
+// 45.8 km, 52 min, S$33.20) lands within 2%. Reconciled jobs correct them.
+export const RIDE_TYPES = [
+  { id: 'standard', label: 'Standard' },
+  { id: 'premium', label: 'Premium' },
+  { id: 'xl', label: '6-seater' },
+  { id: 'taxi', label: 'Taxi' },
+];
+
 export const DEFAULT_SETTINGS = {
   targetPerHour: 30,
-  base: 3.0,
-  perKm: 0.6,
-  perMin: 0.22,
-  commission: 0.2,
+  minFare: 6.2, // Grab minimum fare: no prediction goes below this
+  rideType: 'standard',
+  share: true, // add your reconciled jobs (anonymised) to the shared training pool
+  base: 2.4,
+  perKm: 0.48,
+  perMin: 0.18,
   pickupMin: 6,
   returnMin: { N: 0, S: 0, E: 0, W: 0, AIRPORT: 5, TUAS: 35, WLC: 10, CF: 25 },
   priorStrength: 3,
@@ -46,6 +56,7 @@ export const DEFAULT_SETTINGS = {
 
 export function mergeSettings(saved) {
   const s = { ...DEFAULT_SETTINGS, ...(saved || {}) };
+  delete s.commission; // older versions modelled Grab's cut; the card fare is already take-home
   s.returnMin = { ...DEFAULT_SETTINGS.returnMin, ...((saved && saved.returnMin) || {}) };
   return s;
 }
@@ -60,9 +71,10 @@ export function estDriveMin(km) {
   return 5 + 1.1 * km;
 }
 
+// Take-home estimate before any learning: base + per km + per minute, never below the minimum fare.
 export function priorNet(km, min, s) {
-  const gross = s.base + s.perKm * Math.max(0, km) + s.perMin * Math.max(0, min);
-  return gross * (1 - s.commission);
+  const fare = s.base + s.perKm * Math.max(0, km) + s.perMin * Math.max(0, min);
+  return Math.max(s.minFare ?? 0, fare);
 }
 
 function median(xs) {
@@ -172,8 +184,14 @@ export function similarity(t, q) {
   if (tripBand(t) === q.band) w *= 2;
   w *= timeSimilarity(t.ts, q.ts);
   w *= placeSimilarity(t, q);
+  // Premium, 6-seater and taxi fares run on different rates, so other ride types count little.
+  if (t.rideType && q.ride && t.rideType !== q.ride) w *= 0.2;
   return w;
 }
+
+// A single wild entry in the shared pool (typo, or someone messing about) can't pull a
+// prediction beyond 0.3x–3.3x of the formula.
+const MAX_LOG_RATIO = 1.2;
 
 // q = { band, zone, ts }
 export function predict(q, trips, settings) {
@@ -184,11 +202,20 @@ export function predict(q, trips, settings) {
   const data = trips
     .filter(isTrainable)
     .map((t) => ({ t, r: Math.log(t.fare / priorNet(t.km, tripMinutes(t), s)) }))
-    .filter((x) => Number.isFinite(x.r));
+    .filter((x) => Number.isFinite(x.r))
+    .map((x) => ({ ...x, r: Math.max(-MAX_LOG_RATIO, Math.min(MAX_LOG_RATIO, x.r)) }));
 
   const k = s.priorStrength;
   const n = data.length;
-  const overall = n ? data.reduce((sum, x) => sum + x.r, 0) / (n + k) : 0;
+  // The fallback when few jobs are similar: your ride type's overall correction.
+  let rw = 0;
+  let rwr = 0;
+  for (const x of data) {
+    const w = x.t.rideType && q.ride && x.t.rideType !== q.ride ? 0.2 : 1;
+    rw += w;
+    rwr += w * x.r;
+  }
+  const overall = n ? rwr / (rw + k) : 0;
 
   let sw = 0;
   let swr = 0;
@@ -204,9 +231,11 @@ export function predict(q, trips, settings) {
   for (const x of data) sv += x.w * (x.r - m) ** 2;
   const sd = Math.sqrt(sv / (sw + k));
 
-  const net = prior * Math.exp(m);
-  const lo = prior * Math.exp(m - sd);
-  const hi = prior * Math.exp(m + sd);
+  const floor = s.minFare ?? 0;
+  const net = Math.max(floor, prior * Math.exp(m));
+  const lo = Math.max(floor, prior * Math.exp(m - sd));
+  const hi = Math.max(floor, prior * Math.exp(m + sd));
+  const shared = data.filter((x) => x.t.shared).length;
   const returnMin = s.returnMin[q.zone] ?? 0;
   const totalMin = s.pickupMin + profile.min + returnMin;
   const perHour = (net / totalMin) * 60;
@@ -227,6 +256,7 @@ export function predict(q, trips, settings) {
     returnMin,
     verdict: perHour >= s.targetPerHour ? 'TAKE' : 'SKIP',
     basis: n,
+    shared,
     nearTime,
     dayClass: dayClass(q.ts),
     weight: sw,

@@ -109,18 +109,32 @@
           <label for="st-pickup">Pickup drive (min)</label>
           <input id="st-pickup" type="number" inputmode="decimal" min="0" step="1">
         </div>
+        <div class="field">
+          <label for="st-minfare">Minimum fare (S$)</label>
+          <input id="st-minfare" type="number" inputmode="decimal" min="0" step="0.01">
+        </div>
       </div>
+
+      <h2>Your ride type</h2>
+      <p class="note">Other drivers' jobs of a different ride type count for much less in your predictions.</p>
+      <div id="st-ride" class="seg g4"></div>
+
+      <h2>Shared pool</h2>
+      <label class="check" for="st-share">
+        <input id="st-share" type="checkbox">
+        <span>Add my reconciled jobs to the shared pool</span>
+      </label>
+      <p class="note">Everyone learns from the pool, with no accounts. Each job goes in as: time to the nearest 5 minutes, distance band, drop area, OneMap km and minutes, fare, taken or cancelled, ride type, payment type, and pickup and drop-off rounded to about 1 km. Addresses, postal codes and names never leave this phone.</p>
 
       <h2>Empty drive back after the drop (min)</h2>
       <div id="st-returns" class="grid g4 small-fields"></div>
 
-      <h2>Fare-structure starting point</h2>
-      <p class="note">Estimates from public sources. Your reconciled trips correct these automatically, so you rarely need to touch them.</p>
+      <h2>Take-home starting point</h2>
+      <p class="note">What the card shows is already your take-home, so these are in take-home terms. They're estimates, and reconciled jobs from you and the shared pool correct them automatically, so you rarely need to touch them.</p>
       <div class="row2">
-        <div class="field"><label for="st-base">Base fare (S$)</label><input id="st-base" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div class="field"><label for="st-base">Base (S$)</label><input id="st-base" type="number" inputmode="decimal" step="0.01" min="0"></div>
         <div class="field"><label for="st-km">Per km (S$)</label><input id="st-km" type="number" inputmode="decimal" step="0.01" min="0"></div>
         <div class="field"><label for="st-min">Per minute (S$)</label><input id="st-min" type="number" inputmode="decimal" step="0.01" min="0"></div>
-        <div class="field"><label for="st-comm">Grab's cut (%)</label><input id="st-comm" type="number" inputmode="decimal" step="1" min="0" max="60"></div>
       </div>
       <button type="button" class="ghost" id="st-reset">Restore starting values</button>
 

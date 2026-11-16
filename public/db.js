@@ -2,10 +2,10 @@
 // works (without keeping data) if storage is blocked.
 
 const NAME = 'fareit';
-const VERSION = 1;
+const VERSION = 2; // v2 adds "shared": the local copy of the shared training pool
 let dbPromise = null;
 let memoryOnly = false;
-const memory = { trips: new Map(), kv: new Map() };
+const memory = { trips: new Map(), kv: new Map(), shared: new Map() };
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
@@ -24,6 +24,7 @@ function openDb() {
         const d = req.result;
         if (!d.objectStoreNames.contains('trips')) d.createObjectStore('trips', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+        if (!d.objectStoreNames.contains('shared')) d.createObjectStore('shared', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -87,6 +88,25 @@ export async function clearTrips() {
     memoryOnly = true;
   }
   memory.trips.clear();
+}
+
+export async function allShared() {
+  try {
+    return await withStore('shared', 'readonly', (s) => s.getAll());
+  } catch {
+    memoryOnly = true;
+    return [...memory.shared.values()].map(clone);
+  }
+}
+
+export async function putShared(rows) {
+  const copies = rows.map(clone);
+  try {
+    await withStore('shared', 'readwrite', (s) => { for (const r of copies) s.put(r); });
+  } catch {
+    memoryOnly = true;
+    for (const r of copies) memory.shared.set(r.id, r);
+  }
 }
 
 export async function getKV(key) {

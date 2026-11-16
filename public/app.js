@@ -1,6 +1,7 @@
-import { BANDS, ZONES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, accuracy, isTrainable } from './model.js';
+import { BANDS, ZONES, RIDE_TYPES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, accuracy, isTrainable } from './model.js';
 import { findArea, isPostal, classifyZone } from './places.js';
 import * as db from './db.js';
+import { pushJobs, pullJobs } from './sync.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -18,7 +19,18 @@ const state = {
   form: null,
   wakeLock: null,
   loc: null, // last known position of this phone, roughly where the pickup will be
+  shared: [], // local copy of the shared pool (other drivers' anonymous jobs)
+  device: '', // random id so this phone can correct its own pool rows; not linked to anyone
+  syncing: null,
+  lastSync: null,
+  syncError: '',
 };
+
+// Your own jobs plus everyone else's from the pool (your own rows in the pool are skipped).
+function trainingSet() {
+  const own = new Set(state.trips.map((t) => t.id));
+  return state.shared.length ? [...state.trips, ...state.shared.filter((r) => !own.has(r.id))] : state.trips;
+}
 
 // ---------- small helpers ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -56,9 +68,15 @@ function toast(text) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 4500);
 }
 
-async function api(path) {
+async function api(path, body) {
   const headers = state.apiKey ? { 'x-fareit-key': state.apiKey } : {};
-  const res = await fetch(path, { headers });
+  const init = { headers };
+  if (body !== undefined) {
+    init.method = 'POST';
+    headers['content-type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, init);
   let data = null;
   try { data = await res.json(); } catch { /* not JSON */ }
   if (!res.ok) {
@@ -160,13 +178,13 @@ function resetWindow() {
 async function decide() {
   const now = Date.now();
   const loc = state.loc && now - state.loc.at < 10 * 60 * 1000 ? state.loc : null;
-  const p = predict({ band: state.band, zone: state.zone, ts: now, loc }, state.trips, state.settings);
+  const p = predict({ band: state.band, zone: state.zone, ts: now, loc, ride: state.settings.rideType }, trainingSet(), state.settings);
   renderVerdict(p);
 
   // A change within 15 seconds is a correction of the same job, not a new one.
   let trip = state.currentId && now - state.currentAt < 15000 ? state.trips.find((t) => t.id === state.currentId) : null;
   if (!trip) {
-    trip = { id: uid(), ts: now, status: 'pending', source: 'window' };
+    trip = { id: uid(), ts: now, status: 'pending', source: 'window', rideType: state.settings.rideType };
     state.trips.push(trip);
     state.currentId = trip.id;
     state.currentAt = now;
@@ -194,7 +212,7 @@ function renderVerdict(p) {
   if (p.returnMin >= 10) why.push(`+ about ${p.returnMin} min empty drive back`);
   const stage = p.stage === 'seed'
     ? 'Fare-structure estimate. No reconciled jobs yet.'
-    : `${p.stage === 'trained' ? 'Based on' : 'Learning from'} ${p.basis} job${p.basis === 1 ? '' : 's'}, ${p.nearTime} within an hour of now on a ${DAY_NAMES[p.dayClass]}.`;
+    : `${p.stage === 'trained' ? 'Based on' : 'Learning from'} ${p.basis} job${p.basis === 1 ? '' : 's'}${p.shared ? ` (${p.shared} from other drivers)` : ''}, ${p.nearTime} within an hour of now on a ${DAY_NAMES[p.dayClass]}.`;
   v.className = `verdict ${p.verdict === 'TAKE' ? 'take' : 'skip'}`;
   v.innerHTML = `
     <div class="top-row"><span class="word">${p.verdict}</span><button type="button" class="clear" data-act="clear">Clear</button></div>
@@ -259,6 +277,7 @@ async function markNoFare(t) {
   renderBadge();
   renderReconList();
   toast('Kept with its time and decision. Without a fare it can’t train the price.');
+  syncNow();
 }
 
 function buildReconForm() {
@@ -450,7 +469,7 @@ async function saveRecon(ev) {
 
   let trip = state.form.id ? state.trips.find((t) => t.id === state.form.id) : null;
   if (!trip) {
-    trip = { id: uid(), ts: Date.now(), source: 'manual' };
+    trip = { id: uid(), ts: Date.now(), source: 'manual', rideType: state.settings.rideType };
     state.trips.push(trip);
   }
   // Keep the minute-level time from the window tap unless it was changed here.
@@ -475,13 +494,51 @@ async function saveRecon(ev) {
   const off = p ? Math.round(((p.net - paid) / paid) * 100) : null;
   const vs = p ? ` Predicted ${dollars(p.net)}, paid ${fare(paid)} (${off === 0 ? 'spot on' : `${Math.abs(off)}% ${off > 0 ? 'high' : 'low'}`}).` : '';
   toast(gotDistance ? `Saved with OneMap road distance ${trip.km} km.${vs}` : `Saved. Road distance will be fetched when OneMap is reachable.${vs}`);
+  syncNow();
+}
+
+// ---------- shared pool ----------
+// Uploads your new or edited jobs (if sharing is on) and pulls everyone else's. Never blocks
+// the window: it runs in the background and quietly retries on the next trigger.
+function syncNow() {
+  if (state.syncing) return state.syncing;
+  if (!navigator.onLine) return Promise.resolve();
+  state.syncing = (async () => {
+    try {
+      if (state.settings.share) {
+        await pushJobs({
+          trips: state.trips,
+          device: state.device,
+          post: (body) => api('/api/jobs', body),
+          save: (ts) => db.putTrips(ts),
+        });
+      }
+      const since = (await db.getKV('poolCursor')) || 0;
+      const { cursor, total } = await pullJobs({
+        since,
+        get: (c) => api(`/api/jobs?since=${c}`),
+        store: (rows) => db.putShared(rows),
+      });
+      if (total) state.shared = await db.allShared();
+      await db.setKV('poolCursor', cursor);
+      state.lastSync = Date.now();
+      state.syncError = '';
+    } catch (e) {
+      state.syncError = e.status === 503 ? 'The shared pool isn’t set up on the server yet.' : 'Couldn’t reach the shared pool. Will retry.';
+    } finally {
+      state.syncing = null;
+      if (state.view === 'trips') renderTrips();
+    }
+  })();
+  return state.syncing;
 }
 
 // ---------- trips ----------
 function renderTrips() {
   const box = $('#view-trips');
   const rec = state.trips.filter((t) => t.status === 'reconciled').sort((a, b) => b.ts - a.ts);
-  const trainable = rec.filter(isTrainable).length;
+  const own = new Set(state.trips.map((t) => t.id));
+  const poolOthers = state.shared.filter((r) => !own.has(r.id) && isTrainable(r)).length;
   const acc = accuracy(state.trips);
   const pending = rec.filter((t) => t.distanceStatus === 'pending').length;
   const decided = state.trips.filter((t) => t.decision);
@@ -490,12 +547,13 @@ function renderTrips() {
   const bias = acc.bias === null ? '' : acc.bias > 0.02 ? `Predictions run ${Math.round(acc.bias * 100)}% high` : acc.bias < -0.02 ? `Predictions run ${Math.round(-acc.bias * 100)}% low` : 'No consistent lean';
   box.innerHTML = `
     <div class="tiles">
-      <div class="tile"><span class="v">${rec.length}</span><span class="k">Reconciled trips</span></div>
-      <div class="tile"><span class="v">${trainable}</span><span class="k">Training the model</span></div>
+      <div class="tile"><span class="v">${rec.length}</span><span class="k">Your reconciled jobs</span></div>
+      <div class="tile"><span class="v">${poolOthers}</span><span class="k">Jobs from other drivers</span></div>
       <div class="tile"><span class="v">${acc.mape === null ? '—' : `${Math.round(acc.mape * 100)}%`}</span><span class="k">Average prediction error</span></div>
       <div class="tile"><span class="v">${pending}</span><span class="k">Waiting for road distance</span></div>
     </div>
     ${bias ? `<p class="note">${esc(bias)} across ${acc.count} trip${acc.count === 1 ? '' : 's'}.</p>` : ''}
+    <p class="note">${state.syncError ? esc(state.syncError) : state.lastSync ? `Shared pool synced at ${clock(state.lastSync)}.${state.settings.share ? '' : ' You are learning from it without adding to it.'}` : 'Shared pool not synced yet.'}</p>
     ${decided.length ? `<p class="note">${decided.length} decision${decided.length === 1 ? '' : 's'} logged: ${decided.length - cancelled} taken, ${cancelled} cancelled.${noFare ? ` ${noFare} kept without a fare.` : ''}</p>` : ''}
     ${pending ? '<button type="button" class="primary wide" id="retry-dist">Fetch road distances now</button>' : ''}
     <h2>Reconciled</h2>
@@ -537,10 +595,10 @@ async function retryDistances() {
 const settingInputs = {
   'st-target': ['targetPerHour', 1],
   'st-pickup': ['pickupMin', 1],
+  'st-minfare': ['minFare', 1],
   'st-base': ['base', 1],
   'st-km': ['perKm', 1],
   'st-min': ['perMin', 1],
-  'st-comm': ['commission', 100],
 };
 
 function buildSettings() {
@@ -550,6 +608,17 @@ function buildSettings() {
     f.className = 'field';
     f.innerHTML = `<label for="st-ret-${z.id}">${esc(z.short)}</label><input id="st-ret-${z.id}" type="number" inputmode="numeric" min="0" max="120" step="1">`;
     box.append(f);
+  }
+  const ride = $('#st-ride');
+  for (const r of RIDE_TYPES) {
+    const b = button(esc(r.label), '', async () => {
+      state.settings = { ...state.settings, rideType: r.id };
+      await db.setKV('settings', state.settings);
+      fillSettings();
+      settingsMsg(`Ride type set to ${r.label}.`);
+    });
+    b.dataset.v = r.id;
+    ride.append(b);
   }
   fillSettings();
   $('#settings-form').addEventListener('change', onSettingsChange);
@@ -586,6 +655,8 @@ function buildSettings() {
 function fillSettings() {
   for (const [id, [key, scale]] of Object.entries(settingInputs)) $(`#${id}`).value = +(state.settings[key] * scale).toFixed(2);
   for (const z of ZONES) $(`#st-ret-${z.id}`).value = state.settings.returnMin[z.id];
+  for (const b of $$('#st-ride button')) b.classList.toggle('sel', b.dataset.v === state.settings.rideType);
+  $('#st-share').checked = Boolean(state.settings.share);
   $('#st-key').value = state.apiKey;
 }
 
@@ -597,6 +668,13 @@ function settingsMsg(text, isError = false) {
 
 async function onSettingsChange(e) {
   if (e.target.id === 'st-import') return;
+  if (e.target.id === 'st-share') {
+    state.settings = { ...state.settings, share: e.target.checked };
+    await db.setKV('settings', state.settings);
+    settingsMsg(e.target.checked ? 'Your reconciled jobs will be added to the shared pool.' : 'Your jobs stay on this phone. You still learn from the pool.');
+    if (e.target.checked) syncNow();
+    return;
+  }
   if (e.target.id === 'st-key') {
     state.apiKey = e.target.value.trim();
     await db.setKV('apiKey', state.apiKey);
@@ -609,7 +687,6 @@ async function onSettingsChange(e) {
     const v = parseFloat($(`#${id}`).value);
     if (Number.isFinite(v) && v >= 0) next[key] = v / scale;
   }
-  next.commission = Math.min(Math.max(next.commission, 0), 0.6);
   if (!(next.targetPerHour > 0)) next.targetPerHour = DEFAULT_SETTINGS.targetPerHour;
   for (const z of ZONES) {
     const v = parseFloat($(`#st-ret-${z.id}`).value);
@@ -685,23 +762,30 @@ async function keepAwake() {
 
 // ---------- boot ----------
 async function boot() {
-  const [trips, saved, key] = await Promise.all([db.allTrips(), db.getKV('settings'), db.getKV('apiKey')]);
+  const [trips, saved, key, shared, device] = await Promise.all([
+    db.allTrips(), db.getKV('settings'), db.getKV('apiKey'), db.allShared(), db.getKV('device'),
+  ]);
   state.trips = trips || [];
   state.settings = mergeSettings(saved);
   state.apiKey = key || '';
+  state.shared = shared || [];
+  state.device = device || uid();
+  if (!device) await db.setKV('device', state.device);
 
   buildWindow();
   buildReconForm();
   buildSettings();
   for (const t of $$('.tabs button')) t.addEventListener('click', () => { if (t.dataset.view === 'reconcile') state.form = null; show(t.dataset.view); });
   window.addEventListener('hashchange', () => show(location.hash.slice(1)));
-  window.addEventListener('online', checkStatus);
+  window.addEventListener('online', () => { checkStatus(); syncNow(); });
+  setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 5 * 60 * 1000);
   window.addEventListener('offline', checkStatus);
   document.addEventListener('visibilitychange', keepAwake);
 
   renderBadge();
   show(location.hash.slice(1) || 'window');
   checkStatus();
+  syncNow();
   if (db.isMemoryOnly()) toast('This browser is blocking storage, so trips won’t be kept. Add Fareit to your Home Screen.');
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

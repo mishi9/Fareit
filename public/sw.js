@@ -1,5 +1,5 @@
 // Offline shell: the app opens and predicts with no signal. /api calls always go to the network.
-const CACHE = 'fareit-v1';
+const CACHE = 'fareit-v2';
 const SHELL = [
   './',
   'index.html',
@@ -8,6 +8,7 @@ const SHELL = [
   'model.js',
   'places.js',
   'db.js',
+  'sync.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

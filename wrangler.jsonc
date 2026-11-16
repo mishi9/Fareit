@@ -10,8 +10,11 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
+  // Shared training pool every phone contributes to (created automatically on deploy if it doesn't exist)
+  "d1_databases": [{ "binding": "DB", "database_name": "fareit-pool" }],
   "observability": { "enabled": true }
   // Secrets (dashboard > Variables and Secrets, or `npx wrangler secret put NAME`):
   //   ONEMAP_EMAIL, ONEMAP_PASSWORD   free account from onemap.gov.sg, used for driving routes
-  //   APP_KEY (optional)              shared key the app sends; stops strangers using your OneMap quota
+  //   HASH_SALT (optional)            any random text; salts the hashed IP used for rate limiting
+  //   APP_KEY (optional)              leave unset for an open, collective app
 }
