@@ -6,3 +6,5 @@ id,date,time,ride_type,grab_km,grab_min,actual_min,passenger_fare,driver_earned,
 5,2026-11-17,02:39,Standard,12.39,,,16.00,11.20,,,,,normal,,,,,,card total 24 min (includes the drive to the pickup; trip time not recorded); from beta Formula tab export; formula said 19.59
 6,2026-11-17,04:12,Standard,2.38,,,10.82,7.30,,,,,normal,,,,,,card total 12 min (includes the drive to the pickup; trip time not recorded); from beta Formula tab export; formula said 10.78
 7,2026-11-17,04:14,Standard,20.34,,,23.90,23.80,,,,,normal,,,,,,card total 34 min (includes the drive to the pickup; trip time not recorded); from beta Formula tab export; formula said 23.12; LOW-CUT trip: earned 23.80 confirmed by driver - Grab kept 0.10 (theory: commission lowered when a job goes untaken)
+8,2026-11-17,04:54,Standard,21.70,,,22.30,18.10,,,,,normal,,,,,,card total 19 min (includes the drive to the pickup; trip time not recorded); from beta Formula tab export; formula said 20.95
+9,2026-11-17,05:16,Standard,20.60,22,,24.10,17.30,,,,,normal,,,,,,trip time 22 min from pickup (GPS); card total 32 min; 0.92 km to pickup (GPS 0.78 km / 3 min); from beta Formula tab export; formula said 23.53
