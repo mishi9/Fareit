@@ -69,9 +69,10 @@ main {
 .grid { display: grid; gap: 8px; }
 .g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 .tap {
-  min-height: 54px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+  min-height: 60px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
   font-size: 19px; font-weight: 700; padding: 6px 4px; cursor: pointer; touch-action: manipulation;
   display: flex; align-items: center; justify-content: center; text-align: center; line-height: 1.1;
 }
@@ -179,20 +180,29 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
   width: min(92vw, 480px); font-size: 14px;
 }
 
-/* Short screens (small or older second phones): keep the whole decision on one screen. */
-@media (max-height: 640px) {
+/* Shorter screens (Safari tab, older phones): keep the whole decision on one screen. */
+@media (max-height: 720px) {
   .top { padding-top: calc(env(safe-area-inset-top, 0px) + 6px); padding-bottom: 6px; }
-  .brand { font-size: 17px; }
   main { padding-top: 8px; }
   #view-window { gap: 8px; }
+  #view-window .group { gap: 4px; }
   #view-window .label { font-size: 11px; }
-  .tap { min-height: 44px; font-size: 17px; border-radius: 10px; }
-  .tap.mono { font-size: 16px; }
-  .verdict { min-height: 0; padding: 10px 14px; }
+  .tap { min-height: 50px; }
+  .verdict { min-height: 0; padding: 10px 14px; gap: 2px; }
   .verdict .word { font-size: 36px; }
   .verdict .big { font-size: 20px; }
   .verdict .decide button { min-height: 40px; }
-  .tabs button { min-height: 42px; }
+  .tabs button { min-height: 44px; }
+}
+@media (max-height: 600px) {
+  .brand { font-size: 17px; }
+  .tap { min-height: 42px; font-size: 17px; border-radius: 10px; }
+  .tap.mono { font-size: 16px; }
+  .verdict .why { font-size: 12px; }
+  .verdict .word { font-size: 30px; }
+  .verdict .decide { margin-top: 2px; }
+  .verdict .decide button { min-height: 36px; }
+  .tabs button { min-height: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) { .tap:active { transform: none; } }

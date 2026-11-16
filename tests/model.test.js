@@ -25,7 +25,8 @@ test('with no data, a long Tuas run is a SKIP and the same run east is a TAKE', 
   const east = predict({ band: '40+', zone: 'E', ts }, [], S);
   assert.equal(tuas.stage, 'seed');
   assert.equal(tuas.verdict, 'SKIP');
-  assert.equal(tuas.returnMin, 35);
+  assert.equal(tuas.returnMin, 30);
+  assert.equal(tuas.deadDrop, true);
   assert.equal(east.verdict, 'TAKE');
   assert.ok(tuas.perHour < east.perHour);
   assert.ok(tuas.lo < tuas.net && tuas.net < tuas.hi);
@@ -134,11 +135,24 @@ test('untrainable trips (pending, no fare seen, no distance) are ignored', () =>
   assert.equal(q.stage, 'seed');
 });
 
-test('settings merge keeps per-area return minutes', () => {
-  const s = mergeSettings({ targetPerHour: 35, returnMin: { TUAS: 40 } });
+test('settings merge keeps your dead drops and drops old fields', () => {
+  const s = mergeSettings({ targetPerHour: 35, deadZones: ['TUAS', 'W', 'MARS'], commission: 0.2, share: false, rideType: 'taxi', returnMin: {} });
   assert.equal(s.targetPerHour, 35);
-  assert.equal(s.returnMin.TUAS, 40);
-  assert.equal(s.returnMin.CF, 25);
+  assert.deepEqual(s.deadZones, ['TUAS', 'W']);
+  for (const old of ['commission', 'share', 'rideType', 'returnMin']) assert.equal(old in s, false, old);
+  assert.deepEqual(mergeSettings().deadZones, ['TUAS', 'CF']);
+});
+
+test('dead drops are personal: they change your verdict, not what the job pays', () => {
+  const ts = at('2026-11-16T18:00:00+08:00');
+  const q = { band: '20-30', zone: 'W', ts };
+  const general = predict(q, [], S);
+  const avoidsWest = predict(q, [], mergeSettings({ deadZones: ['TUAS', 'CF', 'W'] }));
+  assert.equal(general.net, avoidsWest.net);
+  assert.equal(general.returnMin, 0);
+  assert.equal(avoidsWest.returnMin, 30);
+  assert.equal(general.verdict, 'TAKE');
+  assert.equal(avoidsWest.verdict, 'SKIP');
 });
 
 test('accuracy reports error and lean', () => {
@@ -153,7 +167,7 @@ test('accuracy reports error and lean', () => {
   assert.ok(Math.abs(a.bias) < 1e-9);
 });
 
-test('drop areas map to the eight buttons', () => {
+test('drop areas map to the nine buttons', () => {
   assert.equal(classifyZone(1.329, 103.642), 'TUAS'); // 41 Tuas View Close
   assert.equal(classifyZone(1.3592, 103.9894), 'AIRPORT'); // Changi Airport
   assert.equal(classifyZone(1.3381, 103.9832), 'AIRPORT'); // Terminal 4
@@ -164,7 +178,10 @@ test('drop areas map to the eight buttons', () => {
   assert.equal(classifyZone(1.3343, 103.962), 'E'); // Changi City Point stays East
   assert.equal(classifyZone(1.381, 103.955), 'E'); // Pasir Ris Park stays East
   assert.equal(classifyZone(1.3469, 103.9474), 'E'); // 111 Tampines St 11
-  assert.equal(classifyZone(1.2789, 103.8536), 'S'); // Raffles Place
+  assert.equal(classifyZone(1.2789, 103.8536), 'C'); // Raffles Place
+  assert.equal(classifyZone(1.3048, 103.8318), 'C'); // Orchard
+  assert.equal(classifyZone(1.3204, 103.8438), 'C'); // Novena
+  assert.equal(classifyZone(1.2494, 103.8303), 'S'); // Sentosa
   assert.equal(classifyZone(1.4304, 103.8354), 'N'); // Yishun
   assert.equal(classifyZone(1.3329, 103.7436), 'W'); // Jurong East
 });

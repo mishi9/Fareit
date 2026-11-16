@@ -18,48 +18,50 @@ export const BANDS = [
   { id: '40+', label: '40+', min: 40, max: Infinity, km: 45 },
 ];
 
+// Button order on the phone: three per row, Tuas and Changi Far last.
 export const ZONES = [
   { id: 'N', label: 'North', short: 'N' },
   { id: 'S', label: 'South', short: 'S' },
   { id: 'E', label: 'East', short: 'E' },
   { id: 'W', label: 'West', short: 'W' },
+  { id: 'C', label: 'Central', short: 'Central' },
   { id: 'AIRPORT', label: 'Airport', short: 'Airport' },
-  { id: 'TUAS', label: 'Tuas', short: 'Tuas', dead: true },
   { id: 'WLC', label: 'Woodlands CP', short: 'WLC' },
-  { id: 'CF', label: 'Changi Far', short: 'CF', dead: true },
+  { id: 'TUAS', label: 'Tuas', short: 'Tuas' },
+  { id: 'CF', label: 'Changi Far', short: 'CF' },
 ];
 
 // Seed values, all in take-home terms: the fare on the job card is already what the driver
 // keeps (before CPF), so there is no commission to model. Grab publishes no driver rate card;
 // these are estimates tuned so the recorded Tampines St 11 -> Tuas View Close trip (about
 // 45.8 km, 52 min, S$33.20) lands within 2%. Reconciled jobs correct them.
-export const RIDE_TYPES = [
-  { id: 'standard', label: 'Standard' },
-  { id: 'premium', label: 'Premium' },
-  { id: 'xl', label: '6-seater' },
-  { id: 'taxi', label: 'Taxi' },
-];
-
 export const DEFAULT_SETTINGS = {
   targetPerHour: 30,
   minFare: 6.2, // Grab minimum fare: no prediction goes below this
-  rideType: 'standard',
-  share: true, // add your reconciled jobs (anonymised) to the shared training pool
+  // Dead drops are personal: the general view is Tuas and Changi Far, but a driver who never
+  // works the west can add West. Only your own verdict counts the empty drive back; what a job
+  // pays is learned from everyone.
+  deadZones: ['TUAS', 'CF'],
+  deadReturnMin: 30,
   base: 2.4,
   perKm: 0.48,
   perMin: 0.18,
   pickupMin: 6,
-  returnMin: { N: 0, S: 0, E: 0, W: 0, AIRPORT: 5, TUAS: 35, WLC: 10, CF: 25 },
   priorStrength: 3,
   defaultSpread: 0.25,
 };
 
 export function mergeSettings(saved) {
   const s = { ...DEFAULT_SETTINGS, ...(saved || {}) };
-  delete s.commission; // older versions modelled Grab's cut; the card fare is already take-home
-  s.returnMin = { ...DEFAULT_SETTINGS.returnMin, ...((saved && saved.returnMin) || {}) };
+  // Fields from earlier versions: Grab's cut (the card fare is already take-home), ride type and
+  // the sharing switch (everyone is Standard and always shares), and the per-area return table.
+  for (const old of ['commission', 'rideType', 'share', 'returnMin']) delete s[old];
+  const valid = new Set(ZONES.map((z) => z.id));
+  s.deadZones = Array.isArray(s.deadZones) ? s.deadZones.filter((z) => valid.has(z)) : [...DEFAULT_SETTINGS.deadZones];
   return s;
 }
+
+export const isDeadDrop = (zone, s) => (s.deadZones || []).includes(zone);
 
 export function bandFor(km) {
   return BANDS.find((b) => km >= b.min && km < b.max) || BANDS[BANDS.length - 1];
@@ -236,7 +238,7 @@ export function predict(q, trips, settings) {
   const lo = Math.max(floor, prior * Math.exp(m - sd));
   const hi = Math.max(floor, prior * Math.exp(m + sd));
   const shared = data.filter((x) => x.t.shared).length;
-  const returnMin = s.returnMin[q.zone] ?? 0;
+  const returnMin = isDeadDrop(q.zone, s) ? s.deadReturnMin : 0;
   const totalMin = s.pickupMin + profile.min + returnMin;
   const perHour = (net / totalMin) * 60;
 
@@ -254,6 +256,7 @@ export function predict(q, trips, settings) {
     perHourHi: (hi / totalMin) * 60,
     totalMin,
     returnMin,
+    deadDrop: isDeadDrop(q.zone, s),
     verdict: perHour >= s.targetPerHour ? 'TAKE' : 'SKIP',
     basis: n,
     shared,

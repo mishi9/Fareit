@@ -1,4 +1,4 @@
-import { BANDS, ZONES, RIDE_TYPES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, accuracy, isTrainable } from './model.js';
+import { BANDS, ZONES, DEFAULT_SETTINGS, mergeSettings, predict, bandFor, accuracy, isTrainable } from './model.js';
 import { findArea, isPostal, classifyZone } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
@@ -138,11 +138,11 @@ function buildWindow() {
   const zones = $('#zones');
   zones.innerHTML = '';
   for (const z of ZONES) {
-    const el = button(esc(z.short), `tap${z.dead ? ' dead' : ''}`, () => pick('zone', z.id));
+    const el = button(esc(z.short), 'tap', () => pick('zone', z.id));
     el.dataset.id = z.id;
-    el.setAttribute('aria-label', `${z.label}${z.dead ? ', usually a dead drop' : ''}`);
     zones.append(el);
   }
+  markDeadDrops();
   $('#verdict').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
@@ -150,6 +150,16 @@ function buildWindow() {
     else recordDecision(b.dataset.act);
   });
   renderVerdict(null);
+}
+
+// The red dot marks your own dead drops (Settings), not a general rule.
+function markDeadDrops() {
+  for (const el of $$('#zones .tap')) {
+    const z = ZONES.find((x) => x.id === el.dataset.id);
+    const dead = state.settings.deadZones.includes(z.id);
+    el.classList.toggle('dead', dead);
+    el.setAttribute('aria-label', `${z.label}${dead ? ', a dead drop for you' : ''}`);
+  }
 }
 
 function markSelection() {
@@ -178,13 +188,13 @@ function resetWindow() {
 async function decide() {
   const now = Date.now();
   const loc = state.loc && now - state.loc.at < 10 * 60 * 1000 ? state.loc : null;
-  const p = predict({ band: state.band, zone: state.zone, ts: now, loc, ride: state.settings.rideType }, trainingSet(), state.settings);
+  const p = predict({ band: state.band, zone: state.zone, ts: now, loc }, trainingSet(), state.settings);
   renderVerdict(p);
 
   // A change within 15 seconds is a correction of the same job, not a new one.
   let trip = state.currentId && now - state.currentAt < 15000 ? state.trips.find((t) => t.id === state.currentId) : null;
   if (!trip) {
-    trip = { id: uid(), ts: now, status: 'pending', source: 'window', rideType: state.settings.rideType };
+    trip = { id: uid(), ts: now, status: 'pending', source: 'window', rideType: 'standard' };
     state.trips.push(trip);
     state.currentId = trip.id;
     state.currentAt = now;
@@ -209,7 +219,7 @@ function renderVerdict(p) {
     return;
   }
   const why = [`${Math.round(p.tripMin)} min trip`];
-  if (p.returnMin >= 10) why.push(`+ about ${p.returnMin} min empty drive back`);
+  if (p.deadDrop && p.returnMin > 0) why.push(`+ about ${p.returnMin} min empty drive back (a dead drop for you)`);
   const stage = p.stage === 'seed'
     ? 'Fare-structure estimate. No reconciled jobs yet.'
     : `${p.stage === 'trained' ? 'Based on' : 'Learning from'} ${p.basis} job${p.basis === 1 ? '' : 's'}${p.shared ? ` (${p.shared} from other drivers)` : ''}, ${p.nearTime} within an hour of now on a ${DAY_NAMES[p.dayClass]}.`;
@@ -469,7 +479,7 @@ async function saveRecon(ev) {
 
   let trip = state.form.id ? state.trips.find((t) => t.id === state.form.id) : null;
   if (!trip) {
-    trip = { id: uid(), ts: Date.now(), source: 'manual', rideType: state.settings.rideType };
+    trip = { id: uid(), ts: Date.now(), source: 'manual', rideType: 'standard' };
     state.trips.push(trip);
   }
   // Keep the minute-level time from the window tap unless it was changed here.
@@ -505,14 +515,12 @@ function syncNow() {
   if (!navigator.onLine) return Promise.resolve();
   state.syncing = (async () => {
     try {
-      if (state.settings.share) {
-        await pushJobs({
-          trips: state.trips,
-          device: state.device,
-          post: (body) => api('/api/jobs', body),
-          save: (ts) => db.putTrips(ts),
-        });
-      }
+      await pushJobs({
+        trips: state.trips,
+        device: state.device,
+        post: (body) => api('/api/jobs', body),
+        save: (ts) => db.putTrips(ts),
+      });
       const since = (await db.getKV('poolCursor')) || 0;
       const { cursor, total } = await pullJobs({
         since,
@@ -553,7 +561,7 @@ function renderTrips() {
       <div class="tile"><span class="v">${pending}</span><span class="k">Waiting for road distance</span></div>
     </div>
     ${bias ? `<p class="note">${esc(bias)} across ${acc.count} trip${acc.count === 1 ? '' : 's'}.</p>` : ''}
-    <p class="note">${state.syncError ? esc(state.syncError) : state.lastSync ? `Shared pool synced at ${clock(state.lastSync)}.${state.settings.share ? '' : ' You are learning from it without adding to it.'}` : 'Shared pool not synced yet.'}</p>
+    <p class="note">${state.syncError ? esc(state.syncError) : state.lastSync ? `Shared pool synced at ${clock(state.lastSync)}.` : 'Shared pool not synced yet.'}</p>
     ${decided.length ? `<p class="note">${decided.length} decision${decided.length === 1 ? '' : 's'} logged: ${decided.length - cancelled} taken, ${cancelled} cancelled.${noFare ? ` ${noFare} kept without a fare.` : ''}</p>` : ''}
     ${pending ? '<button type="button" class="primary wide" id="retry-dist">Fetch road distances now</button>' : ''}
     <h2>Reconciled</h2>
@@ -599,26 +607,24 @@ const settingInputs = {
   'st-base': ['base', 1],
   'st-km': ['perKm', 1],
   'st-min': ['perMin', 1],
+  'st-deadmin': ['deadReturnMin', 1],
 };
 
 function buildSettings() {
-  const box = $('#st-returns');
+  const dead = $('#st-dead');
   for (const z of ZONES) {
-    const f = document.createElement('div');
-    f.className = 'field';
-    f.innerHTML = `<label for="st-ret-${z.id}">${esc(z.short)}</label><input id="st-ret-${z.id}" type="number" inputmode="numeric" min="0" max="120" step="1">`;
-    box.append(f);
-  }
-  const ride = $('#st-ride');
-  for (const r of RIDE_TYPES) {
-    const b = button(esc(r.label), '', async () => {
-      state.settings = { ...state.settings, rideType: r.id };
+    const b = button(esc(z.short), '', async () => {
+      const set = new Set(state.settings.deadZones);
+      if (set.has(z.id)) set.delete(z.id);
+      else set.add(z.id);
+      state.settings = { ...state.settings, deadZones: ZONES.map((x) => x.id).filter((id) => set.has(id)) };
       await db.setKV('settings', state.settings);
       fillSettings();
-      settingsMsg(`Ride type set to ${r.label}.`);
+      markDeadDrops();
+      settingsMsg(set.has(z.id) ? `${z.label} is now a dead drop for you.` : `${z.label} is no longer a dead drop for you.`);
     });
-    b.dataset.v = r.id;
-    ride.append(b);
+    b.dataset.v = z.id;
+    dead.append(b);
   }
   fillSettings();
   $('#settings-form').addEventListener('change', onSettingsChange);
@@ -627,6 +633,7 @@ function buildSettings() {
     state.settings = mergeSettings();
     await db.setKV('settings', state.settings);
     fillSettings();
+    markDeadDrops();
     settingsMsg('Starting values restored.');
   });
   $('#st-export').addEventListener('click', exportData);
@@ -654,9 +661,7 @@ function buildSettings() {
 
 function fillSettings() {
   for (const [id, [key, scale]] of Object.entries(settingInputs)) $(`#${id}`).value = +(state.settings[key] * scale).toFixed(2);
-  for (const z of ZONES) $(`#st-ret-${z.id}`).value = state.settings.returnMin[z.id];
-  for (const b of $$('#st-ride button')) b.classList.toggle('sel', b.dataset.v === state.settings.rideType);
-  $('#st-share').checked = Boolean(state.settings.share);
+  for (const b of $$('#st-dead button')) b.classList.toggle('sel', state.settings.deadZones.includes(b.dataset.v));
   $('#st-key').value = state.apiKey;
 }
 
@@ -668,13 +673,6 @@ function settingsMsg(text, isError = false) {
 
 async function onSettingsChange(e) {
   if (e.target.id === 'st-import') return;
-  if (e.target.id === 'st-share') {
-    state.settings = { ...state.settings, share: e.target.checked };
-    await db.setKV('settings', state.settings);
-    settingsMsg(e.target.checked ? 'Your reconciled jobs will be added to the shared pool.' : 'Your jobs stay on this phone. You still learn from the pool.');
-    if (e.target.checked) syncNow();
-    return;
-  }
   if (e.target.id === 'st-key') {
     state.apiKey = e.target.value.trim();
     await db.setKV('apiKey', state.apiKey);
@@ -688,10 +686,6 @@ async function onSettingsChange(e) {
     if (Number.isFinite(v) && v >= 0) next[key] = v / scale;
   }
   if (!(next.targetPerHour > 0)) next.targetPerHour = DEFAULT_SETTINGS.targetPerHour;
-  for (const z of ZONES) {
-    const v = parseFloat($(`#st-ret-${z.id}`).value);
-    if (Number.isFinite(v) && v >= 0) next.returnMin[z.id] = v;
-  }
   state.settings = next;
   await db.setKV('settings', next);
   settingsMsg('Saved.');
@@ -737,6 +731,7 @@ async function importData(e) {
       state.settings = mergeSettings(data.settings);
       await db.setKV('settings', state.settings);
       fillSettings();
+      markDeadDrops();
     }
     renderBadge();
     settingsMsg(`Imported ${valid.length} trips.`);

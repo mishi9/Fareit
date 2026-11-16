@@ -8,7 +8,7 @@ Nothing touches the Grab phone. No screenshots, no screen capture, no voice, and
 
 ## How you use it
 
-1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–5` … `40+` km) and the drop area (`N` `S` `E` `W` `Airport` `Tuas` `WLC` `CF`). The verdict appears straight away. Changing a tap within 15 seconds corrects the same job instead of adding a new one.
+1. **Window tab, in the 8 seconds.** Read the job card on Phone 1. On Phone 2, tap the distance band (`0–5` … `40+` km) and the drop area (`N` `S` `E` `W` `Central` `Airport` `WLC` `Tuas` `CF`). The verdict appears straight away. Changing a tap within 15 seconds corrects the same job instead of adding a new one.
 2. **Then tap Took it or Cancelled.** Both are recorded with the exact time. The job time and Phone 2's location (roughly the pickup area) are saved when you tap.
 3. **Reconcile tab, once you're parked.** Every job is waiting there, taken or cancelled. Add the pickup and drop-off (exact address, postal code, or an area like `Tampines`), the job time (prefilled, editable), the estimated trip time, and the fare. For a cancelled job, that's the fare the card flashed when you rejected it. Taken or cancelled, a job with a fare trains the model the same way. Payment type is optional. Fareit looks up the official road distance on OneMap and records how far off its prediction was. If you never saw a cancelled job's fare, **No fare seen** keeps its time, band, area and decision, but it can't teach the price.
 4. **Trips tab.** Shows reconciled trips, the average prediction error, whether predictions run high or low, and how many jobs you took vs cancelled.
@@ -27,19 +27,20 @@ TAKE        when $/hr ≥ your line (default S$30/hr), otherwise SKIP
 - **As you reconcile:** each job's actual fare divided by the formula's estimate becomes a correction. Corrections are weighted toward jobs like the current one: same drop area, same band, same time of day, same kind of day, and started near where you are now. They're pulled toward your overall average until enough similar jobs exist, so one odd fare can't swing predictions. This is how surge and Grab's real cut get learned without ever being shown to you.
 - **Time of day carries the most weight.** Commute peaks, lunch, going home, and bar closing (around 2:45 on weekdays and 3:45 on weekends, Orchard especially) all change the yield. Time is matched tightly: a job 45 minutes away counts 61%, one hour 41%, two hours 3%. So 2:45 and 3:45 are learned as different moments.
 - **Late night belongs to the evening before.** 3:45 on Saturday morning counts as Friday night. Days are grouped as weekday (Mon–Thu), Friday, Saturday and Sunday, and nearby groups partly share what they learn.
-- **Ride type:** jobs from Premium, 6-seater or taxi drivers count for a fifth as much in a Standard driver's predictions, and the other way round. Set yours in Settings.
 - **Junk protection:** no single job, from you or the pool, can pull a prediction beyond 0.3× to 3.3× the starting estimate. It's diluted by every other job too.
 - **Where you are:** Orchard at 2:45 isn't Tampines at 2:45. Jobs that started within about 2 km of your current spot count up to twice as much. Once a job is reconciled, the exact pickup replaces the tap location. If location permission is refused, everything else still works.
-- **Dead drops:** Tuas (35 min) and Changi Far (25 min) carry an empty drive back that's counted in $/hr. Woodlands Checkpoint has 10 min and the airport 5. All of these can be changed in Settings.
+- **Dead drops are personal.** The general view is Tuas and Changi Far, so those are the default. But a driver who never works the west can add West in Settings → My dead drops. For your dead drops, your verdict adds an empty drive back (30 min by default). It changes only your $/hr verdict, never the predicted fare, and it isn't shared.
+- **Took it / Cancelled isn't a judgement of the job.** A driver may cancel a good job simply because they don't want to go there. So the model never learns from the decision itself, only from what the job paid. A cancelled job whose fare you saw teaches exactly what a taken one does.
 - **Bands for now, exact km later:** each band's typical distance and time switch from the band midpoint to the median of your own trips once three reconciled trips fall in that band. All trips store OneMap's exact km, so a later version can predict from exact distance without collecting anything new.
 
 ## The shared pool
 
-- **What goes in, per job:** time rounded to 5 minutes, distance band, drop area, OneMap road km and minutes, fare, taken or cancelled, ride type, payment type, and pickup and drop-off rounded to about 1 km. A cancelled job with no fare seen goes in with its time and decision only.
+- **What goes in, per job:** time rounded to 5 minutes, distance band, drop area, OneMap road km and minutes, fare, taken or cancelled, payment type, and pickup and drop-off rounded to about 1 km. A cancelled job with no fare seen goes in with its time and decision only.
 - **What never leaves the phone:** addresses, postal codes, names, exact positions, your settings and your job list.
 - **No accounts:** each phone has a random device id. It isn't linked to anyone; it only lets a phone correct its own pool rows (when you edit a reconciled job), and not anyone else's.
 - **Abuse limits:** the server checks every value is in range and inside Singapore, takes at most 300 new jobs per connection per day, and stores the connection only as a salted hash for that limit.
-- **Sharing switch:** Settings → Shared pool. Turn it off and you still learn from the pool without adding to it. The phone syncs on start, after each reconcile, and every 5 minutes while open.
+- **Always on.** Every reconciled job is shared. The phone syncs on start, after each reconcile, and every 5 minutes while open.
+- Everyone is assumed to drive Standard 4-seater for now.
 - Deleting trips on your phone doesn't remove rows already in the pool.
 
 ## Drop areas
@@ -50,6 +51,7 @@ When you add a trip by hand, the drop area is suggested from the map. A drop you
 |---|---|
 | Airport | within 1 km of Terminal 1–4 or Jewel |
 | WLC | within 1.5 km of Woodlands Checkpoint |
+| Central | within 3.5 km of the CBD/Orchard middle (1.300, 103.845): CBD, Marina, Orchard, Novena, River Valley |
 | Tuas | west of about 103.675°E (Tuas industrial, Tuas Checkpoint) |
 | CF (Changi Far) | past Loyang/Pasir Ris: east of about 103.965°E outside the terminals (Loyang, Changi Village, airfreight, Changi coast). Changi City Point and Pasir Ris stay East. |
 | N / S / E / W | compass direction from the middle of the island (1.340, 103.835) |

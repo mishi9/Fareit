@@ -143,7 +143,7 @@ async function route(from, to, env) {
 
 // ---------- shared training pool ----------
 const BANDS = ['0-5', '5-10', '10-15', '15-20', '20-30', '30-40', '40+'];
-const ZONES = ['N', 'S', 'E', 'W', 'AIRPORT', 'TUAS', 'WLC', 'CF'];
+const ZONES = ['N', 'S', 'E', 'W', 'C', 'AIRPORT', 'WLC', 'TUAS', 'CF'];
 const RIDES = ['standard', 'premium', 'xl', 'taxi'];
 const MAX_JOBS_PER_POST = 50;
 const MAX_NEW_JOBS_PER_IP_PER_DAY = 300;

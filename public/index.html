@@ -30,7 +30,7 @@
     </div>
     <div class="group">
       <div class="label">Drop area</div>
-      <div id="zones" class="grid g4"></div>
+      <div id="zones" class="grid g3"></div>
     </div>
     <div id="verdict" class="verdict idle" aria-live="polite"></div>
   </section>
@@ -80,7 +80,7 @@
       </div>
       <div class="field">
         <span class="flabel">Drop area</span>
-        <div id="rf-zone" class="seg g4"></div>
+        <div id="rf-zone" class="seg g3"></div>
         <div id="rf-zone-hint" class="hint"></div>
       </div>
       <div class="field">
@@ -115,19 +115,18 @@
         </div>
       </div>
 
-      <h2>Your ride type</h2>
-      <p class="note">Other drivers' jobs of a different ride type count for much less in your predictions.</p>
-      <div id="st-ride" class="seg g4"></div>
+      <h2>My dead drops</h2>
+      <p class="note">Areas you'd rather not end up in. Your verdict adds the empty drive back for these. This only affects you: what a job pays is still learned from everyone.</p>
+      <div id="st-dead" class="seg g3"></div>
+      <div class="row2">
+        <div class="field">
+          <label for="st-deadmin">Empty drive back from a dead drop (min)</label>
+          <input id="st-deadmin" type="number" inputmode="numeric" min="0" max="120" step="1">
+        </div>
+      </div>
 
       <h2>Shared pool</h2>
-      <label class="check" for="st-share">
-        <input id="st-share" type="checkbox">
-        <span>Add my reconciled jobs to the shared pool</span>
-      </label>
-      <p class="note">Everyone learns from the pool, with no accounts. Each job goes in as: time to the nearest 5 minutes, distance band, drop area, OneMap km and minutes, fare, taken or cancelled, ride type, payment type, and pickup and drop-off rounded to about 1 km. Addresses, postal codes and names never leave this phone.</p>
-
-      <h2>Empty drive back after the drop (min)</h2>
-      <div id="st-returns" class="grid g4 small-fields"></div>
+      <p class="note">Everyone learns from the pool, with no accounts. Every reconciled job goes in as: time to the nearest 5 minutes, distance band, drop area, OneMap km and minutes, fare, taken or cancelled, ride type, payment type, and pickup and drop-off rounded to about 1 km. Addresses, postal codes and names never leave this phone.</p>
 
       <h2>Take-home starting point</h2>
       <p class="note">What the card shows is already your take-home, so these are in take-home terms. They're estimates, and reconciled jobs from you and the shared pool correct them automatically, so you rarely need to touch them.</p>

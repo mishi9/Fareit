@@ -93,6 +93,7 @@ const AIRPORT_RADIUS_KM = 1.0;
 const WLC = { lat: 1.445, lng: 103.769, radiusKm: 1.5 };
 const TUAS_MAX_LNG = 103.675; // west of Pioneer: Tuas industrial, Tuas Checkpoint
 const CF_MIN_LNG = 103.965; // east of Changi Business Park: Loyang, Changi Village, airfreight, Changi coast
+const CENTRAL = { lat: 1.3, lng: 103.845, radiusKm: 3.5 }; // CBD, Marina, Orchard, Novena, River Valley
 const CENTRE = { lat: 1.34, lng: 103.835 }; // reference point for the four compass areas
 
 // Suggests a drop-area button for a coordinate. The button you tapped in the window always
@@ -102,6 +103,7 @@ export function classifyZone(lat, lng) {
   if (haversineKm(lat, lng, WLC.lat, WLC.lng) <= WLC.radiusKm) return 'WLC';
   if (lng <= TUAS_MAX_LNG) return 'TUAS';
   if (lng >= CF_MIN_LNG) return 'CF';
+  if (haversineKm(lat, lng, CENTRAL.lat, CENTRAL.lng) <= CENTRAL.radiusKm) return 'C';
   const dy = lat - CENTRE.lat;
   const dx = (lng - CENTRE.lng) * Math.cos((lat * Math.PI) / 180);
   const angle = (Math.atan2(dy, dx) * 180) / Math.PI; // 0 = east, 90 = north
