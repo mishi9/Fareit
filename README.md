@@ -65,6 +65,12 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
+## Beta
+
+Settings → Beta → code `52105` switches the phone to the beta at `/beta/`. It's a code, not security. Once unlocked, opening Fareit goes straight to the beta (marked **BETA** in the header) until Settings → **Leave beta**. The beta shares the same trips, settings and shared pool, so switching loses nothing.
+
+`public/beta/` is a separate copy of the app (own service worker and cache) for testing new features without touching the main version. When a beta feature is ready, copy it into `public/`. Don't raise the database version in `public/beta/db.js`: both versions open the same database.
+
 ## Set up
 
 ### 1. OneMap account (free)

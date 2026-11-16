@@ -1,5 +1,5 @@
 // Offline shell: the app opens and predicts with no signal. /api calls always go to the network.
-const CACHE = 'fareit-v10';
+const CACHE = 'fareit-v11';
 const SHELL = [
   './',
   'index.html',
@@ -23,7 +23,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      // Only this app's old caches: the beta's (fareit-beta-…) belong to the beta's worker.
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('fareit-v') && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -32,6 +33,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  if (url.pathname.startsWith('/beta/')) return; // the beta has its own service worker and cache
 
   // Stale-while-revalidate: answer from cache instantly, refresh in the background.
   event.respondWith(

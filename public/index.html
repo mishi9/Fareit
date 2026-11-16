@@ -13,6 +13,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<script>
+  // Beta channel: once unlocked in Settings, opening Fareit goes straight to the beta at /beta/.
+  try { if (localStorage.getItem('fareit-channel') === 'beta') location.replace('beta/' + location.hash); } catch (e) {}
+</script>
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="app.js"></script>
 </head>
@@ -148,6 +152,16 @@
       </div>
       <input id="st-import" type="file" accept="application/json,.json" hidden>
       <button type="button" class="danger" id="st-clear">Delete all trips</button>
+
+      <h2>Beta</h2>
+      <p class="note">Try features that are still being tested. The beta uses the same trips and shared pool, and you can come back here any time.</p>
+      <div class="row2">
+        <div class="field">
+          <label for="st-beta-code">Beta code</label>
+          <input id="st-beta-code" type="text" inputmode="numeric" autocomplete="off" placeholder="Code">
+        </div>
+        <button type="button" class="ghost" id="st-beta">Open beta</button>
+      </div>
       <p id="st-msg" class="msg" role="status"></p>
     </form>
   </section>

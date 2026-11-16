@@ -745,6 +745,12 @@ function buildSettings() {
     settingsMsg('Starting values restored.');
   });
   $('#st-export').addEventListener('click', exportData);
+  // Beta: a code, not real security. Unlocking switches this phone to the beta at /beta/.
+  $('#st-beta').addEventListener('click', () => {
+    if ($('#st-beta-code').value.trim() !== '52105') { settingsMsg('That beta code isn’t right.', true); return; }
+    try { localStorage.setItem('fareit-channel', 'beta'); } catch { /* still open it this once */ }
+    location.href = 'beta/#window';
+  });
   $('#st-import').addEventListener('change', importData);
   let armed = false;
   let disarm;
