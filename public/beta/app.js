@@ -5,6 +5,7 @@ const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
+import { buildLab } from './lab.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -117,7 +118,7 @@ function renderBadge() {
 
 // ---------- views ----------
 function show(view) {
-  if (!['window', 'reconcile', 'trips', 'settings'].includes(view)) view = 'window';
+  if (!['window', 'reconcile', 'trips', 'lab', 'settings'].includes(view)) view = 'window';
   state.view = view;
   for (const v of $$('.view')) v.hidden = v.id !== `view-${view}`;
   for (const t of $$('.tabs button')) t.classList.toggle('on', t.dataset.view === view);
@@ -891,6 +892,7 @@ async function boot() {
   sizeWindow();
   window.addEventListener('resize', sizeWindow);
   buildWindow();
+  buildLab($('#view-lab'));
   buildReconForm();
   buildSettings();
   for (const t of $$('.tabs button')) t.addEventListener('click', () => { if (t.dataset.view === 'reconcile') state.form = null; show(t.dataset.view); });

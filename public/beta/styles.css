@@ -51,6 +51,15 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
   background: var(--bg); border-bottom: 1px solid var(--line);
 }
 .brand { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: -0.01em; }
+/* Formula tab */
+.lab-formula .k, .lab-predict .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.lab-formula .f { font-family: var(--mono); font-size: 15px; line-height: 1.5; margin: 6px 0; }
+.lab-formula .s, .lab-predict .s { font-size: 13px; color: var(--muted); line-height: 1.35; }
+.lab-predict { border: 2px solid var(--accent); border-radius: 16px; padding: 14px 16px; display: grid; gap: 4px; background: var(--surface); }
+.lab-predict .v { font-family: var(--display); font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+.lab-check { font-size: 15px; min-height: 20px; }
+.lab-check .good { color: var(--go); font-weight: 700; }
+.lab-check .bad { color: var(--stop); font-weight: 700; }
 .beta-tag { font-family: var(--body); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; vertical-align: middle; padding: 2px 6px; border-radius: 6px; background: var(--warn); color: #1a1003; }
 .chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--raised); color: var(--muted); white-space: nowrap; }
 .chip.ok { color: var(--go); }
@@ -196,7 +205,7 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
 
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 6px) max(8px, env(safe-area-inset-left, 0px));
   background: var(--bg); border-top: 1px solid var(--line);
 }
