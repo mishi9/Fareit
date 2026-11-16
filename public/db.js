@@ -108,6 +108,15 @@ export async function allShared() {
   }
 }
 
+export async function deleteShared(ids) {
+  try {
+    await withStore('shared', 'readwrite', (s) => { for (const id of ids) s.delete(id); });
+  } catch {
+    memoryOnly = true;
+  }
+  for (const id of ids) memory.shared.delete(id);
+}
+
 export async function putShared(rows) {
   const copies = rows.map(clone);
   try {

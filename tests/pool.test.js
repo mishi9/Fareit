@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import worker, { resetSchemaFlag, cleanJob } from '../worker/index.js';
 import { toPoolRow, fromPoolRow, isShareable, pushJobs, pullJobs } from '../public/sync.js';
-import { predict, priorNet, DEFAULT_SETTINGS } from '../public/model.js';
+import { predict, priorNet, isTrainable, DEFAULT_SETTINGS } from '../public/model.js';
 
 const S = DEFAULT_SETTINGS;
 const at = (iso) => new Date(iso).getTime();
@@ -203,4 +203,37 @@ test('phones push their jobs and learn from each other', async () => {
   const p = predict({ band: '12-15', zone: 'E', ts: now }, stored, S);
   assert.equal(p.basis, 1);
   assert.equal(p.shared, 1);
+});
+
+test('a phone can delete its own job; other phones see a tombstone and drop it', async () => {
+  const env = { DB: fakeD1() };
+  const api = client(env);
+  const del = (body) => worker.fetch(new Request('https://fareit.test/api/jobs/delete', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  }), env).then(async (r) => ({ status: r.status, body: await r.json() }));
+  await api.post({ device: 'device-aaaaaaaa', jobs: [job(), job({ id: 'job-0000000002' })] });
+  const before = await api.get();
+  assert.equal(before.body.jobs.length, 2);
+
+  // Someone else can't delete it; an id that never reached the pool is reported as missing.
+  const hijack = await del({ device: 'device-bbbbbbbb', ids: ['job-0000000001'] });
+  assert.deepEqual(hijack.body, { deleted: [], missing: ['job-0000000001'] });
+  const own = await del({ device: 'device-aaaaaaaa', ids: ['job-0000000001', 'job-never-uploaded'] });
+  assert.deepEqual(own.body, { deleted: ['job-0000000001'], missing: ['job-never-uploaded'] });
+  assert.deepEqual((await del({ device: 'device-aaaaaaaa', ids: ['job-0000000001'] })).body.deleted, ['job-0000000001'], 'deleting twice is fine');
+
+  // Another phone pulling since its last cursor gets a tombstone with nothing else in it.
+  const changes = await api.get(before.body.next);
+  assert.equal(changes.body.jobs.length, 1);
+  assert.deepEqual(Object.keys(changes.body.jobs[0]).sort(), ['deleted', 'id', 'rev']);
+  const stored = new Map((before.body.jobs).map((r) => [r.id, fromPoolRow(r)]));
+  await pullJobs({
+    since: before.body.next,
+    get: (c) => api.get(c).then((r) => r.body),
+    store: async (rows) => { for (const r of rows) { if (r.deleted) stored.delete(r.id); else stored.set(r.id, r); } },
+  });
+  assert.deepEqual([...stored.keys()], ['job-0000000002']);
+  // A fresh phone pulling everything gets the tombstone too, and the training set stays clean.
+  const fresh = (await api.get(0)).body.jobs.map(fromPoolRow);
+  assert.equal(fresh.filter((r) => !r.deleted && isTrainable(r)).length, 1);
 });

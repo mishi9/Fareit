@@ -7,6 +7,7 @@
 //   GET  /api/near?at=lat,lng                -> { label, address, postal, lat, lng } nearest address
 //   POST /api/jobs   { device, jobs: [...] } -> { accepted, rejected }   add/update anonymous jobs
 //   GET  /api/jobs?since=REV&limit=N         -> { jobs, next, more }     page through the pool
+//   POST /api/jobs/delete { device, ids }    -> { deleted, missing }     remove your own jobs
 //
 // No accounts. Each phone sends a random device id so it can correct its own rows and nobody
 // else's. The pool holds no addresses, names or exact places: pickup and drop are rounded to
@@ -213,6 +214,7 @@ function ensureSchema(db) {
     schemaReady = db.batch(SCHEMA.map((s) => db.prepare(s)))
       .then(() => addColumn(db, 'pricing TEXT'))
       .then(() => addColumn(db, 'card_km REAL'))
+      .then(() => addColumn(db, 'deleted INTEGER'))
       .catch((e) => {
         schemaReady = null;
         throw e;
@@ -323,16 +325,51 @@ async function postJobs(request, env) {
   return json({ accepted, rejected });
 }
 
+// A phone can delete only its own jobs. The row stays as an empty tombstone with a new rev, so
+// other phones see the deletion on their next pull and drop their copy.
+const TOMBSTONE = `UPDATE jobs SET deleted = 1, updated_at = ?3, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM jobs),
+    band = NULL, zone = NULL, decision = NULL, km = NULL, trip_min = NULL, drive_min = NULL, fare = NULL, payment = NULL,
+    pricing = NULL, card_km = NULL, pickup_lat = NULL, pickup_lng = NULL, drop_lat = NULL, drop_lng = NULL
+  WHERE id = ?1 AND device = ?2 AND deleted IS NOT 1`;
+
+async function deleteJobs(request, env) {
+  let body;
+  try {
+    body = JSON.parse(await request.text());
+  } catch {
+    return json({ error: 'Upload must be JSON.' }, 400);
+  }
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((id) => ID_RE.test(id)).slice(0, MAX_JOBS_PER_POST);
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const deleted = [];
+  const missing = [];
+  for (const id of ids) {
+    const row = await env.DB.prepare('SELECT device, deleted FROM jobs WHERE id = ?1').bind(id).first();
+    if (!row) { missing.push(id); continue; } // never reached the pool: nothing to remove
+    if (row.device !== device) { missing.push(id); continue; }
+    if (row.deleted !== 1) await env.DB.prepare(TOMBSTONE).bind(id, device, now).run();
+    deleted.push(id);
+  }
+  return json({ deleted, missing });
+}
+
 async function getJobs(url, env) {
   const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
     `SELECT rev, id, ts, ride, band, zone, decision, km, trip_min, drive_min, fare, payment,
-       pickup_lat, pickup_lng, drop_lat, drop_lng, pricing, card_km FROM jobs WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
+       pickup_lat, pickup_lng, drop_lat, drop_lng, pricing, card_km, deleted FROM jobs WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
-  const jobs = results.slice(0, limit);
+  const jobs = results.slice(0, limit).map((r) => {
+    if (r.deleted === 1) return { rev: r.rev, id: r.id, deleted: 1 };
+    const { deleted, ...rest } = r;
+    return rest;
+  });
   return json({ jobs, next: jobs.length ? jobs[jobs.length - 1].rev : since, more });
 }
 
@@ -343,7 +380,8 @@ export default {
       return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
     }
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
-    if (request.method !== 'GET' && !isJobsPost) return json({ error: 'Method not allowed' }, 405);
+    const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
+    if (request.method !== 'GET' && !isJobsPost && !isDelete) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
       return json({
@@ -353,6 +391,14 @@ export default {
     }
     if (!authorized(request, env)) return json({ error: 'Access key missing or wrong. Set it in Fareit under Settings.' }, 401);
 
+    if (isDelete) {
+      if (!env.DB) return json({ error: 'The shared pool isn’t set up on the server yet.' }, 503);
+      try {
+        return await deleteJobs(request, env);
+      } catch {
+        return json({ error: 'The shared pool couldn’t be reached.' }, 502);
+      }
+    }
     if (url.pathname === '/api/jobs') {
       if (!env.DB) return json({ error: 'The shared pool isn’t set up on the server yet.' }, 503);
       try {

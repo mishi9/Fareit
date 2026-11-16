@@ -37,6 +37,7 @@ export function toPoolRow(t) {
 
 // A pool row in the shape the model reads.
 export function fromPoolRow(row) {
+  if (row.deleted) return { id: row.id, deleted: true };
   const trainable = row.fare > 0 && row.km > 0;
   return {
     id: row.id,

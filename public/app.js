@@ -574,6 +574,7 @@ function syncNow() {
         if (await fetchDistance(t)) await db.putTrip(t);
         else if (/isn’t set up|Signing in to OneMap failed/.test(t.distanceError || '')) break; // server not ready; try next sync
       }
+      await flushDeletes();
       await pushJobs({
         trips: state.trips,
         device: state.device,
@@ -584,7 +585,13 @@ function syncNow() {
       const { cursor, total } = await pullJobs({
         since,
         get: (c) => api(`/api/jobs?since=${c}`),
-        store: (rows) => db.putShared(rows),
+        store: async (rows) => {
+          // Jobs their owner deleted come back as tombstones: drop our copy.
+          const gone = rows.filter((r) => r.deleted).map((r) => r.id);
+          if (gone.length) await db.deleteShared(gone);
+          const live = rows.filter((r) => !r.deleted);
+          if (live.length) await db.putShared(live);
+        },
       });
       if (total) state.shared = await db.allShared();
       await db.setKV('poolCursor', cursor);
@@ -598,6 +605,48 @@ function syncNow() {
     }
   })();
   return state.syncing;
+}
+
+// ---------- deleting a job ----------
+// Removes a job from this phone and, if it reached the shared pool, from the pool too. If the pool
+// can't be reached, the deletion is queued and sent on the next sync.
+async function deleteJob(t) {
+  state.trips = state.trips.filter((x) => x.id !== t.id);
+  state.shared = state.shared.filter((x) => x.id !== t.id);
+  await db.deleteTrips([t.id]);
+  await db.deleteShared([t.id]);
+  const queue = (await db.getKV('pendingDeletes')) || [];
+  if (!queue.includes(t.id)) queue.push(t.id);
+  await db.setKV('pendingDeletes', queue);
+  renderBadge();
+  toast('Job deleted from this phone. Removing it from the shared pool…');
+  await flushDeletes().catch(() => {});
+  if (state.view === 'trips') renderTrips();
+}
+
+async function flushDeletes() {
+  const queue = (await db.getKV('pendingDeletes')) || [];
+  if (!queue.length || !navigator.onLine) return;
+  const res = await api('/api/jobs/delete', { device: state.device, ids: queue.slice(0, 50) });
+  const done = new Set([...(res.deleted || []), ...(res.missing || [])]);
+  await db.setKV('pendingDeletes', queue.filter((id) => !done.has(id)));
+}
+
+// A Delete button that asks for a second tap, so a stray touch can't remove a job.
+function deleteButton(t) {
+  let armed = false;
+  let timer;
+  const b = button('Delete', 'ghost small danger', () => {
+    if (!armed) {
+      armed = true;
+      b.textContent = 'Tap again to delete';
+      timer = setTimeout(() => { armed = false; b.textContent = 'Delete'; }, 4000);
+      return;
+    }
+    clearTimeout(timer);
+    deleteJob(t);
+  });
+  return b;
 }
 
 // ---------- trips ----------
@@ -638,7 +687,26 @@ function renderTrips() {
       ${t.decision ? `<div class="acts"><span class="pill ${t.decision}">${decisionLabel(t.decision)}${t.decidedAt ? ` ${clock(t.decidedAt)}` : ''}</span></div>` : ''}`;
     const acts = document.createElement('div');
     acts.className = 'acts';
-    acts.append(button('Edit', 'ghost small', () => { show('reconcile'); openForm(t); }));
+    acts.append(button('Edit', 'ghost small', () => { show('reconcile'); openForm(t); }), deleteButton(t));
+    card.append(acts);
+    box.append(card);
+  }
+  // Jobs kept without a fare (No fare seen): listed so a duplicate or mistake can be removed.
+  const noFareJobs = state.trips.filter((t) => t.status === 'nofare').sort((a, b) => b.ts - a.ts);
+  if (noFareJobs.length) {
+    const h = document.createElement('h2');
+    h.textContent = 'Kept without a fare';
+    box.append(h);
+  }
+  for (const t of noFareJobs.slice(0, 100)) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="line1"><span class="when">${esc(when(t.ts))}</span><span class="when">No fare seen</span></div>
+      <div class="meta">${esc(distLabel(t))}${t.decision ? ` · ${decisionLabel(t.decision)}` : ''}</div>`;
+    const acts = document.createElement('div');
+    acts.className = 'acts';
+    acts.append(deleteButton(t));
     card.append(acts);
     box.append(card);
   }
