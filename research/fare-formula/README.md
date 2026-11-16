@@ -10,13 +10,22 @@ passenger fare = base + a × km + b × min  (+ ERP, tolls, fees, surcharges)    
 driver earned  = passenger fare − Grab's commission
 ```
 
+## Known facts
+
+- **Service:** the formula is for **standard GrabCar** (private hire). Only rows whose `ride_type` is
+  GrabCar / GrabCar Standard are fitted. GrabTaxi and JustGrab (which can be a taxi) are counted
+  but never mixed in.
+- **Minimum passenger fare: S$8.10**, however short the trip. Tested several times as a passenger
+  on normal GrabCar. Trips paying exactly S$8.10 are left out of the formula fit (the floor set
+  the fare, not the formula) and used to find the distance where the minimum stops applying.
+
 ## trips.csv, one row per job
 
 | Column | What | Required |
 |---|---|---|
 | id | running number | yes |
 | date, time | booking date (YYYY-MM-DD) and time (HH:MM, 24 h) | yes |
-| ride_type | JustGrab, GrabCar, Saver, 6-seater … | yes |
+| ride_type | GrabCar for standard private hire; anything else (GrabTaxi, JustGrab, Saver, 6-seater …) is kept apart | yes |
 | grab_km | distance Grab shows for the trip (not the odometer) | yes |
 | grab_min | trip time Grab estimated, if shown | if known |
 | actual_min | minutes actually driven, pickup to drop-off | if known |

@@ -4,6 +4,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Known facts, tested as a passenger (normal GrabCar, Singapore):
+//   - the minimum a passenger pays is S$8.10, however short the trip.
+const MIN_PASSENGER_FARE = 8.10;
+
+// Which service the formula is for. Only standard GrabCar (private hire) is fitted; GrabTaxi
+// (and anything else) runs on different rates and is reported separately, never mixed in.
+const FITTED = 'GrabCar';
+function service(name) {
+  const n = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!n) return 'unknown';
+  if (n.includes('taxi')) return 'GrabTaxi';
+  if (['grabcar', 'grabcarstandard', 'standard', 'car'].includes(n)) return 'GrabCar';
+  if (n.includes('justgrab')) return 'JustGrab'; // can be a taxi or a car: kept apart
+  return name;
+}
+
 const file = process.argv[2] || path.join(path.dirname(fileURLToPath(import.meta.url)), 'trips.csv');
 const [head, ...lines] = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/);
 const cols = head.split(',');
@@ -16,6 +32,9 @@ const trips = lines.filter((l) => l.trim()).map((l) => {
   r.min = r.grab_min ?? r.actual_min;
   r.addons = (r.erp || 0) + (r.tolls || 0) + (r.platform_fee || 0) + (r.other_surcharge || 0);
   r.core = r.passenger_fare - r.addons; // the part the distance/time formula sets
+  r.service = service(r.ride_type);
+  // Paid exactly the minimum: the formula didn't set this fare, the floor did.
+  r.atMinimum = Math.abs(r.passenger_fare - MIN_PASSENGER_FARE) < 0.005;
   return r;
 });
 
@@ -47,7 +66,18 @@ function lsq(X, y) {
 const dot = (x, w) => x.reduce((s, v, i) => s + v * w[i], 0);
 
 // ---- passenger formula, normal trips only ----
-const normal = trips.filter((t) => t.surge_flag === 'normal' && t.grab_km > 0 && t.core > 0);
+const byService = {};
+for (const t of trips) byService[t.service] = (byService[t.service] || 0) + 1;
+console.log(`By service: ${Object.entries(byService).map(([k, v]) => `${k} ${v}`).join(', ')}. Fitting ${FITTED} only.`);
+const car = trips.filter((t) => t.service === FITTED);
+const atMin = car.filter((t) => t.atMinimum);
+if (atMin.length) {
+  const longest = Math.max(...atMin.map((t) => t.grab_km));
+  console.log(`At the S$${MIN_PASSENGER_FARE.toFixed(2)} minimum: ${atMin.length} trip(s), longest ${longest} km. Left out of the fit; they show where the minimum stops applying.`);
+}
+const below = car.filter((t) => t.passenger_fare > 0 && t.passenger_fare < MIN_PASSENGER_FARE - 0.005);
+for (const t of below) console.log(`  check #${t.id}: passenger paid ${t.passenger_fare} — below the S$${MIN_PASSENGER_FARE.toFixed(2)} minimum (promo, or a different service?)`);
+const normal = car.filter((t) => t.surge_flag === 'normal' && t.grab_km > 0 && t.core > 0 && !t.atMinimum && t.passenger_fare >= MIN_PASSENGER_FARE);
 const withMin = normal.filter((t) => t.min > 0);
 const models = [
   { name: 'base + km', rows: normal, x: (t) => [1, t.grab_km], terms: ['base', 'per km'] },
@@ -90,8 +120,8 @@ for (const m of models) {
 }
 
 // ---- Grab's cut ----
-const paid = trips.filter((t) => t.passenger_fare > 0 && t.driver_earned > 0);
-console.log(`\nGrab's cut: ${paid.length} trips with both numbers`);
+const paid = car.filter((t) => t.passenger_fare > 0 && t.driver_earned > 0);
+console.log(`\nGrab's cut (${FITTED}): ${paid.length} trips with both numbers`);
 if (paid.length) {
   // ERP and tolls are usually passed straight to the driver, so measure the cut on the rest.
   const cuts = paid.map((t) => {
