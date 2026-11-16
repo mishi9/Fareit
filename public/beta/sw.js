@@ -1,5 +1,5 @@
 // Beta offline shell, separate from the main app's (scope /beta/, cache fareit-beta-…).
-const CACHE = 'fareit-beta-v10';
+const CACHE = 'fareit-beta-v11';
 const SHELL = [
   './',
   'index.html',

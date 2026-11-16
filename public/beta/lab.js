@@ -127,20 +127,20 @@ export async function buildLab(root) {
 
     <div class="row2">
       <div class="field"><label for="lab-km">Trip km (pickup → drop-off)</label>
-        <input id="lab-km" type="number" inputmode="decimal" step="0.1" min="0" placeholder="20.6"></div>
+        <input id="lab-km" type="number" inputmode="decimal" step="0.1" min="0"></div>
       <div class="field"><label for="lab-min">Trip min from pickup</label>
-        <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="22 (blank: estimate)"></div>
+        <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="blank = estimate"></div>
     </div>
     <p class="hint">Trip only, from the pickup point: the passenger's price doesn't include your way there. The card's total time includes it, so put that below instead.</p>
     <div class="row2">
       <div class="field"><label for="lab-cardmin">Card total min (optional)</label>
-        <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0" placeholder="32"></div>
+        <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0"></div>
       <div class="field"><label for="lab-pickupkm">Km to pickup (optional)</label>
-        <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.92"></div>
+        <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0"></div>
     </div>
     <div class="row2">
       <div class="field"><label for="lab-erp">ERP / tolls (S$, if any)</label>
-        <input id="lab-erp" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div>
+        <input id="lab-erp" type="number" inputmode="decimal" step="0.01" min="0"></div>
       <div class="field"><span class="flabel">Pricing</span>
         <div id="lab-surge" class="seg g2">
           <button type="button" data-v="normal">Normal</button>
@@ -159,9 +159,9 @@ export async function buildLab(root) {
 
     <div class="row2">
       <div class="field"><label for="lab-actual">Paid by passenger, actual (S$)</label>
-        <input id="lab-actual" type="number" inputmode="decimal" step="0.01" min="0" placeholder="14.00"></div>
+        <input id="lab-actual" type="number" inputmode="decimal" step="0.01" min="0"></div>
       <div class="field"><label for="lab-earned">You earned, actual (S$)</label>
-        <input id="lab-earned" type="number" inputmode="decimal" step="0.01" min="0" placeholder="11.20"></div>
+        <input id="lab-earned" type="number" inputmode="decimal" step="0.01" min="0"></div>
     </div>
     <div class="lab-check" id="lab-check"></div>
     <p class="msg" id="lab-msg" role="status"></p>
