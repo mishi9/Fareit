@@ -150,3 +150,56 @@ export function toCsv(trips) {
   });
   return [head, ...lines].join('\n') + '\n';
 }
+
+// ---- Time of day ----
+// How far real fares ran above or below the normal-price formula at this hour, from every trip
+// (normal and surge): this is where surge-prone hours show up. Trips count by how close their
+// booking hour is (1 h away 61%, 2 h away 14%), and one pseudo-trip at 0% keeps a single trip
+// from swinging it.
+const HOUR_SD = 1;
+export const hourOf = (ts) => { const d = new Date(ts); return d.getHours() + d.getMinutes() / 60; };
+const hourGap = (a, b) => { const g = Math.abs(a - b) % 24; return Math.min(g, 24 - g); };
+
+function ratioToFormula(t, w) {
+  if (!(t.actual > 0) || !(t.km > 0) || !(t.min > 0)) return null;
+  const p = passengerFare(w, t.km, t.min).fare; // without ERP: compare like with like
+  const r = Math.log((t.actual - (t.erp || 0)) / p);
+  return Number.isFinite(r) ? r : null;
+}
+
+export function timeOfDay(trips, ts) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const h = hourOf(ts);
+  let sw = 0;
+  let swr = 0;
+  let near = 0;
+  let surgeNear = 0;
+  for (const t of all) {
+    const r = ratioToFormula(t, w);
+    if (r === null) continue;
+    const g = hourGap(hourOf(t.ts), h);
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD));
+    sw += x;
+    swr += x * r;
+    if (g <= 1.5) { near++; if (t.surge === 'surge') surgeNear++; }
+  }
+  const m = swr / (sw + 1);
+  return { lift: Math.exp(m) - 1, near, surgeNear, weight: sw };
+}
+
+// Fares vs the formula in 3-hour blocks, for the "By time of day" table.
+export function byTimeBlock(trips) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const blocks = Array.from({ length: 8 }, (_, i) => ({ from: i * 3, to: i * 3 + 3, n: 0, surge: 0, sum: 0 }));
+  for (const t of all) {
+    const r = ratioToFormula(t, w);
+    if (r === null) continue;
+    const b = blocks[Math.floor(hourOf(t.ts) / 3) % 8];
+    b.n++;
+    b.sum += r;
+    if (t.surge === 'surge') b.surge++;
+  }
+  return blocks.map((b) => ({ ...b, lift: b.n ? Math.exp(b.sum / b.n) - 1 : null }));
+}

@@ -66,3 +66,26 @@ test('CSV export matches the research dataset columns and leaves out the base tr
   assert.equal(lines[0].split(',').length, lines[1].split(',').length);
   assert.ok(lines[1].includes(',Standard,10,20,,14,'));
 });
+
+test('time of day: how fares near an hour ran against the formula, surge trips included', async () => {
+  const { timeOfDay, byTimeBlock } = await import('../public/beta/formula.js');
+  const at = (iso) => Date.parse(iso);
+  // Normal midday trips teach the formula; evening surge trips paid 30% over it.
+  const midday = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14], [18, 35], [25, 30], [40, 50], [3, 9]]
+    .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
+  const evening = [[10, 20], [15, 25], [8, 18]].map(([km, min], i) => {
+    const t = make(km, min, { ts: at(`2026-11-1${7 + i}T18:30:00+08:00`), surge: 'surge' });
+    return { ...t, actual: Math.round(t.actual * 1.3 * 100) / 100 };
+  });
+  const all = [...midday, ...evening];
+  const sixPm = timeOfDay(all, at('2026-11-20T18:00:00+08:00'));
+  assert.equal(sixPm.near, 3);
+  assert.equal(sixPm.surgeNear, 3);
+  assert.ok(sixPm.lift > 0.15 && sixPm.lift < 0.3, `evening lift ${sixPm.lift}`);
+  const noon = timeOfDay(all, at('2026-11-20T12:00:00+08:00'));
+  assert.ok(Math.abs(noon.lift) < 0.05, `midday lift ${noon.lift}`);
+  const blocks = byTimeBlock(all);
+  assert.equal(blocks[6].n, 3, '18:00–21:00');
+  assert.equal(blocks[0].n, 1, '00:00–03:00 holds the base trip');
+  assert.ok(blocks[6].lift > 0.15);
+});

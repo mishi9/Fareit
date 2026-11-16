@@ -60,6 +60,13 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
 .lab-check { font-size: 15px; min-height: 20px; }
 .lab-check .good { color: var(--go); font-weight: 700; }
 .lab-check .bad { color: var(--stop); font-weight: 700; }
+.lab-two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; align-items: end; }
+.lab-predict .v.sm { font-size: 30px; }
+.lab-check { line-height: 1.5; }
+.lab-table { display: grid; gap: 4px; }
+.lab-table .row { display: grid; grid-template-columns: 1.3fr 0.7fr 1.2fr; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-family: var(--mono); font-size: 14px; }
+.lab-table .up { color: var(--warn); font-weight: 700; }
+.lab-table .down { color: var(--accent); font-weight: 700; }
 .beta-tag { font-family: var(--body); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; vertical-align: middle; padding: 2px 6px; border-radius: 6px; background: var(--warn); color: #1a1003; }
 .chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--raised); color: var(--muted); white-space: nowrap; }
 .chip.ok { color: var(--go); }

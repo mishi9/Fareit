@@ -1,19 +1,31 @@
-// Formula tab (beta): type a trip's distance and Grab's time, see the passenger fare the current
-// formula predicts, then type the real fare and take-home. Saving re-fits the weights, so the
-// next trip is predicted with everything learned so far. Trips stay on this phone (beta only):
-// they are never sent to the shared pool.
+// Formula tab (beta): type a trip's distance and Grab's time, see what the passenger should pay and
+// what you should earn by the current formula, then type the real numbers. Saving records the
+// predictions first, then re-fits, so every trip is an honest test. The booking time shows which
+// hours run above the normal-price formula (surge-prone hours). Trips stay on this phone (beta
+// only): they are never sent to the shared pool.
 import * as db from './db.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, MIN_PASSENGER, BASE_TRIPS,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock,
+  MIN_PASSENGER, BASE_TRIPS,
 } from './formula.js';
 
 const KEY = 'formulaLab';
 const $ = (s, root = document) => root.querySelector(s);
 const money = (n) => `S$${Number(n).toFixed(2)}`;
 const pct = (n) => `${(n * 100).toFixed(1)}%`;
+const signed = (n) => `${n >= 0 ? '+' : '−'}${Math.abs(n * 100).toFixed(0)}%`;
 const num = (el) => {
   const v = parseFloat(el.value);
   return Number.isFinite(v) ? v : null;
+};
+const pad = (n) => String(n).padStart(2, '0');
+const toLocalInput = (ts) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const offText = (pred, actual) => {
+  const off = pred - actual;
+  return Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`;
 };
 
 const lab = { trips: [], surge: 'normal', root: null };
@@ -34,25 +46,30 @@ export async function buildLab(root) {
         <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="22"></div>
     </div>
     <div class="row2">
+      <div class="field"><label for="lab-when">Booked at</label>
+        <input id="lab-when" type="datetime-local"></div>
       <div class="field"><label for="lab-erp">ERP / tolls (S$, if any)</label>
         <input id="lab-erp" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div>
-      <div class="field"><span class="flabel">Pricing</span>
-        <div id="lab-surge" class="seg g2">
-          <button type="button" data-v="normal">Normal</button>
-          <button type="button" data-v="surge">Surge</button>
-        </div></div>
     </div>
+    <div class="field"><span class="flabel">Pricing</span>
+      <div id="lab-surge" class="seg g2">
+        <button type="button" data-v="normal">Normal</button>
+        <button type="button" data-v="surge">Surge</button>
+      </div></div>
 
     <div class="lab-predict" aria-live="polite">
-      <div class="k">Paid by passenger, by the formula</div>
-      <div class="v" id="lab-pred">—</div>
+      <div class="lab-two">
+        <div><div class="k">Paid by passenger</div><div class="v" id="lab-pred">—</div></div>
+        <div><div class="k">You earn</div><div class="v sm" id="lab-pred-earn">—</div></div>
+      </div>
       <div class="s" id="lab-pred-sub">Type the distance and time.</div>
+      <div class="s" id="lab-tod"></div>
     </div>
 
     <div class="row2">
       <div class="field"><label for="lab-actual">Paid by passenger, actual (S$)</label>
         <input id="lab-actual" type="number" inputmode="decimal" step="0.01" min="0" placeholder="14.00"></div>
-      <div class="field"><label for="lab-earned">You earned (S$)</label>
+      <div class="field"><label for="lab-earned">You earned, actual (S$)</label>
         <input id="lab-earned" type="number" inputmode="decimal" step="0.01" min="0" placeholder="11.20"></div>
     </div>
     <div class="lab-check" id="lab-check"></div>
@@ -64,6 +81,8 @@ export async function buildLab(root) {
 
     <h2>How close it's getting</h2>
     <div id="lab-stats"></div>
+    <h2>By time of day</h2>
+    <div id="lab-tod-table"></div>
     <h2>Grab's cut</h2>
     <div id="lab-cut"></div>
     <h2>Trips</h2>
@@ -71,7 +90,8 @@ export async function buildLab(root) {
     <div id="lab-list" class="stack"></div>
     <button type="button" class="ghost wide" id="lab-export">Export CSV</button>`;
 
-  for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
+  $('#lab-when', root).value = toLocalInput(Date.now());
+  for (const id of ['lab-km', 'lab-min', 'lab-when', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
   for (const b of root.querySelectorAll('#lab-surge button')) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
@@ -85,13 +105,14 @@ function renderAll() {
   renderFormula();
   update();
   renderStats();
+  renderTimeTable();
   renderList();
 }
 
 function renderFormula() {
   const w = weights();
   const mine = w.n - BASE_TRIPS.length;
-  const basis = mine > 0 ? `Fitted from the base trip and ${mine} of yours.` : 'From the base trip only (11.58 km, paid S$16.80): it sets the level, more trips sort out the split.';
+  const basis = mine > 0 ? `Fitted from the base trip and ${mine} normal trip${mine === 1 ? '' : 's'} of yours.` : 'From the base trip only (11.58 km, paid S$16.80): it sets the level, more trips sort out the split.';
   $('#lab-formula', lab.root).innerHTML = `
     <div class="k">Grab's published formula (Standard, normal pricing)</div>
     <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min) + ERP</div>
@@ -100,42 +121,65 @@ function renderFormula() {
 
 function readForm() {
   const r = lab.root;
+  const when = new Date($('#lab-when', r).value).getTime();
   return {
     km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: num($('#lab-erp', r)) || 0,
+    ts: Number.isFinite(when) ? when : Date.now(),
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
   };
 }
 
-// Live: the predicted fare appears as soon as distance and time are in.
+// Live: the predicted fare and earnings appear as soon as distance and time are in.
 function update() {
   const r = lab.root;
   for (const b of r.querySelectorAll('#lab-surge button')) b.classList.toggle('sel', b.dataset.v === lab.surge);
   const f = readForm();
   const pred = $('#lab-pred', r);
+  const predEarn = $('#lab-pred-earn', r);
   const sub = $('#lab-pred-sub', r);
+  const tod = $('#lab-tod', r);
   const check = $('#lab-check', r);
   if (!(f.km > 0) || !(f.min > 0)) {
     pred.textContent = '—';
+    predEarn.textContent = '—';
     sub.textContent = 'Type the distance and time.';
+    tod.textContent = '';
     check.innerHTML = '';
     return;
   }
   const p = passengerFare(weights(), f.km, f.min, f.erp);
   const c = commission();
+  const earn = driverEarns(c, p.fare, f.erp);
   pred.textContent = money(p.fare);
-  const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)} of what the passenger pays${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
-  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}You'd earn about ${money(driverEarns(c, p.fare, f.erp))} (${cutLabel}).${f.surge === 'surge' ? ' Surge: the formula is for normal pricing, so expect the real fare to be higher.' : ''}`;
+  predEarn.textContent = money(earn);
+  const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
+  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}Normal-price formula. ${cutLabel}.${f.surge === 'surge' ? ' Surge: expect the real fare to be higher.' : ''}`;
+
+  // Time of day: how fares near this hour have run against the formula (surge-prone hours).
+  const t = timeOfDay(lab.trips, f.ts);
+  const h = new Date(f.ts);
+  const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
+  if (t.near === 0) {
+    tod.textContent = `Around ${at}: no trips near this hour yet.`;
+  } else {
+    const likely = Math.round(p.fare * (1 + t.lift) * 100) / 100;
+    tod.textContent = `Around ${at}: fares have run ${signed(t.lift)} vs the formula (${t.near} trip${t.near === 1 ? '' : 's'} within 1½ h${t.surgeNear ? `, ${t.surgeNear} surge` : ''}). With that, about ${money(likely)}.`;
+  }
+
   const lines = [];
   if (f.actual > 0) {
     const off = p.fare - f.actual;
-    const close = Math.abs(off) < 0.005 ? 'Exact.' : `Formula is ${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'} (${pct(Math.abs(off) / f.actual)}).`;
-    lines.push(`<span class="${Math.abs(off) <= 0.5 ? 'good' : 'bad'}">${close}</span>`);
+    lines.push(`<span class="${Math.abs(off) <= 0.5 ? 'good' : 'bad'}">Paid: formula ${offText(p.fare, f.actual)} (${pct(Math.abs(off) / f.actual)}).</span>`);
+  }
+  if (f.earned > 0) {
+    const off = earn - f.earned;
+    lines.push(`<span class="${Math.abs(off) <= 0.5 ? 'good' : 'bad'}">Earned: prediction ${offText(earn, f.earned)} (${pct(Math.abs(off) / f.earned)}).</span>`);
   }
   if (f.actual > 0 && f.earned > 0) {
     const cut = cutOf(f);
-    lines.push(`Grab kept ${money(cut.cut)} on this trip (${pct(cut.rate)} of what the passenger paid).`);
+    lines.push(`Grab kept ${money(cut.cut)} (${pct(cut.rate)} of what the passenger paid).`);
   }
-  check.innerHTML = lines.join(' ');
+  check.innerHTML = lines.join('<br>');
 }
 
 async function save() {
@@ -143,54 +187,69 @@ async function save() {
   const msg = $('#lab-msg', lab.root);
   if (!(f.km > 0) || !(f.min > 0)) { msg.textContent = 'Add the distance and the time.'; msg.classList.add('err'); return; }
   if (!(f.actual > 0)) { msg.textContent = 'Add what the passenger actually paid.'; msg.classList.add('err'); return; }
-  // The prediction is recorded before this trip changes the weights: an honest test each time.
+  // Predictions are recorded before this trip changes anything: an honest test each time.
   const w = weights();
   const predicted = passengerFare(w, f.km, f.min, f.erp).fare;
   const c = commission();
+  const predictedEarned = driverEarns(c, predicted, f.erp);
+  const t = timeOfDay(lab.trips, f.ts);
   lab.trips.push({
-    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ts: Date.now(), ...f,
-    predicted, predictedEarned: driverEarns(c, predicted, f.erp),
+    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...f,
+    savedAt: Date.now(), predicted, predictedEarned, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
   });
   await db.setKV(KEY, lab.trips);
-  const off = predicted - f.actual;
   msg.classList.remove('err');
-  msg.textContent = `Saved. The formula said ${money(predicted)}, real ${money(f.actual)} (${off === 0 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`}). Weights updated.`;
+  msg.textContent = `Saved. Paid: formula ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Formula updated.`;
   clearForm(true);
   renderAll();
 }
 
 function clearForm(keepMsg) {
   for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, lab.root).value = '';
+  $('#lab-when', lab.root).value = toLocalInput(Date.now());
   lab.surge = 'normal';
   if (keepMsg !== true) $('#lab-msg', lab.root).textContent = '';
   update();
 }
+
+const avg = (xs) => xs.reduce((s, v) => s + v, 0) / xs.length;
 
 function renderStats() {
   const box = $('#lab-stats', lab.root);
   const normal = lab.trips.filter((t) => t.surge === 'normal' && t.actual > 0);
   if (!normal.length) { box.innerHTML = '<p class="note">Save a few normal trips. Each one is predicted before it teaches the formula, so this shows how close the guesses are getting.</p>'; return; }
   const offs = normal.map((t) => Math.abs(t.predicted - t.actual));
-  const avg = offs.reduce((s, v) => s + v, 0) / offs.length;
   const last5 = offs.slice(-5);
-  const avg5 = last5.reduce((s, v) => s + v, 0) / last5.length;
+  const earnOffs = normal.filter((t) => t.earned > 0 && t.predictedEarned > 0).map((t) => Math.abs(t.predictedEarned - t.earned));
+  const earnLast5 = earnOffs.slice(-5);
   const loo = looError(lab.trips);
   box.innerHTML = `
     <div class="tiles">
-      <div class="tile"><span class="v">${money(avg5)}</span><span class="k">Off on the last ${last5.length} (predicted before saving)</span></div>
-      <div class="tile"><span class="v">${money(avg)}</span><span class="k">Off on all ${offs.length}</span></div>
-      <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Off with today's weights${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
-      <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length}</span><span class="k">Within 10 cents</span></div>
+      <div class="tile"><span class="v">${money(avg(last5))}</span><span class="k">Paid: off on the last ${last5.length} (predicted before saving)</span></div>
+      <div class="tile"><span class="v">${earnLast5.length ? money(avg(earnLast5)) : '—'}</span><span class="k">Earned: off on the last ${earnLast5.length || ''} (predicted before saving)</span></div>
+      <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Paid: off with today's formula${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
+      <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length} / ${normal.length}</span><span class="k">Paid within 10 cents</span></div>
     </div>
-    <p class="note">"Off with today's weights" predicts each trip from all the others, the honest test of the current formula.</p>`;
+    <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips only.</p>`;
+}
+
+// Fares vs the normal-price formula by 3-hour block: where surge-prone hours show up.
+function renderTimeTable() {
+  const box = $('#lab-tod-table', lab.root);
+  const rows = byTimeBlock(lab.trips).filter((b) => b.n);
+  box.innerHTML = `
+    <p class="note">How real fares ran against the normal-price formula, by booking time. Surge trips are included, so busy hours show up here.</p>
+    <div class="lab-table">${rows.map((b) => `
+      <div class="row"><span>${pad(b.from)}:00–${pad(b.to % 24)}:00</span><span class="${b.lift > 0.05 ? 'up' : b.lift < -0.05 ? 'down' : ''}">${signed(b.lift)}</span><span>${b.n} trip${b.n === 1 ? '' : 's'}${b.surge ? `, ${b.surge} surge` : ''}</span></div>`).join('')}
+    </div>`;
 }
 
 function renderCut() {
   const box = $('#lab-cut', lab.root);
   const c = commission();
   const verdict = c.kind === 'flat'
-    ? `Looks like a flat <b>${pct(c.avgRate)}</b>.`
+    ? `Looks like a flat <b>${pct(c.avgRate)}</b> of what the passenger paid.`
     : c.kind === 'percent+fixed'
       ? `Looks like <b>${pct(1 - c.keep)}</b> plus <b>${money(-c.fixed)}</b> per job.`
       : `<b>${pct(c.avgRate)}</b> of what the passenger paid so far${c.n === 1 ? ' (base trip: S$4.70 of S$16.80)' : ''}. 3 trips will show whether it's a flat % or not.`;
@@ -203,14 +262,13 @@ function renderList() {
   const box = $('#lab-list', lab.root);
   box.innerHTML = lab.trips.length ? '' : '<p class="empty">No trips of yours yet.</p>';
   for (const t of [...lab.trips].reverse()) {
-    const off = t.predicted - t.actual;
     const cut = cutOf(t);
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
-      <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
+      <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
       <div class="meta">${t.km} km · ${t.min} min${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : ''}</div>
-      <div class="meta">Formula said ${money(t.predicted)} (${Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`})${cut ? ` · earned ${money(t.earned)}, Grab kept ${pct(cut.rate)}` : ''}</div>`;
+      <div class="meta">Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})${t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     let armed = false;
@@ -227,7 +285,8 @@ function renderList() {
     acts.append(del);
     card.append(acts);
     box.append(card);
-  }  box.append(baseCard());
+  }
+  box.append(baseCard());
 }
 
 // The built-in base trip, listed last so it's clear where the starting weights came from.
@@ -236,7 +295,7 @@ function baseCard() {
   const card = document.createElement('div');
   card.className = 'card';
   card.innerHTML = `
-    <div class="line1"><span class="when">Base trip (built in)</span><span class="when">${money(t.actual)}</span></div>
+    <div class="line1"><span class="when">Base trip (built in), ~01:30</span><span class="when">${money(t.actual)}</span></div>
     <div class="meta">${t.km} km · ${t.min} min (OneMap) · earned ${money(t.earned)}, Grab kept ${money(cutOf(t).cut)}</div>
     <div class="meta">${t.note}</div>`;
   return card;
