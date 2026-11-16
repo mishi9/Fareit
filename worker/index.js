@@ -8,6 +8,9 @@
 //   POST /api/jobs   { device, jobs: [...] } -> { accepted, rejected }   add/update anonymous jobs
 //   GET  /api/jobs?since=REV&limit=N         -> { jobs, next, more }     page through the pool
 //   POST /api/jobs/delete { device, ids }    -> { deleted, missing }     remove your own jobs
+//   POST /api/formula { device, trips }      -> { accepted, rejected }   beta formula dataset
+//   GET  /api/formula?since=REV              -> { trips, next, more }    (separate from the pool)
+//   POST /api/formula/delete { device, ids } -> { deleted, missing }
 //
 // No accounts. Each phone sends a random device id so it can correct its own rows and nobody
 // else's. The pool holds no addresses, names or exact places: pickup and drop are rounded to
@@ -205,6 +208,21 @@ const SCHEMA = [
   )`,
   'CREATE INDEX IF NOT EXISTS jobs_rev ON jobs(rev)',
   'CREATE INDEX IF NOT EXISTS jobs_ip ON jobs(ip_hash, received_at)',
+  // The beta formula dataset: exact trips for working out Grab's fare formula. Separate from the
+  // jobs pool and never used by the main app. Numbers only: no places, no addresses.
+  `CREATE TABLE IF NOT EXISTS formula_trips (
+    id TEXT PRIMARY KEY,
+    device TEXT NOT NULL,
+    ip_hash TEXT,
+    received_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    rev INTEGER NOT NULL,
+    ts INTEGER,
+    km REAL, min REAL, erp REAL, paid REAL, earned REAL, surge TEXT,
+    predicted REAL, predicted_earned REAL,
+    deleted INTEGER
+  )`,
+  'CREATE INDEX IF NOT EXISTS formula_rev ON formula_trips(rev)',
 ];
 let schemaReady = null;
 // Pools created before a column existed get it added; on newer ones it's already there.
@@ -373,6 +391,118 @@ async function getJobs(url, env) {
   return json({ jobs, next: jobs.length ? jobs[jobs.length - 1].rev : since, more });
 }
 
+// ---------- beta formula dataset ----------
+const FORMULA_MAX_PER_POST = 50;
+const FORMULA_MAX_NEW_PER_IP_PER_DAY = 200;
+
+export function cleanFormulaTrip(t, now = Date.now()) {
+  if (!t || typeof t !== 'object' || !ID_RE.test(String(t.id || ''))) return null;
+  const n = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const ts = n(t.ts);
+  const km = n(t.km);
+  const min = n(t.min);
+  const erp = n(t.erp) ?? 0;
+  const paid = n(t.paid);
+  const earned = n(t.earned);
+  const predicted = n(t.predicted);
+  const predictedEarned = n(t.predicted_earned);
+  if (!Number.isFinite(ts) || ts < now - 365 * 86400 * 1000 || ts > now + 10 * 60 * 1000) return null;
+  if (!(km >= 0.3 && km <= 100) || !(min >= 1 && min <= 240) || !(paid >= 2 && paid <= 400)) return null;
+  if (!inRange(erp, 0, 50) || !inRange(earned, 0.5, 400) || !inRange(predicted, 0, 1000) || !inRange(predictedEarned, 0, 1000)) return null;
+  if (!['normal', 'surge'].includes(t.surge)) return null;
+  return {
+    id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
+    earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
+  };
+}
+
+const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received_at, updated_at, rev, ts, km, min, erp, paid,
+    earned, surge, predicted, predicted_earned, deleted)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0)
+  ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
+    min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
+    predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0
+  WHERE formula_trips.device = excluded.device`;
+
+async function readJson(request) {
+  const text = await request.text();
+  if (text.length > 100 * 1024) return { error: json({ error: 'Too much data in one upload.' }, 413) };
+  try {
+    return { body: JSON.parse(text) };
+  } catch {
+    return { error: json({ error: 'Upload must be JSON.' }, 400) };
+  }
+}
+
+async function postFormula(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  const trips = Array.isArray(body.trips) ? body.trips.slice(0, FORMULA_MAX_PER_POST) : [];
+  if (!trips.length) return json({ accepted: [], rejected: [] });
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const ipHash = await hashIp(request, env);
+  const recent = await env.DB.prepare('SELECT COUNT(*) AS n FROM formula_trips WHERE ip_hash = ?1 AND received_at > ?2')
+    .bind(ipHash, now - 86400 * 1000).first();
+  let budget = FORMULA_MAX_NEW_PER_IP_PER_DAY - Number((recent && recent.n) || 0);
+  const accepted = [];
+  const rejected = [];
+  for (const raw of trips) {
+    const t = cleanFormulaTrip(raw, now);
+    if (!t) { rejected.push(raw && raw.id); continue; }
+    const existing = await env.DB.prepare('SELECT device FROM formula_trips WHERE id = ?1').bind(t.id).first();
+    if (existing && existing.device !== device) { rejected.push(t.id); continue; }
+    if (!existing) {
+      if (budget <= 0) { rejected.push(t.id); continue; }
+      budget--;
+    }
+    await env.DB.prepare(FORMULA_UPSERT).bind(
+      t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
+    ).run();
+    accepted.push(t.id);
+  }
+  return json({ accepted, rejected });
+}
+
+async function getFormula(url, env) {
+  const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
+  const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
+  await ensureSchema(env.DB);
+  const { results } = await env.DB.prepare(
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, deleted
+       FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
+  ).bind(since, limit + 1).all();
+  const more = results.length > limit;
+  const trips = results.slice(0, limit).map((r) => {
+    if (r.deleted === 1) return { rev: r.rev, id: r.id, deleted: 1 };
+    const { deleted, ...rest } = r;
+    return rest;
+  });
+  return json({ trips, next: trips.length ? trips[trips.length - 1].rev : since, more });
+}
+
+async function deleteFormula(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((id) => ID_RE.test(id)).slice(0, FORMULA_MAX_PER_POST);
+  await ensureSchema(env.DB);
+  const deleted = [];
+  const missing = [];
+  for (const id of ids) {
+    const row = await env.DB.prepare('SELECT device FROM formula_trips WHERE id = ?1').bind(id).first();
+    if (!row || row.device !== device) { missing.push(id); continue; }
+    await env.DB.prepare(`UPDATE formula_trips SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips),
+        km = NULL, min = NULL, erp = NULL, paid = NULL, earned = NULL, surge = NULL, predicted = NULL, predicted_earned = NULL
+      WHERE id = ?1`).bind(id, Date.now()).run();
+    deleted.push(id);
+  }
+  return json({ deleted, missing });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -381,7 +511,8 @@ export default {
     }
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
-    if (request.method !== 'GET' && !isJobsPost && !isDelete) return json({ error: 'Method not allowed' }, 405);
+    const isFormulaWrite = (url.pathname === '/api/formula' || url.pathname === '/api/formula/delete') && request.method === 'POST';
+    if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
       return json({
@@ -391,6 +522,15 @@ export default {
     }
     if (!authorized(request, env)) return json({ error: 'Access key missing or wrong. Set it in Fareit under Settings.' }, 401);
 
+    if (url.pathname === '/api/formula' || url.pathname === '/api/formula/delete') {
+      if (!env.DB) return json({ error: 'The database isn’t set up on the server yet.' }, 503);
+      try {
+        if (url.pathname === '/api/formula/delete') return await deleteFormula(request, env);
+        return request.method === 'POST' ? await postFormula(request, env) : await getFormula(url, env);
+      } catch {
+        return json({ error: 'The database couldn’t be reached.' }, 502);
+      }
+    }
     if (isDelete) {
       if (!env.DB) return json({ error: 'The shared pool isn’t set up on the server yet.' }, 503);
       try {

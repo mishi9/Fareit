@@ -5,7 +5,7 @@ const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
-import { buildLab } from './lab.js';
+import { buildLab, syncLab } from './lab.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -125,6 +125,7 @@ function show(view) {
   if (location.hash !== `#${view}`) history.replaceState(null, '', `#${view}`);
   if (view === 'reconcile') { if (!state.form) renderReconList(); }
   if (view === 'trips') renderTrips();
+  if (view === 'lab') syncLab();
   keepAwake();
 }
 

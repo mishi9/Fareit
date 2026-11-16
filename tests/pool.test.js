@@ -237,3 +237,30 @@ test('a phone can delete its own job; other phones see a tombstone and drop it',
   const fresh = (await api.get(0)).body.jobs.map(fromPoolRow);
   assert.equal(fresh.filter((r) => !r.deleted && isTrainable(r)).length, 1);
 });
+
+test('formula dataset: separate table, own-device edits and deletes, numbers only', async () => {
+  const env = { DB: fakeD1() };
+  const call = (path, body) => worker.fetch(new Request(`https://fareit.test${path}`, body
+    ? { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': '9.9.9.9' }, body: JSON.stringify(body) } : {}), env)
+    .then(async (r) => ({ status: r.status, body: await r.json() }));
+  const trip = (over = {}) => ({ id: 'lab-trip-0001', ts: Date.now() - 60000, km: 17.76, min: 16, erp: 0, paid: 17, earned: 12.3, surge: 'normal', predicted: 21.3, predicted_earned: 15.34, ...over });
+
+  const up = await call('/api/formula', { device: 'device-aaaaaaaa', trips: [trip(), trip({ id: 'lab-trip-0002', km: 999 }), trip({ id: 'lab-trip-0003', surge: 'boost' })] });
+  assert.deepEqual(up.body, { accepted: ['lab-trip-0001'], rejected: ['lab-trip-0002', 'lab-trip-0003'] });
+  const all = await call('/api/formula?since=0');
+  assert.equal(all.body.trips.length, 1);
+  assert.deepEqual(Object.keys(all.body.trips[0]).sort(), ['earned', 'erp', 'id', 'km', 'min', 'paid', 'predicted', 'predicted_earned', 'rev', 'surge', 'ts']);
+  assert.equal(all.body.trips[0].paid, 17);
+
+  // The jobs pool is untouched.
+  assert.equal((await call('/api/jobs?since=0')).body.jobs.length, 0);
+
+  // Only the phone that added a trip can change or delete it.
+  assert.deepEqual((await call('/api/formula', { device: 'device-bbbbbbbb', trips: [trip({ paid: 99 })] })).body.rejected, ['lab-trip-0001']);
+  assert.deepEqual((await call('/api/formula/delete', { device: 'device-bbbbbbbb', ids: ['lab-trip-0001'] })).body, { deleted: [], missing: ['lab-trip-0001'] });
+  assert.deepEqual((await call('/api/formula', { device: 'device-aaaaaaaa', trips: [trip({ earned: 12.4 })] })).body.accepted, ['lab-trip-0001']);
+  const del = await call('/api/formula/delete', { device: 'device-aaaaaaaa', ids: ['lab-trip-0001'] });
+  assert.deepEqual(del.body.deleted, ['lab-trip-0001']);
+  const after = await call(`/api/formula?since=${all.body.next}`);
+  assert.deepEqual(after.body.trips.map((t) => [t.id, t.deleted]), [['lab-trip-0001', 1]]);
+});

@@ -1,8 +1,9 @@
 // Formula tab (beta): type a trip's distance and Grab's time, see what the passenger should pay and
 // what you should earn by the current formula, then type the real numbers. Saving records the
 // predictions first, then re-fits, so every trip is an honest test. The trip's time is when you
-// tap Save; it shows which hours run above the normal-price formula (surge-prone hours). Trips stay on this phone (beta
-// only): they are never sent to the shared pool.
+// tap Save; it shows which hours run above the normal-price formula (surge-prone hours).
+// Trips are uploaded to the formula dataset on the server (separate from the shared jobs pool)
+// and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock,
@@ -24,14 +25,90 @@ const offText = (pred, actual) => {
   return Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`;
 };
 
-const lab = { trips: [], surge: 'normal', root: null };
+const lab = { trips: [], shared: {}, surge: 'normal', root: null, device: null, syncNote: '' };
 
-const weights = () => fitWeights(lab.trips);
-const commission = () => fitCommission(lab.trips);
+// Everyone's trips: yours (on this phone) plus other testers' (from the server).
+const dataset = () => {
+  const mine = new Set(lab.trips.map((t) => t.id));
+  return [...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))];
+};
+const weights = () => fitWeights(dataset());
+const commission = () => fitCommission(dataset());
+
+// ---- the formula dataset on the server ----
+const toRow = (t) => ({
+  id: t.id, ts: t.ts, km: t.km, min: t.min, erp: t.erp || 0, paid: t.actual, earned: t.earned ?? null,
+  surge: t.surge, predicted: t.predicted ?? null, predicted_earned: t.predictedEarned ?? null,
+});
+const fromRow = (r) => ({
+  id: r.id, ts: r.ts, km: r.km, min: r.min, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, shared: true,
+});
+const printOf = (t) => JSON.stringify(toRow(t));
+
+async function post(path, body) {
+  const key = await db.getKV('apiKey');
+  const headers = { 'content-type': 'application/json', ...(key ? { 'x-fareit-key': key } : {}) };
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+let syncing = null;
+export function syncLab() {
+  if (!lab.device) return Promise.resolve(); // not set up yet: buildLab syncs once it is
+  if (syncing) return syncing;
+  syncing = (async () => {
+    try {
+      if (!navigator.onLine) throw new Error('offline');
+      // deletions waiting from earlier
+      const dels = (await db.getKV('formulaDeletes')) || [];
+      if (dels.length) {
+        const r = await post('../api/formula/delete', { device: lab.device, ids: dels.slice(0, 50) });
+        const done = new Set([...(r.deleted || []), ...(r.missing || [])]);
+        await db.setKV('formulaDeletes', dels.filter((id) => !done.has(id)));
+      }
+      // your new or changed trips
+      const todo = lab.trips.filter((t) => t.uploaded !== printOf(t));
+      for (let i = 0; i < todo.length; i += 50) {
+        const batch = todo.slice(i, i + 50);
+        const r = await post('../api/formula', { device: lab.device, trips: batch.map(toRow) });
+        const seen = new Set([...(r.accepted || []), ...(r.rejected || [])]);
+        for (const t of batch) if (seen.has(t.id)) t.uploaded = printOf(t);
+      }
+      if (todo.length) await db.setKV(KEY, lab.trips);
+      // everyone's trips since last time
+      let cursor = (await db.getKV('formulaCursor')) || 0;
+      for (let page = 0; page < 20; page++) {
+        const res = await fetch(`../api/formula?since=${cursor}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        for (const r of data.trips || []) {
+          if (r.deleted) delete lab.shared[r.id];
+          else lab.shared[r.id] = fromRow(r);
+        }
+        cursor = data.next ?? cursor;
+        if (!data.more) break;
+      }
+      await db.setKV('formulaShared', lab.shared);
+      await db.setKV('formulaCursor', cursor);
+      const waiting = lab.trips.filter((t) => t.uploaded !== printOf(t)).length;
+      lab.syncNote = waiting ? `${waiting} trip${waiting === 1 ? '' : 's'} waiting to upload.` : `Synced with the formula dataset at ${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: false })}.`;
+    } catch {
+      lab.syncNote = 'Couldn’t reach the formula dataset. Your trips are kept here and will upload later.';
+    } finally {
+      syncing = null;
+      if (lab.root) renderAll();
+    }
+  })();
+  return syncing;
+}
 
 export async function buildLab(root) {
   lab.root = root;
   lab.trips = (await db.getKV(KEY)) || [];
+  lab.shared = (await db.getKV('formulaShared')) || {};
+  lab.device = await db.getKV('device');
   root.innerHTML = `
     <div class="card lab-formula" id="lab-formula"></div>
 
@@ -79,8 +156,8 @@ export async function buildLab(root) {
     <div id="lab-tod-table"></div>
     <h2>Grab's cut</h2>
     <div id="lab-cut"></div>
-    <h2>Trips</h2>
-    <p class="note">Kept on this phone in the beta only, never in the shared pool.</p>
+    <h2>Your trips</h2>
+    <p class="note" id="lab-sync"></p>
     <div id="lab-list" class="stack"></div>
     <button type="button" class="ghost wide" id="lab-export">Export CSV</button>`;
 
@@ -92,6 +169,7 @@ export async function buildLab(root) {
   $('#lab-clear', root).addEventListener('click', clearForm);
   $('#lab-export', root).addEventListener('click', exportCsv);
   renderAll();
+  syncLab();
 }
 
 function renderAll() {
@@ -104,8 +182,11 @@ function renderAll() {
 
 function renderFormula() {
   const w = weights();
-  const mine = w.n - BASE_TRIPS.length;
-  const basis = mine > 0 ? `Fitted from the base trip and ${mine} normal trip${mine === 1 ? '' : 's'} of yours.` : 'From the base trip only (11.58 km, paid S$16.80): it sets the level, more trips sort out the split.';
+  const learned = w.n - BASE_TRIPS.length;
+  const others = Object.keys(lab.shared).filter((id) => !lab.trips.some((t) => t.id === id)).length;
+  const basis = learned > 0
+    ? `Fitted from the base trip and ${learned} normal trip${learned === 1 ? '' : 's'}${others ? ` (${others} trip${others === 1 ? '' : 's'} from other drivers in the dataset)` : ''}.`
+    : 'From the base trip only (11.58 km, paid S$16.80): it sets the level, more trips sort out the split.';
   $('#lab-formula', lab.root).innerHTML = `
     <div class="k">Grab's published formula (Standard, normal pricing)</div>
     <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min) + ERP</div>
@@ -148,7 +229,7 @@ function update() {
   sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}Normal-price formula. ${cutLabel}.${f.surge === 'surge' ? ' Surge: expect the real fare to be higher.' : ''}`;
 
   // Time of day: how fares near this hour have run against the formula (surge-prone hours).
-  const t = timeOfDay(lab.trips, f.ts);
+  const t = timeOfDay(dataset(), f.ts);
   const h = new Date(f.ts);
   const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
   if (t.near === 0) {
@@ -184,13 +265,14 @@ async function save() {
   const predicted = passengerFare(w, f.km, f.min, f.erp).fare;
   const c = commission();
   const predictedEarned = driverEarns(c, predicted, f.erp);
-  const t = timeOfDay(lab.trips, f.ts);
+  const t = timeOfDay(dataset(), f.ts);
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...f,
     predicted, predictedEarned, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
   });
   await db.setKV(KEY, lab.trips);
+  syncLab();
   msg.classList.remove('err');
   msg.textContent = `Saved. Paid: formula ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Formula updated.`;
   clearForm(true);
@@ -208,13 +290,13 @@ const avg = (xs) => xs.reduce((s, v) => s + v, 0) / xs.length;
 
 function renderStats() {
   const box = $('#lab-stats', lab.root);
-  const normal = lab.trips.filter((t) => t.surge === 'normal' && t.actual > 0);
+  const normal = dataset().filter((t) => t.surge === 'normal' && t.actual > 0 && t.predicted > 0).sort((a, b) => a.ts - b.ts);
   if (!normal.length) { box.innerHTML = '<p class="note">Save a few normal trips. Each one is predicted before it teaches the formula, so this shows how close the guesses are getting.</p>'; return; }
   const offs = normal.map((t) => Math.abs(t.predicted - t.actual));
   const last5 = offs.slice(-5);
   const earnOffs = normal.filter((t) => t.earned > 0 && t.predictedEarned > 0).map((t) => Math.abs(t.predictedEarned - t.earned));
   const earnLast5 = earnOffs.slice(-5);
-  const loo = looError(lab.trips);
+  const loo = looError(dataset());
   box.innerHTML = `
     <div class="tiles">
       <div class="tile"><span class="v">${money(avg(last5))}</span><span class="k">Paid: off on the last ${last5.length} (predicted before saving)</span></div>
@@ -222,13 +304,13 @@ function renderStats() {
       <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Paid: off with today's formula${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
       <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length} / ${normal.length}</span><span class="k">Paid within 10 cents</span></div>
     </div>
-    <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips only.</p>`;
+    <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips from everyone in the dataset.</p>`;
 }
 
 // Fares vs the normal-price formula by 3-hour block: where surge-prone hours show up.
 function renderTimeTable() {
   const box = $('#lab-tod-table', lab.root);
-  const rows = byTimeBlock(lab.trips).filter((b) => b.n);
+  const rows = byTimeBlock(dataset()).filter((b) => b.n);
   box.innerHTML = `
     <p class="note">How real fares ran against the normal-price formula, by booking time. Surge trips are included, so busy hours show up here.</p>
     <div class="lab-table">${rows.map((b) => `
@@ -250,6 +332,7 @@ function renderCut() {
 
 function renderList() {
   renderCut();
+  $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload to the formula dataset (separate from the shared jobs pool) so every tester learns from them.';
   const box = $('#lab-list', lab.root);
   box.innerHTML = lab.trips.length ? '' : '<p class="empty">No trips of yours yet.</p>';
   for (const t of [...lab.trips].reverse()) {
@@ -270,8 +353,13 @@ function renderList() {
     del.addEventListener('click', async () => {
       if (!armed) { armed = true; del.textContent = 'Tap again to delete'; setTimeout(() => { armed = false; del.textContent = 'Delete'; }, 4000); return; }
       lab.trips = lab.trips.filter((x) => x.id !== t.id);
+      delete lab.shared[t.id];
       await db.setKV(KEY, lab.trips);
+      await db.setKV('formulaShared', lab.shared);
+      const dels = (await db.getKV('formulaDeletes')) || [];
+      if (!dels.includes(t.id)) await db.setKV('formulaDeletes', [...dels, t.id]);
       renderAll();
+      syncLab();
     });
     acts.append(del);
     card.append(acts);
@@ -294,7 +382,7 @@ function baseCard() {
 
 async function exportCsv() {
   const name = `fareit-formula-${new Date().toISOString().slice(0, 10)}.csv`;
-  const file = new File([toCsv(lab.trips)], name, { type: 'text/csv' });
+  const file = new File([toCsv(dataset())], name, { type: 'text/csv' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file], title: name }); return; } catch { /* fall back to download */ }
   }
