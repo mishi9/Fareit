@@ -6,7 +6,7 @@
 // and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase,
   MIN_PASSENGER, BASE_TRIPS,
 } from './formula.js';
 
@@ -37,13 +37,16 @@ const commission = () => fitCommission(dataset());
 
 // ---- the formula dataset on the server ----
 const toRow = (t) => ({
-  id: t.id, ts: t.ts, km: t.km, min: t.min, erp: t.erp || 0, paid: t.actual, earned: t.earned ?? null,
+  id: t.id, ts: t.ts, km: t.km, min: t.min ?? null, erp: t.erp || 0, paid: t.actual, earned: t.earned ?? null,
   surge: t.surge, predicted: t.predicted ?? null, predicted_earned: t.predictedEarned ?? null,
+  card_min: t.cardMin ?? null, pickup_km: t.pickupKm ?? null,
 });
 const fromRow = (r) => ({
-  id: r.id, ts: r.ts, km: r.km, min: r.min, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
-  predicted: r.predicted, predictedEarned: r.predicted_earned, shared: true,
+  id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, shared: true,
 });
+// Trip time used for a prediction: what was typed, or the estimate from the km.
+const estimate = () => timeEstimator(withBase(dataset()));
 const printOf = (t) => JSON.stringify(toRow(t));
 
 async function post(path, body) {
@@ -109,14 +112,31 @@ export async function buildLab(root) {
   lab.trips = (await db.getKV(KEY)) || [];
   lab.shared = (await db.getKV('formulaShared')) || {};
   lab.device = await db.getKV('device');
+  // Trips saved before trip time and card time were split held the job card's total time (which
+  // includes the drive to the pickup) as their time. Keep it as card time; trip time unknown.
+  let moved = false;
+  for (const t of lab.trips) {
+    if (t.timeSplit) continue;
+    if (t.min > 0 && t.cardMin == null) { t.cardMin = t.min; t.min = null; }
+    t.timeSplit = true;
+    moved = true;
+  }
+  if (moved) await db.setKV(KEY, lab.trips);
   root.innerHTML = `
     <div class="card lab-formula" id="lab-formula"></div>
 
     <div class="row2">
-      <div class="field"><label for="lab-km">Distance A → B (km)</label>
-        <input id="lab-km" type="number" inputmode="decimal" step="0.1" min="0" placeholder="12.4"></div>
-      <div class="field"><label for="lab-min">Time from Grab (min)</label>
-        <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="22"></div>
+      <div class="field"><label for="lab-km">Trip km (pickup → drop-off)</label>
+        <input id="lab-km" type="number" inputmode="decimal" step="0.1" min="0" placeholder="20.6"></div>
+      <div class="field"><label for="lab-min">Trip min from pickup</label>
+        <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="22 (blank: estimate)"></div>
+    </div>
+    <p class="hint">Trip only, from the pickup point: the passenger's price doesn't include your way there. The card's total time includes it, so put that below instead.</p>
+    <div class="row2">
+      <div class="field"><label for="lab-cardmin">Card total min (optional)</label>
+        <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0" placeholder="32"></div>
+      <div class="field"><label for="lab-pickupkm">Km to pickup (optional)</label>
+        <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.92"></div>
     </div>
     <div class="row2">
       <div class="field"><label for="lab-erp">ERP / tolls (S$, if any)</label>
@@ -161,7 +181,7 @@ export async function buildLab(root) {
     <div id="lab-list" class="stack"></div>
     <button type="button" class="ghost wide" id="lab-export">Export CSV</button>`;
 
-  for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
+  for (const id of ['lab-km', 'lab-min', 'lab-cardmin', 'lab-pickupkm', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
   for (const b of root.querySelectorAll('#lab-surge button')) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
@@ -197,6 +217,7 @@ function readForm() {
   const r = lab.root;
   return {
     km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: num($('#lab-erp', r)) || 0,
+    cardMin: num($('#lab-cardmin', r)), pickupKm: num($('#lab-pickupkm', r)), timeSplit: true,
     ts: Date.now(), // the trip's time is when you save it
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
   };
@@ -212,21 +233,22 @@ function update() {
   const sub = $('#lab-pred-sub', r);
   const tod = $('#lab-tod', r);
   const check = $('#lab-check', r);
-  if (!(f.km > 0) || !(f.min > 0)) {
+  if (!(f.km > 0)) {
     pred.textContent = '—';
     predEarn.textContent = '—';
-    sub.textContent = 'Type the distance and time.';
+    sub.textContent = 'Type the trip km (and trip minutes if you have them).';
     tod.textContent = '';
     check.innerHTML = '';
     return;
   }
-  const p = passengerFare(weights(), f.km, f.min, f.erp);
+  const mins = f.min > 0 ? f.min : estimate()(f.km);
+  const p = passengerFare(weights(), f.km, mins, f.erp);
   const c = commission();
   const earn = driverEarns(c, p.fare, f.erp);
   pred.textContent = money(p.fare);
   predEarn.textContent = money(earn);
   const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
-  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}Normal-price formula. ${cutLabel}.${f.surge === 'surge' ? ' Surge: expect the real fare to be higher.' : ''}`;
+  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.${f.surge === 'surge' ? ' Surge: expect the real fare to be higher.' : ''}`;
 
   // Time of day: how fares near this hour have run against the formula (surge-prone hours).
   const t = timeOfDay(dataset(), f.ts);
@@ -258,11 +280,11 @@ function update() {
 async function save() {
   const f = readForm();
   const msg = $('#lab-msg', lab.root);
-  if (!(f.km > 0) || !(f.min > 0)) { msg.textContent = 'Add the distance and the time.'; msg.classList.add('err'); return; }
+  if (!(f.km > 0)) { msg.textContent = 'Add the trip km.'; msg.classList.add('err'); return; }
   if (!(f.actual > 0)) { msg.textContent = 'Add what the passenger actually paid.'; msg.classList.add('err'); return; }
   // Predictions are recorded before this trip changes anything: an honest test each time.
   const w = weights();
-  const predicted = passengerFare(w, f.km, f.min, f.erp).fare;
+  const predicted = passengerFare(w, f.km, f.min > 0 ? f.min : estimate()(f.km), f.erp).fare;
   const c = commission();
   const predictedEarned = driverEarns(c, predicted, f.erp);
   const t = timeOfDay(dataset(), f.ts);
@@ -280,7 +302,7 @@ async function save() {
 }
 
 function clearForm(keepMsg) {
-  for (const id of ['lab-km', 'lab-min', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, lab.root).value = '';
+  for (const id of ['lab-km', 'lab-min', 'lab-cardmin', 'lab-pickupkm', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, lab.root).value = '';
   lab.surge = 'normal';
   if (keepMsg !== true) $('#lab-msg', lab.root).textContent = '';
   update();
@@ -345,7 +367,7 @@ function renderList() {
     card.className = 'card';
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
-      <div class="meta">${t.km} km · ${t.min} min${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : ''}</div>
+      <div class="meta">${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : ''}</div>
       <div class="meta">Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})${t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';

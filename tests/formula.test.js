@@ -102,3 +102,19 @@ test('low-cut trips (Grab keeps almost nothing) are counted apart, not fitted in
   // Usual rule from the other 6: about 79.8% of paid − S$1.45, every trip within 20 cents.
   for (const t of real.slice(0, 5)) assert.ok(Math.abs(driverEarns(c, t.actual) - t.earned) < 0.2, `${t.actual} → ${driverEarns(c, t.actual)} vs ${t.earned}`);
 });
+
+test('trip time: the job card total (which includes the way to the pickup) is never used as trip time', async () => {
+  const { timeEstimator, tripTime } = await import('../public/beta/formula.js');
+  const cardOnly = { km: 20.6, min: null, cardMin: 32, pickupKm: 0.92, surge: 'normal', actual: 25, ts: Date.now() };
+  const est = timeEstimator([]);
+  assert.equal(tripTime(cardOnly, est), est(20.6), 'estimated from km, not the card total of 32');
+  assert.ok(Math.abs(est(20.6) - 25.66) < 0.01, 'default about 3 + 1.1 min per km');
+  assert.equal(tripTime({ ...cardOnly, min: 22 }, est), 22, 'a typed trip time wins');
+  // Real trip times teach the estimate.
+  const timed = [[5, 9], [10, 15], [20, 22], [30, 31]].map(([km, min]) => ({ km, min }));
+  const learned = timeEstimator(timed);
+  assert.ok(Math.abs(learned(20) - 22) < 1.5, `learned ${learned(20)}`);
+  // A trip without trip time still teaches the formula through its distance.
+  assert.equal(usable(cardOnly), true);
+  assert.equal(fitWeights([cardOnly]).n, 2);
+});

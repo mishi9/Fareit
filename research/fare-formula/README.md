@@ -43,7 +43,7 @@ driver earned     = paid by passenger − what Grab keeps
 | date, time | booking date (YYYY-MM-DD) and time (HH:MM, 24 h) | yes |
 | ride_type | GrabCar for standard private hire; anything else (GrabTaxi, JustGrab, Saver, 6-seater …) is kept apart | yes |
 | grab_km | distance Grab shows for the trip (not the odometer) | yes |
-| grab_min | trip time Grab estimated, if shown | if known |
+| grab_min | trip time **from the pickup point** (navigation estimate). Not the job card's total, which also includes the drive to the pickup: put that in notes | if known |
 | actual_min | minutes actually driven, pickup to drop-off | if known |
 | passenger_fare | total the passenger paid | yes |
 | driver_earned | what the driver actually earned for the job | yes |

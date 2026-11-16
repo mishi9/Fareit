@@ -67,18 +67,38 @@ function lsq(X, y) {
 // Your trips plus the built-in base trip.
 export const withBase = (trips) => [...BASE_TRIPS, ...trips.filter((t) => !t.base)];
 
+// ---- Trip time ----
+// The passenger is quoted before a driver is matched, so the price depends on pickup → drop-off
+// only. `min` is that trip time (the navigation's estimate from the pickup point). The job
+// card's total also includes the driver's way to the pickup, so it's kept apart as `cardMin`
+// and never used as trip time. When a trip has no trip time, it's estimated from the km.
+const DEFAULT_TIME = { a: 3, b: 1.1 }; // minutes ≈ 3 + 1.1 × km until real trip times teach it
+
+export function timeEstimator(trips) {
+  const rows = trips.filter((t) => t.min > 0 && t.km > 0);
+  let { a, b } = DEFAULT_TIME;
+  if (rows.length >= 3) {
+    const w = lsq(rows.map((t) => [1, t.km]), rows.map((t) => t.min));
+    if (w && w[1] > 0) [a, b] = w;
+  }
+  return (km) => Math.max(1, a + b * km);
+}
+export const tripTime = (t, est) => (t.min > 0 ? t.min : est(t.km));
+
 // A trip can teach the formula if it's normal-priced, complete, and not held up by the minimum.
 export function usable(t) {
-  if (t.surge !== 'normal' || !(t.km > 0) || !(t.min > 0) || !(t.actual > 0)) return false;
+  if (t.surge !== 'normal' || !(t.km > 0) || !(t.actual > 0)) return false;
   return t.actual - (t.erp || 0) > MIN_PASSENGER + 0.005;
 }
 
 // Best weights: least squares on what the passenger paid (minus ERP / tolls), with the gentle
 // pull toward the seed. Always includes the base trip.
 export function fitWeights(trips, { includeBase = true } = {}) {
-  const rows = (includeBase ? withBase(trips) : trips).filter(usable);
+  const pool = includeBase ? withBase(trips) : trips;
+  const rows = pool.filter(usable);
   if (!rows.length) return { ...SEED, n: 0 };
-  const X = rows.map((t) => [1, t.km, t.min]);
+  const est = timeEstimator(pool);
+  const X = rows.map((t) => [1, t.km, tripTime(t, est)]);
   const y = rows.map((t) => t.actual - (t.erp || 0));
   TERMS.forEach((term, i) => {
     const row = [0, 0, 0];
@@ -98,9 +118,10 @@ export function looError(trips) {
   if (mine.length < 2) return null;
   let abs = 0;
   let rel = 0;
+  const est = timeEstimator(withBase(trips));
   for (const t of mine) {
     const w = fitWeights(trips.filter((o) => o !== t));
-    const p = passengerFare(w, t.km, t.min, t.erp).fare;
+    const p = passengerFare(w, t.km, tripTime(t, est), t.erp).fare;
     abs += Math.abs(p - t.actual);
     rel += Math.abs(p - t.actual) / t.actual;
   }
@@ -157,7 +178,8 @@ export function toCsv(trips) {
     const d = new Date(t.ts);
     const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    return [i + 1, date, time, 'Standard', t.km, t.min, '', t.actual ?? '', t.earned ?? '', t.erp || '', '', '', '', t.surge, '', '', '', '', '', `formula said ${t.predicted ?? ''}`].join(',');
+    const notes = [`formula said ${t.predicted ?? ''}`, t.cardMin ? `card total ${t.cardMin} min` : '', t.pickupKm ? `pickup ${t.pickupKm} km` : ''].filter(Boolean).join('; ');
+    return [i + 1, date, time, 'Standard', t.km, t.min ?? '', '', t.actual ?? '', t.earned ?? '', t.erp || '', '', '', '', t.surge, '', '', '', '', '', notes].join(',');
   });
   return [head, ...lines].join('\n') + '\n';
 }
@@ -171,9 +193,9 @@ const HOUR_SD = 1;
 export const hourOf = (ts) => { const d = new Date(ts); return d.getHours() + d.getMinutes() / 60; };
 const hourGap = (a, b) => { const g = Math.abs(a - b) % 24; return Math.min(g, 24 - g); };
 
-function ratioToFormula(t, w) {
-  if (!(t.actual > 0) || !(t.km > 0) || !(t.min > 0)) return null;
-  const p = passengerFare(w, t.km, t.min).fare; // without ERP: compare like with like
+function ratioToFormula(t, w, est) {
+  if (!(t.actual > 0) || !(t.km > 0)) return null;
+  const p = passengerFare(w, t.km, tripTime(t, est)).fare; // without ERP: compare like with like
   const r = Math.log((t.actual - (t.erp || 0)) / p);
   return Number.isFinite(r) ? r : null;
 }
@@ -181,13 +203,14 @@ function ratioToFormula(t, w) {
 export function timeOfDay(trips, ts) {
   const all = withBase(trips);
   const w = fitWeights(trips);
+  const est = timeEstimator(all);
   const h = hourOf(ts);
   let sw = 0;
   let swr = 0;
   let near = 0;
   let surgeNear = 0;
   for (const t of all) {
-    const r = ratioToFormula(t, w);
+    const r = ratioToFormula(t, w, est);
     if (r === null) continue;
     const g = hourGap(hourOf(t.ts), h);
     const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD));
@@ -203,9 +226,10 @@ export function timeOfDay(trips, ts) {
 export function byTimeBlock(trips) {
   const all = withBase(trips);
   const w = fitWeights(trips);
+  const est = timeEstimator(all);
   const blocks = Array.from({ length: 8 }, (_, i) => ({ from: i * 3, to: i * 3 + 3, n: 0, surge: 0, sum: 0 }));
   for (const t of all) {
-    const r = ratioToFormula(t, w);
+    const r = ratioToFormula(t, w, est);
     if (r === null) continue;
     const b = blocks[Math.floor(hourOf(t.ts) / 3) % 8];
     b.n++;

@@ -220,19 +220,22 @@ const SCHEMA = [
     ts INTEGER,
     km REAL, min REAL, erp REAL, paid REAL, earned REAL, surge TEXT,
     predicted REAL, predicted_earned REAL,
-    deleted INTEGER
+    deleted INTEGER,
+    card_min REAL, pickup_km REAL
   )`,
   'CREATE INDEX IF NOT EXISTS formula_rev ON formula_trips(rev)',
 ];
 let schemaReady = null;
 // Pools created before a column existed get it added; on newer ones it's already there.
-const addColumn = (db, def) => Promise.resolve().then(() => db.prepare(`ALTER TABLE jobs ADD COLUMN ${def}`).run()).catch(() => {});
+const addColumn = (db, def, table = 'jobs') => Promise.resolve().then(() => db.prepare(`ALTER TABLE ${table} ADD COLUMN ${def}`).run()).catch(() => {});
 function ensureSchema(db) {
   if (!schemaReady) {
     schemaReady = db.batch(SCHEMA.map((s) => db.prepare(s)))
       .then(() => addColumn(db, 'pricing TEXT'))
       .then(() => addColumn(db, 'card_km REAL'))
       .then(() => addColumn(db, 'deleted INTEGER'))
+      .then(() => addColumn(db, 'card_min REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'pickup_km REAL', 'formula_trips'))
       .catch((e) => {
         schemaReady = null;
         throw e;
@@ -406,22 +409,29 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   const earned = n(t.earned);
   const predicted = n(t.predicted);
   const predictedEarned = n(t.predicted_earned);
+  const cardMin = n(t.card_min);
+  const pickupKm = n(t.pickup_km);
   if (!Number.isFinite(ts) || ts < now - 365 * 86400 * 1000 || ts > now + 10 * 60 * 1000) return null;
-  if (!(km >= 0.3 && km <= 100) || !(min >= 1 && min <= 240) || !(paid >= 2 && paid <= 400)) return null;
+  // min is the trip time from the pickup (optional); card_min is the job card's total, which also
+  // includes the drive to the pickup.
+  if (!(km >= 0.3 && km <= 100) || !inRange(min, 1, 240) || !(paid >= 2 && paid <= 400)) return null;
+  if (!inRange(cardMin, 1, 300) || !inRange(pickupKm, 0, 50)) return null;
   if (!inRange(erp, 0, 50) || !inRange(earned, 0.5, 400) || !inRange(predicted, 0, 1000) || !inRange(predictedEarned, 0, 1000)) return null;
   if (!['normal', 'surge'].includes(t.surge)) return null;
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
+    card_min: r2(cardMin), pickup_km: r2(pickupKm),
   };
 }
 
 const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received_at, updated_at, rev, ts, km, min, erp, paid,
-    earned, surge, predicted, predicted_earned, deleted)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0)
+    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
     min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
-    predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0
+    predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0,
+    card_min = excluded.card_min, pickup_km = excluded.pickup_km
   WHERE formula_trips.device = excluded.device`;
 
 async function readJson(request) {
@@ -460,6 +470,7 @@ async function postFormula(request, env) {
     }
     await env.DB.prepare(FORMULA_UPSERT).bind(
       t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
+      t.card_min, t.pickup_km,
     ).run();
     accepted.push(t.id);
   }
@@ -471,7 +482,7 @@ async function getFormula(url, env) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, deleted
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, deleted
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
@@ -496,7 +507,8 @@ async function deleteFormula(request, env) {
     const row = await env.DB.prepare('SELECT device FROM formula_trips WHERE id = ?1').bind(id).first();
     if (!row || row.device !== device) { missing.push(id); continue; }
     await env.DB.prepare(`UPDATE formula_trips SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips),
-        km = NULL, min = NULL, erp = NULL, paid = NULL, earned = NULL, surge = NULL, predicted = NULL, predicted_earned = NULL
+        km = NULL, min = NULL, erp = NULL, paid = NULL, earned = NULL, surge = NULL, predicted = NULL, predicted_earned = NULL,
+        card_min = NULL, pickup_km = NULL
       WHERE id = ?1`).bind(id, Date.now()).run();
     deleted.push(id);
   }
