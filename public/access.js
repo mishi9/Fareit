@@ -105,7 +105,7 @@ function gate({ token, mode, error }) {
             <li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li>
             <li>Open <b>Agaration</b> from your Home Screen. It lets itself in.</li>
           </ol>
-          <p class="note">Your invite works once, on one phone. Opening it from the Home Screen is what uses it, so the app stays unlocked there.</p>
+          <p class="note">Your invite link works for <b>60 minutes</b> from when you first opened it, so do this now. Once the Home Screen app is in, it stays unlocked.</p>
           <p class="note">Already have Agaration on your Home Screen? Open it and enter this code: <b class="gate-code">${escapeHtml(token)}</b></p>
           <button type="button" class="ghost small" id="gate-safari">Use it in Safari instead</button>
         ` : `
@@ -190,6 +190,11 @@ export async function ready() {
   if (!inviteOnly) { dropInviteFromAddress(); return; }
 
   if (token && isIos() && !isStandalone()) {
+    // Opening the link starts its 60 minutes; say so now if it's already expired.
+    try { await post('/api/access/open', { token }); } catch (e) {
+      await gate({ token, error: e.message });
+      return;
+    }
     await gate({ token, mode: 'ios-install' });
     return;
   }

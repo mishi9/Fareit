@@ -65,26 +65,50 @@ test('owner code guesses are limited to 10 an hour', async () => {
   assert.equal((await req('/api/owner/claim', { body: { code: '804613', device: 'owner-phone-1' }, ip: '5.6.7.8' })).status, 200);
 });
 
-test('an invite works once, for one phone', async () => {
+test('an invite works for 60 minutes after it is first opened, one phone at a time', async (t) => {
   const { req, owner } = setup();
   const okey = await owner();
   const { token } = (await req('/api/invites/create', { body: { label: 'brother' }, key: okey })).body;
   assert.match(token, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  let now = Date.now() + 3 * 86400 * 1000; // links don't age before they're opened
+  t.mock.method(Date, 'now', () => now);
 
-  const first = await req('/api/access/redeem', { body: { token, device: 'brother-phone' } });
+  const opened = await req('/api/access/open', { body: { token } });
+  assert.equal(opened.body.expires_at, now + 60 * 60 * 1000);
+
+  now += 10 * 60 * 1000;
+  const first = await req('/api/access/redeem', { body: { token, device: 'brother-safari' } });
   assert.equal(first.status, 200);
   assert.equal(first.body.kind, 'driver');
   assert.equal((await req('/api/formula?since=0', { key: first.body.key })).status, 200);
 
-  // shared with someone else: refused
-  const second = await req('/api/access/redeem', { body: { token, device: 'stranger-phone' } });
-  assert.equal(second.status, 410);
-
-  // same phone again (e.g. its Home Screen app): works, and the old key stops
-  const again = await req('/api/access/redeem', { body: { token: token.toLowerCase(), device: 'brother-phone' } });
-  assert.equal(again.status, 200);
+  // within the hour, another use (e.g. the Home Screen app) takes over; the older phone stops
+  now += 20 * 60 * 1000;
+  const second = await req('/api/access/redeem', { body: { token: token.toLowerCase(), device: 'brother-homescreen' } });
+  assert.equal(second.status, 200);
   assert.equal((await req('/api/access', { key: first.body.key })).status, 401);
-  assert.equal((await req('/api/access', { key: again.body.key })).status, 200);
+  assert.equal((await req('/api/access', { key: second.body.key })).status, 200);
+
+  // after 60 minutes from first opening, the link is dead; the phone that's in stays in
+  now += 31 * 60 * 1000;
+  const late = await req('/api/access/redeem', { body: { token, device: 'stranger-phone' } });
+  assert.equal(late.status, 410);
+  assert.equal(late.body.expired, true);
+  assert.equal((await req('/api/access/open', { body: { token } })).status, 410);
+  assert.equal((await req('/api/access', { key: second.body.key })).status, 200);
+});
+
+test('redeeming starts the hour too, when the link was never opened first', async (t) => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const { token } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  assert.equal((await req('/api/access/redeem', { body: { token, device: 'android-phone' } })).status, 200);
+  const row = (await req('/api/invites', { key: okey })).body.invites[0];
+  assert.equal(row.expires_at, now + 60 * 60 * 1000);
+  now += 61 * 60 * 1000;
+  assert.equal((await req('/api/access/redeem', { body: { token, device: 'other-phone' } })).status, 410);
 });
 
 test('a made-up invite is refused', async () => {

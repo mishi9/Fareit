@@ -895,7 +895,12 @@ function buildOwner() {
       box.replaceChildren(...invites.map((inv) => {
         const row = document.createElement('div');
         row.className = `invite-row${inv.revoked ? ' off' : ''}`;
-        const status = inv.revoked ? 'Turned off' : inv.used_at ? `In use since ${when(inv.used_at)}` : `Not used yet · made ${when(inv.created_at)}`;
+        const clock = (ms) => new Date(ms).toLocaleTimeString('en-SG', { hour: 'numeric', minute: '2-digit' });
+        const linkState = !inv.expires_at ? 'link not opened yet'
+          : inv.expires_at > Date.now() ? `link open until ${clock(inv.expires_at)}` : 'link expired';
+        const status = inv.revoked ? 'Turned off'
+          : inv.used_at ? `In use since ${when(inv.used_at)} · ${linkState}`
+          : `Not used yet · made ${when(inv.created_at)} · ${linkState}`;
         const sent = inv.used_at ? [
           `${inv.trips || 0} trip${inv.trips === 1 ? '' : 's'}`,
           inv.jobs ? `${inv.jobs} job${inv.jobs === 1 ? '' : 's'}` : '',
@@ -944,7 +949,7 @@ function buildOwner() {
     } catch (e) { settingsMsg(e.message, true); }
     btn.disabled = false;
   });
-  const message = () => `You're invited to try Agaration. Open this on your phone (on an iPhone, in Safari): ${current}\nIt works once, on one phone, so please don't share it.`;
+  const message = () => `You're invited to try Agaration. Open this on your phone (on an iPhone, in Safari): ${current}\nIt works for 60 minutes after you first open it, on one phone, so please don't share it.`;
   $('#st-invite-share').addEventListener('click', async () => {
     if (navigator.share) { try { await navigator.share({ title: 'Agaration invite', text: message() }); return; } catch { return; } }
     $('#st-invite-copy').click();

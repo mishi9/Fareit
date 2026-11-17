@@ -19,7 +19,8 @@
 // Invite-only access (when the INVITE_ONLY variable is "1"): every /api call except the ones
 // below needs a phone's access key in x-agaration-key. A phone gets one by redeeming a one-time
 // invite link, or, for the owner, with the owner code. No names or contact details anywhere.
-//   POST /api/access/redeem { token, device } -> { key, kind }   one-time: an invite works once
+//   POST /api/access/open { token }           -> { expires_at }   starts the invite's 60-minute window
+//   POST /api/access/redeem { token, device } -> { key, kind }   within 60 min of first opening; one phone at a time
 //   POST /api/owner/claim { code, device }    -> { key, kind }   10 tries an hour per connection
 //   GET  /api/access                          -> { ok, kind }    is this phone's key still good
 //   GET  /api/manifest?invite=TOKEN           -> manifest whose start_url carries the invite
@@ -313,6 +314,7 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'lat REAL', 'formula_trips'))
       .then(() => addColumn(db, 'lng REAL', 'formula_trips'))
       .then(() => addColumn(db, 'animal TEXT', 'invites'))
+      .then(() => addColumn(db, 'opened_at INTEGER', 'invites'))
       .catch((e) => {
         schemaReady = null;
         throw e;
@@ -724,7 +726,9 @@ async function deleteQueue(request, env) {
 }
 
 // ---------- invite-only access ----------
-const OPEN_PATHS = new Set(['/api/status', '/api/access/redeem', '/api/owner/claim', '/api/manifest']);
+const OPEN_PATHS = new Set(['/api/status', '/api/access/open', '/api/access/redeem', '/api/owner/claim', '/api/manifest']);
+// An invite link works for this long after it's first opened, then never again.
+export const INVITE_WINDOW_MS = 60 * 60 * 1000;
 const TOKEN_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L: easy to read out
 const TOKEN_RE = /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
 const OWNER_TRIES_PER_HOUR = 10;
@@ -789,15 +793,42 @@ async function redeemInvite(request, env) {
   const device = String(body.device || '');
   if (!TOKEN_RE.test(token) || !ID_RE.test(device)) return json({ error: 'That invite link isn’t valid.' }, 400);
   await ensureSchema(env.DB);
-  const inv = await env.DB.prepare('SELECT used_at, used_device, revoked FROM invites WHERE token = ?1').bind(token).first();
-  if (!inv || inv.revoked === 1) return json({ error: 'That invite link isn’t valid. Ask for a new one.' }, 404);
-  if (inv.used_at && inv.used_device !== device) return json({ error: 'That invite has already been used. Ask for a new one.' }, 410);
-  // First use, or the same phone trying again (e.g. the first reply never arrived): one live key.
+  const inv = await openInvite(env, token);
+  if (inv.error) return inv.error;
+  // Within the window any phone can use it, but only the latest stays in: each use turns off the
+  // phone before (e.g. Safari, once the Home Screen app lets itself in). A shared link kicks the
+  // tester off, which they'd notice; after 60 minutes it can't be used at all.
+  const now = Date.now();
   await env.DB.batch([
-    env.DB.prepare('UPDATE invites SET used_at = COALESCE(used_at, ?2), used_device = ?3 WHERE token = ?1').bind(token, Date.now(), device),
+    env.DB.prepare('UPDATE invites SET used_at = COALESCE(used_at, ?2), used_device = ?3 WHERE token = ?1').bind(token, now, device),
     env.DB.prepare('UPDATE access_keys SET revoked = 1 WHERE invite = ?1').bind(token),
   ]);
   return json({ key: await issueKey(env, device, 'driver', token), kind: 'driver' });
+}
+
+// The first time a link is opened starts its 60-minute window. Returns the invite, or { error }.
+async function openInvite(env, token) {
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const inv = await env.DB.prepare('SELECT opened_at, revoked FROM invites WHERE token = ?1').bind(token).first();
+  if (!inv || inv.revoked === 1) return { error: json({ error: 'That invite link isn’t valid. Ask for a new one.' }, 404) };
+  if (inv.opened_at && now > inv.opened_at + INVITE_WINDOW_MS) {
+    return { error: json({ error: 'That invite link has expired (it works for 60 minutes after it’s first opened). Ask for a new one.', expired: true }, 410) };
+  }
+  if (!inv.opened_at) {
+    await env.DB.prepare('UPDATE invites SET opened_at = ?2 WHERE token = ?1 AND opened_at IS NULL').bind(token, now).run();
+    inv.opened_at = now;
+  }
+  return { ...inv, expires_at: inv.opened_at + INVITE_WINDOW_MS };
+}
+
+async function startInvite(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const token = String(body.token || '').toUpperCase().trim();
+  if (!TOKEN_RE.test(token)) return json({ error: 'That invite link isn’t valid.' }, 400);
+  const inv = await openInvite(env, token);
+  return inv.error || json({ expires_at: inv.expires_at });
 }
 
 async function claimOwner(request, env) {
@@ -832,12 +863,12 @@ async function listInvites(env) {
   for (const r of unnamed) await env.DB.prepare('UPDATE invites SET animal = ?2 WHERE token = ?1').bind(r.token, await pickAnimal(env.DB)).run();
   const count = (table) => `(SELECT COUNT(*) FROM ${table} WHERE deleted IS NOT 1 AND device IN (SELECT device FROM phones WHERE who = invites.token))`;
   const { results } = await env.DB.prepare(
-    `SELECT token, label, animal, created_at, used_at, revoked,
+    `SELECT token, label, animal, created_at, opened_at, used_at, revoked,
        ${count('jobs')} AS jobs, ${count('formula_trips')} AS trips, ${count('airport_queue')} AS queue,
        (SELECT MAX(last_at) FROM phones WHERE who = invites.token) AS last_at
      FROM invites ORDER BY created_at DESC LIMIT 200`,
   ).all();
-  return json({ invites: results.map((r) => ({ ...r, revoked: r.revoked === 1 })) });
+  return json({ invites: results.map((r) => ({ ...r, revoked: r.revoked === 1, expires_at: r.opened_at ? r.opened_at + INVITE_WINDOW_MS : null })) });
 }
 
 async function revokeInvite(request, env) {
@@ -876,7 +907,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/owner/claim', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -900,6 +931,7 @@ export default {
       if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
       try {
         if (url.pathname === '/api/access/redeem') return await redeemInvite(request, env);
+        if (url.pathname === '/api/access/open') return await startInvite(request, env);
         if (url.pathname === '/api/owner/claim') return await claimOwner(request, env);
         if (!who) who = await whoIs(request, env);
         if (url.pathname === '/api/access') return who ? json({ ok: true, kind: who.kind }) : json({ error: 'Not let in.', locked: true }, 401);
