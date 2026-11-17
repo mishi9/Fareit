@@ -156,7 +156,7 @@ export async function buildLab(root) {
         <button type="button" data-v="airport">Airport</button>
       </div></div>
 
-    <div class="lab-predict" aria-live="polite">
+    <div class="lab-predict" id="lab-predict" aria-live="polite">
       <div class="lab-two">
         <div><div class="k">Paid by passenger</div><div class="v" id="lab-pred">—</div></div>
         <div><div class="k">You earn</div><div class="v sm" id="lab-pred-earn">—</div></div>
@@ -316,6 +316,7 @@ function update() {
     sub.textContent = 'Type the trip km (and trip minutes if you have them).';
     tod.textContent = '';
     check.innerHTML = '';
+    $('#lab-predict', r).className = 'lab-predict';
     return;
   }
   const mins = f.min > 0 ? f.min : estimate()(f.km);
@@ -347,6 +348,11 @@ function update() {
     const likely = Math.round(p.fare * (1 + t.lift) * 100) / 100;
     tod.textContent = `Around ${at}: fares have run ${signed(t.lift)} vs the formula (${t.near} trip${t.near === 1 ? '' : 's'} within 1½ h${t.surgeNear ? `, ${t.surgeNear} surge` : ''}). With that, about ${money(likely)}.`;
   }
+  // The prediction card in the Window's colours: green for surge or a busy hour (10%+ above
+  // normal), red for a slow hour (10%+ below), grey otherwise.
+  const hourLift = t.near ? t.lift : 0;
+  const mood = f.surge === 'surge' || hourLift >= 0.1 ? 'good' : hourLift <= -0.1 ? 'bad' : 'normal';
+  $('#lab-predict', r).className = `lab-predict ${mood}`;
 
   // Formula vs actual, in words: Close (within 5%), Off (5–15%), Far off (over 15%).
   const rows = [];
@@ -355,7 +361,7 @@ function update() {
     const rel = Math.abs(off) / actual;
     const grade = rel <= 0.05 ? ['close', 'Close'] : rel <= 0.15 ? ['off', 'Off'] : ['far', 'Far off'];
     const diff = Math.abs(off) < 0.005 ? 'Exact' : `${money(Math.abs(off))} too ${off > 0 ? 'high' : 'low'} (${(rel * 100).toFixed(0)}%)`;
-    rows.push(`<div class="r"><span class="l">${label}</span><span>${money(formula)}</span><span>${money(actual)}</span><span class="d ${grade[0]}">${diff}<b>${grade[1]}</b></span></div>`);
+    rows.push(`<div class="r ${grade[0]}"><span class="l">${label}</span><span>${money(formula)}</span><span>${money(actual)}</span><span class="d ${grade[0]}">${diff}<b>${grade[1]}</b></span></div>`);
   };
   if (f.actual > 0) row('Passenger paid', shown, f.actual);
   if (f.earned > 0) row('You earned', earn, f.earned);

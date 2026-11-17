@@ -70,6 +70,13 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
 .lab-check .kept { margin-top: 8px; font-size: 14px; }
 .lab-check .key { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .lab-check .key span { font-weight: 700; }
+/* Whole rows and the prediction card take their colour: border plus a light tint. */
+.lab-check .r.close { border-color: var(--go); background: color-mix(in srgb, var(--go) 12%, var(--surface)); }
+.lab-check .r.off { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--surface)); }
+.lab-check .r.far { border-color: var(--stop); background: color-mix(in srgb, var(--stop) 12%, var(--surface)); }
+.lab-predict.normal { border-color: var(--muted); }
+.lab-predict.good { border-color: var(--go); background: color-mix(in srgb, var(--go) 12%, var(--surface)); }
+.lab-predict.bad { border-color: var(--stop); background: color-mix(in srgb, var(--stop) 12%, var(--surface)); }
 .lab-check .surge-hint { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--warn); font-size: 14px; display: grid; gap: 8px; }
 .lab-check .surge-hint button { justify-self: start; }
 .lab-predict .surge-est { color: var(--warn); }
