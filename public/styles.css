@@ -57,9 +57,12 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
 /* the three states as solid blocks along the bottom: bad, normal, good */
 .logo::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
   background: linear-gradient(90deg, var(--stop) 0 33.34%, var(--warn) 33.34% 66.67%, var(--go) 66.67%); }
-/* the "A": two up-arrows, one inside the other */
-.logo-up { width: 0.7em; height: 0.84em; margin-right: 0.06em; align-self: baseline; transform: translateY(0.04em); overflow: visible;
-  fill: none; stroke: currentColor; stroke-width: 4.4; stroke-linecap: butt; stroke-linejoin: miter; }
+/* the "A": three slim up-arrows rising from bad to good, red at the bottom, green on top */
+.logo-up { width: 0.56em; height: 0.8em; margin-right: 0.06em; align-self: baseline; transform: translateY(0.05em); overflow: visible;
+  fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.logo-up .up-r { stroke: var(--stop); }
+.logo-up .up-a { stroke: var(--warn); }
+.logo-up .up-g { stroke: var(--go); }
 .brand { white-space: nowrap; }
 @media (max-width: 360px) { .logo { padding: 1px 7px 5px; } .brand { font-size: 16px; } .beta-tag { font-size: 10px; padding: 1px 4px; } }
 
