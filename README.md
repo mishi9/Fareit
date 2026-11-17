@@ -80,6 +80,10 @@ On **Radar**, near Woodlands Checkpoint (every route passes through) or a drop-o
 
 Live data is fetched by the server at most every 2 minutes and shared by every phone.
 
+## Likely surging nearby
+
+Drivers tap **↑ Seeing surge here?** on Radar (or save a trip tagged Surge). When at least 2 different drivers have seen surge within about 1.5 km of each other in the last 30 minutes, drivers within 3 km (about 5 to 10 minutes away) see a green banner at the top of Radar: "Orchard likely surging · 2.1 km away", or "Likely surging around you" within 1.5 km. Reports are stored at about 1 km for 30 minutes; one phone counts once (a repeat tap within 10 minutes just moves its report). Ranges are in `public/surge.js`.
+
 ## Radar at the airport
 
 At Changi (within the airport zone, any terminal) jobs are auto-accepted, so there's no 8-second window to estimate for. Radar swaps the earnings cards for:

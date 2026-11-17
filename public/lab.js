@@ -10,6 +10,7 @@ import { renderFlights } from './flights.js';
 import { eventsList, onEventsChange, loadEvents } from './events.js';
 import { jbPlace, jbRowsHtml } from './jb.js';
 import { ferryTerminalAt, ferryRowsHtml } from './ferries.js';
+import { loadSurge, surgeNow, surgeBanner, reportSurge } from './surge.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
@@ -262,6 +263,14 @@ export function renderBands() {
   const loc = here();
   // At Changi there's no 8-second window (jobs are auto-accepted), so Radar shows the queue
   // (above, from queue.js) and arrivals by terminal instead of the earnings cards.
+  // Likely surging within 3 km (2+ drivers in the last 30 min): first thing on Radar.
+  loadSurge(renderBands);
+  const surgeBox = document.querySelector('#radar-surge');
+  if (surgeBox) {
+    const s = surgeNow();
+    surgeBox.hidden = !s;
+    if (s) surgeBox.innerHTML = surgeBanner(s, areaName({ lat: Math.round(s.lat * 100) / 100, lng: Math.round(s.lng * 100) / 100 }), now);
+  }
   // Near Woodlands or a JB bus drop-off: what's arriving next, at the top, to decide whether to
   // head there or wait. (Ferry terminals next, once there's a timetable for them.)
   const placeBox = document.querySelector('#radar-place');
@@ -310,7 +319,21 @@ export function renderBands() {
         <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)} <span class="band-km">(about ${Math.round(b.km)} km)</span></div>
         <div class="band-km">${b.inBandNear ? `From ${b.inBandNear} trip${b.inBandNear === 1 ? '' : 's'} in this range${loc ? ' near you' : ''} around this hour.` : 'No trips in this range near now: following the overall picture.'}</div>
       </div>`).join('')}
+    <button type="button" class="ghost surge-report" id="surge-report">↑ Seeing surge here? Tap to tell other drivers</button>
+    <p class="note" id="surge-report-msg" role="status"></p>
     <p class="note band-note">Grey: normal for now. Green: fares here at this hour have been running 10% or more above normal. Red: 10% or more below. Learns from every trip saved, from Got a job or the Est. tab.</p>`;
+  const rb = box.querySelector('#surge-report');
+  if (rb) rb.addEventListener('click', async () => {
+    const msg = box.querySelector('#surge-report-msg');
+    rb.disabled = true;
+    try {
+      await reportSurge(lab.device || (await db.getKV('device')));
+      msg.classList.remove('err');
+      msg.textContent = 'Thanks. Drivers within 3 km see it once another driver confirms (counts for 30 min).';
+      loadSurge(() => {}, true);
+    } catch (e) { msg.textContent = e.message; msg.classList.add('err'); }
+    rb.disabled = false;
+  });
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
 

@@ -476,3 +476,29 @@ test('ferries into HarbourFront: crossing times and interlined sailings shown on
   assert.ok(next.some((a) => a.from.startsWith('Harbour Bay') && a.arrive === '08:00'));
   assert.equal(ferryTerminalAt({ lat: 1.2652, lng: 103.8207 }).id, 'hfc');
 });
+
+import { surgeSpots, surgeFor } from '../public/surge.js';
+test('likely surging: 2+ drivers within 1.5 km in 30 min; shown to drivers within 3 km', () => {
+  const now = Date.now();
+  const m = 60000;
+  const orchard = { lat: 1.304, lng: 103.832 };
+  const one = [{ ...orchard, ts: now - 5 * m, d: 'a' }, { lat: 1.305, lng: 103.833, ts: now - 2 * m, d: 'a' }];
+  assert.deepEqual(surgeSpots(one, now), [], 'one driver twice is not enough');
+  const two = [...one, { lat: 1.30, lng: 103.83, ts: now - 8 * m, d: 'b' }];
+  const spots = surgeSpots(two, now);
+  assert.equal(spots.length, 1);
+  assert.equal(spots[0].drivers, 2);
+  assert.equal(spots[0].latest, now - 2 * m);
+  const stale = two.map((p) => ({ ...p, ts: p.ts - 40 * m }));
+  assert.deepEqual(surgeSpots(stale, now), [], 'older than 30 min: gone');
+  const far = [{ ...orchard, ts: now, d: 'a' }, { lat: 1.35, lng: 103.94, ts: now, d: 'b' }];
+  assert.deepEqual(surgeSpots(far, now), [], 'two drivers far apart are two different places');
+  // who sees it
+  const newton = { lat: 1.3123, lng: 103.8393 }; // ~1.2 km from Orchard
+  const tiongBahru = { lat: 1.2858, lng: 103.8273 }; // ~2 km
+  const tampines = { lat: 1.3526, lng: 103.9447 }; // ~13 km
+  assert.equal(surgeFor(newton, spots).inside, true);
+  assert.equal(surgeFor(tiongBahru, spots).inside, false);
+  assert.ok(surgeFor(tiongBahru, spots).km < 3);
+  assert.equal(surgeFor(tampines, spots), null);
+});

@@ -397,3 +397,10 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .q-wait { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
 .q-wait-min { font-family: var(--mono); font-size: 26px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .q-wait .note { margin: 0; }
+
+/* Likely surging nearby (top of Radar) */
+.surge-alert { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 14px; border: 2px solid var(--go);
+  background: color-mix(in srgb, var(--go) 16%, var(--surface)); }
+.surge-up { font-size: 28px; font-weight: 800; color: var(--go); line-height: 1; }
+.surge-alert .note { margin: 2px 0 0; }
+.surge-report { width: 100%; font-size: 14px; }
