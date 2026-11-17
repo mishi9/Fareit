@@ -356,6 +356,21 @@ const UPSERT = `INSERT INTO jobs (id, device, ip_hash, received_at, updated_at, 
     pricing = excluded.pricing, card_km = excluded.card_km
   WHERE jobs.device = excluded.device`;
 
+// ---------- batched writes ----------
+// Who owns each id, in one query for the whole upload instead of one per row.
+async function owners(db, table, ids) {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return new Map();
+  const marks = unique.map((_, i) => `?${i + 1}`).join(', ');
+  const { results } = await db.prepare(`SELECT id, device, deleted FROM ${table} WHERE id IN (${marks})`).bind(...unique).all();
+  return new Map(results.map((r) => [r.id, r]));
+}
+// All of an upload's writes in one round trip, as one transaction: all saved or none (phones
+// retry the whole upload, and writes overwrite, so a retry never duplicates).
+async function writeAll(db, statements) {
+  if (statements.length) await db.batch(statements);
+}
+
 async function postJobs(request, env) {
   const text = await request.text();
   if (text.length > 100 * 1024) return json({ error: 'Too much data in one upload.' }, 413);
@@ -379,21 +394,25 @@ async function postJobs(request, env) {
 
   const accepted = [];
   const rejected = [];
-  for (const raw of jobs) {
-    const row = cleanJob(raw, now);
+  const rows = jobs.map((raw) => ({ raw, row: cleanJob(raw, now) }));
+  const known = await owners(env.DB, 'jobs', rows.filter((x) => x.row).map((x) => x.row.id));
+  const writes = [];
+  for (const { raw, row } of rows) {
     if (!row) { rejected.push(raw && raw.id); continue; }
-    const existing = await env.DB.prepare('SELECT device FROM jobs WHERE id = ?1').bind(row.id).first();
+    const existing = known.get(row.id);
     if (existing && existing.device !== device) { rejected.push(row.id); continue; }
     if (!existing) {
       if (budget <= 0) { rejected.push(row.id); continue; }
       budget--;
+      known.set(row.id, { device }); // a repeat of the same id later in this upload is an edit
     }
-    await env.DB.prepare(UPSERT).bind(
+    writes.push(env.DB.prepare(UPSERT).bind(
       row.id, device, ipHash, now, row.ts, row.ride, row.band, row.zone, row.decision, row.km, row.trip_min,
       row.drive_min, row.fare, row.payment, row.pickup_lat, row.pickup_lng, row.drop_lat, row.drop_lng, row.pricing, row.card_km,
-    ).run();
+    ));
     accepted.push(row.id);
   }
+  await writeAll(env.DB, writes);
   return json({ accepted, rejected });
 }
 
@@ -418,13 +437,16 @@ async function deleteJobs(request, env) {
   const now = Date.now();
   const deleted = [];
   const missing = [];
-  for (const id of ids) {
-    const row = await env.DB.prepare('SELECT device, deleted FROM jobs WHERE id = ?1').bind(id).first();
+  const known = await owners(env.DB, 'jobs', ids);
+  const writes = [];
+  for (const id of new Set(ids)) {
+    const row = known.get(id);
     if (!row) { missing.push(id); continue; } // never reached the pool: nothing to remove
     if (row.device !== device) { missing.push(id); continue; }
-    if (row.deleted !== 1) await env.DB.prepare(TOMBSTONE).bind(id, device, now).run();
+    if (row.deleted !== 1) writes.push(env.DB.prepare(TOMBSTONE).bind(id, device, now));
     deleted.push(id);
   }
+  await writeAll(env.DB, writes);
   return json({ deleted, missing });
 }
 
@@ -514,21 +536,25 @@ async function postFormula(request, env) {
   let budget = FORMULA_MAX_NEW_PER_IP_PER_DAY - Number((recent && recent.n) || 0);
   const accepted = [];
   const rejected = [];
-  for (const raw of trips) {
-    const t = cleanFormulaTrip(raw, now);
+  const cleaned = trips.map((raw) => ({ raw, t: cleanFormulaTrip(raw, now) }));
+  const known = await owners(env.DB, 'formula_trips', cleaned.filter((x) => x.t).map((x) => x.t.id));
+  const writes = [];
+  for (const { raw, t } of cleaned) {
     if (!t) { rejected.push(raw && raw.id); continue; }
-    const existing = await env.DB.prepare('SELECT device FROM formula_trips WHERE id = ?1').bind(t.id).first();
+    const existing = known.get(t.id);
     if (existing && existing.device !== device) { rejected.push(t.id); continue; }
     if (!existing) {
       if (budget <= 0) { rejected.push(t.id); continue; }
       budget--;
+      known.set(t.id, { device });
     }
-    await env.DB.prepare(FORMULA_UPSERT).bind(
+    writes.push(env.DB.prepare(FORMULA_UPSERT).bind(
       t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
       t.card_min, t.pickup_km, t.lat, t.lng,
-    ).run();
+    ));
     accepted.push(t.id);
   }
+  await writeAll(env.DB, writes);
   return json({ accepted, rejected });
 }
 
@@ -558,15 +584,18 @@ async function deleteFormula(request, env) {
   await ensureSchema(env.DB);
   const deleted = [];
   const missing = [];
-  for (const id of ids) {
-    const row = await env.DB.prepare('SELECT device FROM formula_trips WHERE id = ?1').bind(id).first();
+  const known = await owners(env.DB, 'formula_trips', ids);
+  const writes = [];
+  for (const id of new Set(ids)) {
+    const row = known.get(id);
     if (!row || row.device !== device) { missing.push(id); continue; }
-    await env.DB.prepare(`UPDATE formula_trips SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips),
+    writes.push(env.DB.prepare(`UPDATE formula_trips SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips),
         km = NULL, min = NULL, erp = NULL, paid = NULL, earned = NULL, surge = NULL, predicted = NULL, predicted_earned = NULL,
         card_min = NULL, pickup_km = NULL, lat = NULL, lng = NULL
-      WHERE id = ?1`).bind(id, Date.now()).run();
+      WHERE id = ?1`).bind(id, Date.now()));
     deleted.push(id);
   }
+  await writeAll(env.DB, writes);
   return json({ deleted, missing });
 }
 
@@ -610,18 +639,22 @@ async function postQueue(request, env) {
   let budget = FORMULA_MAX_NEW_PER_IP_PER_DAY - Number((recent && recent.n) || 0);
   const accepted = [];
   const rejected = [];
-  for (const raw of readings) {
-    const q = cleanQueueReading(raw, now);
+  const cleaned = readings.map((raw) => ({ raw, q: cleanQueueReading(raw, now) }));
+  const known = await owners(env.DB, 'airport_queue', cleaned.filter((x) => x.q).map((x) => x.q.id));
+  const writes = [];
+  for (const { raw, q } of cleaned) {
     if (!q) { rejected.push(raw && raw.id); continue; }
-    const existing = await env.DB.prepare('SELECT device FROM airport_queue WHERE id = ?1').bind(q.id).first();
+    const existing = known.get(q.id);
     if (existing && existing.device !== device) { rejected.push(q.id); continue; }
     if (!existing) {
       if (budget <= 0) { rejected.push(q.id); continue; }
       budget--;
+      known.set(q.id, { device });
     }
-    await env.DB.prepare(QUEUE_UPSERT).bind(q.id, device, ipHash, now, q.ts, q.cars_ahead, q.est_wait_min, q.actual_wait_min).run();
+    writes.push(env.DB.prepare(QUEUE_UPSERT).bind(q.id, device, ipHash, now, q.ts, q.cars_ahead, q.est_wait_min, q.actual_wait_min));
     accepted.push(q.id);
   }
+  await writeAll(env.DB, writes);
   return json({ accepted, rejected });
 }
 
@@ -651,13 +684,16 @@ async function deleteQueue(request, env) {
   await ensureSchema(env.DB);
   const deleted = [];
   const missing = [];
-  for (const id of ids) {
-    const row = await env.DB.prepare('SELECT device FROM airport_queue WHERE id = ?1').bind(id).first();
+  const known = await owners(env.DB, 'airport_queue', ids);
+  const writes = [];
+  for (const id of new Set(ids)) {
+    const row = known.get(id);
     if (!row || row.device !== device) { missing.push(id); continue; }
-    await env.DB.prepare(`UPDATE airport_queue SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM airport_queue),
-        cars_ahead = NULL, est_wait_min = NULL, actual_wait_min = NULL WHERE id = ?1`).bind(id, Date.now()).run();
+    writes.push(env.DB.prepare(`UPDATE airport_queue SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM airport_queue),
+        cars_ahead = NULL, est_wait_min = NULL, actual_wait_min = NULL WHERE id = ?1`).bind(id, Date.now()));
     deleted.push(id);
   }
+  await writeAll(env.DB, writes);
   return json({ deleted, missing });
 }
 

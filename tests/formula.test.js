@@ -296,3 +296,42 @@ test('each Window band leans on trips of its own distance', async () => {
   assert.ok(b[0].vs > b[1].vs && b[1].vs > b[2].vs, `ordered: ${b.map((x) => x.vs.toFixed(3)).join(', ')}`);
   assert.deepEqual([b[0].inBandNear, b[1].inBandNear, b[2].inBandNear], [4, 0, 3]);
 });
+
+test('remembered results equal fresh ones, and a new trip is always taken into account', async () => {
+  const { looError, timeEstimator, LOO_MAX } = await import('../public/beta/formula.js');
+  const trips = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20]].map(([km, min]) => make(km, min));
+  const a = fitWeights(trips);
+  const b = fitWeights(trips);
+  assert.equal(a, b, 'same trips array: the same remembered result');
+  assert.deepEqual(fitWeights([...trips]), a, 'a fresh copy of the same trips gives the same numbers');
+  assert.deepEqual(fitCommission([...trips]), fitCommission(trips));
+  assert.equal(timeEstimator(trips)(10), timeEstimator([...trips])(10));
+  // The page hands out a new array when a trip is added: it counts straight away.
+  const more = [...trips, make(40, 50, { actual: 60 })];
+  assert.notDeepEqual(fitWeights(more), a);
+  // The accuracy stat tests every trip up to LOO_MAX.
+  assert.equal(looError(trips).n, 6);
+  assert.equal(LOO_MAX, 200);
+});
+
+test('speed: 3,000 trips stay quick once remembered', async () => {
+  const { bandOutlook, looError } = await import('../public/beta/formula.js');
+  const now = Date.parse('2026-11-22T02:00:00+08:00');
+  const many = Array.from({ length: 3000 }, (_, i) => {
+    const km = 2 + (i % 35);
+    return make(km, km * 1.2 + 4, { ts: now - i * 7 * 60000, lat: 1.3 + (i % 20) / 200, lng: 103.8 + (i % 30) / 200 });
+  });
+  let t0 = performance.now();
+  looError(many);
+  const firstLoo = performance.now() - t0;
+  t0 = performance.now();
+  looError(many);
+  const againLoo = performance.now() - t0;
+  bandOutlook(many, now, { lat: 1.32, lng: 103.86 });
+  t0 = performance.now();
+  for (let m = 0; m < 10; m++) bandOutlook(many, now + m * 60000, { lat: 1.32, lng: 103.86 });
+  const perMinute = (performance.now() - t0) / 10;
+  assert.ok(againLoo < 5, `remembered accuracy stat ${againLoo.toFixed(1)} ms`);
+  assert.ok(perMinute < 150, `Window refresh with 3,000 trips ${perMinute.toFixed(1)} ms`);
+  console.log(`# 3,000 trips: accuracy stat first ${firstLoo.toFixed(0)} ms, then ${againLoo.toFixed(2)} ms; Window refresh ${perMinute.toFixed(1)} ms`);
+});

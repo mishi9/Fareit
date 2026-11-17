@@ -299,3 +299,33 @@ test('airport queue readings: own table, numbers and time only, own-device edits
   assert.equal((await call('/api/formula?since=0')).body.trips.length, 0);
   assert.deepEqual((await call('/api/queue/delete', { device: 'device-aaaaaaaa', ids: ['queue-read-0001'] })).body.deleted, ['queue-read-0001']);
 });
+
+test('an upload is a few database round trips, not two per row', async () => {
+  const base = fakeD1();
+  let trips = 0;
+  // Count round trips: each first/all/run is one; a batch is one, however many statements.
+  const wrap = (stmt) => ({
+    bind: (...a) => wrap(stmt.bind(...a)),
+    first: () => { trips++; return stmt.first(); },
+    all: () => { trips++; return stmt.all(); },
+    run: () => { trips++; return stmt.run(); },
+    exec: () => stmt.exec(),
+  });
+  const env = { DB: { prepare: (sql) => wrap(base.prepare(sql)), batch: (list) => { trips++; return base.batch(list); } } };
+  const send = (path, body) => worker.fetch(new Request(`https://fareit.test${path}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': '7.7.7.7' }, body: JSON.stringify(body),
+  }), env).then((r) => r.json());
+  await send('/api/jobs', { device: 'device-aaaaaaaa', jobs: [job({ id: 'warm-up-0001' })] }); // creates the tables
+  const fifty = Array.from({ length: 50 }, (_, i) => job({ id: `job-batch-${String(i).padStart(4, '0')}` }));
+  trips = 0;
+  const res = await send('/api/jobs', { device: 'device-aaaaaaaa', jobs: fifty });
+  assert.equal(res.accepted.length, 50);
+  assert.ok(trips <= 3, `50 jobs took ${trips} round trips`);
+  const pulled = await worker.fetch(new Request('https://fareit.test/api/jobs?since=0'), env).then((r) => r.json());
+  assert.equal(pulled.jobs.length, 51);
+  assert.equal(new Set(pulled.jobs.map((j) => j.rev)).size, 51, 'every row still gets its own revision');
+  trips = 0;
+  const del = await send('/api/jobs/delete', { device: 'device-aaaaaaaa', ids: fifty.map((j) => j.id) });
+  assert.equal(del.deleted.length, 50);
+  assert.ok(trips <= 2, `50 deletes took ${trips} round trips`);
+});

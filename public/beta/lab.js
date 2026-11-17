@@ -29,12 +29,18 @@ const offText = (pred, actual) => {
   return Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`;
 };
 
-const lab = { trips: [], shared: {}, surge: 'normal', root: null, device: null, syncNote: '' };
+const lab = { trips: [], shared: {}, surge: 'normal', root: null, device: null, syncNote: '', version: 0, cache: null };
 
-// Everyone's trips: yours (on this phone) plus other testers' (from the server).
+// Everyone's trips: yours (on this phone) plus other testers' (from the server). The same array is
+// handed out until the trips change (changed()), so the formula, cut and time estimate built from
+// it are worked out once per change. Nothing is dropped: it's always every trip.
+const changed = () => { lab.version++; };
 const dataset = () => {
-  const mine = new Set(lab.trips.map((t) => t.id));
-  return [...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))];
+  if (!lab.cache || lab.cache.version !== lab.version) {
+    const mine = new Set(lab.trips.map((t) => t.id));
+    lab.cache = { version: lab.version, trips: [...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))] };
+  }
+  return lab.cache.trips;
 };
 const weights = () => fitWeights(dataset());
 const commission = () => fitCommission(dataset());
@@ -97,6 +103,7 @@ export function syncLab() {
         for (const r of data.trips || []) {
           if (r.deleted) delete lab.shared[r.id];
           else lab.shared[r.id] = fromRow(r);
+          changed();
         }
         cursor = data.next ?? cursor;
         if (!data.more) break;
@@ -119,6 +126,7 @@ export async function buildLab(root) {
   lab.root = root;
   lab.trips = (await db.getKV(KEY)) || [];
   lab.shared = (await db.getKV('formulaShared')) || {};
+  changed();
   lab.device = await db.getKV('device');
   watchLocation();
   onMove(() => renderBands());
@@ -131,7 +139,7 @@ export async function buildLab(root) {
     t.timeSplit = true;
     moved = true;
   }
-  if (moved) await db.setKV(KEY, lab.trips);
+  if (moved) { changed(); await db.setKV(KEY, lab.trips); }
   root.innerHTML = `
     <div class="card lab-formula" id="lab-formula"></div>
 
@@ -406,6 +414,7 @@ async function save() {
   const c = commission();
   const predictedEarned = driverEarns(c, predicted, f.erp);
   const t = timeOfDay(dataset(), f.ts);
+  changed();
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...f,
     // Where the phone was (about 1 km): on Got a job, near the pickup; otherwise on Save.
@@ -535,6 +544,7 @@ async function quickSave() {
   }
   const est = estimate();
   const normalPaid = passengerFare(weights(), f.km, est(f.km)).fare;
+  changed();
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, quick: true,
     ts: lab.pending ? lab.pending.ts : Date.now(), km: f.km, min: null, erp: 0, actual: null, earned: f.earned, surge: f.surge,
@@ -673,6 +683,7 @@ function renderList() {
       if (!armed) { armed = true; del.textContent = 'Tap again to delete'; setTimeout(() => { armed = false; del.textContent = 'Delete'; }, 4000); return; }
       lab.trips = lab.trips.filter((x) => x.id !== t.id);
       delete lab.shared[t.id];
+      changed();
       await db.setKV(KEY, lab.trips);
       await db.setKV('formulaShared', lab.shared);
       const dels = (await db.getKV('formulaDeletes')) || [];

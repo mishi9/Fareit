@@ -67,7 +67,20 @@ function lsq(X, y) {
 }
 
 // Your trips plus the built-in base trip.
-export const withBase = (trips) => [...BASE_TRIPS, ...trips.filter((t) => !t.base)];
+// Results that depend only on the set of trips are remembered per trips array: the page passes
+// the same array until a trip is saved, deleted or synced in (then a new one), so the formula,
+// the cut and the time estimate are worked out once per change, not on every refresh or keystroke.
+// Everything time- or place-dependent (now, surge near this hour, the bands) is still worked out
+// fresh from all trips every time.
+const memo = (fn) => {
+  const cache = new WeakMap();
+  return (trips) => {
+    if (!cache.has(trips)) cache.set(trips, fn(trips));
+    return cache.get(trips);
+  };
+};
+
+export const withBase = memo((trips) => [...BASE_TRIPS, ...trips.filter((t) => !t.base)]);
 
 // ---- Trip time ----
 // The passenger is quoted before a driver is matched, so the price depends on pickup → drop-off
@@ -76,7 +89,8 @@ export const withBase = (trips) => [...BASE_TRIPS, ...trips.filter((t) => !t.bas
 // and never used as trip time. When a trip has no trip time, it's estimated from the km.
 const DEFAULT_TIME = { a: 3, b: 1.1 }; // minutes ≈ 3 + 1.1 × km until real trip times teach it
 
-export function timeEstimator(trips) {
+export const timeEstimator = memo(timeEstimatorOf);
+function timeEstimatorOf(trips) {
   const rows = trips.filter((t) => t.min > 0 && t.km > 0);
   let { a, b } = DEFAULT_TIME;
   if (rows.length >= 3) {
@@ -95,7 +109,11 @@ export function usable(t) {
 
 // Best weights: least squares on what the passenger paid (minus ERP / tolls), with the gentle
 // pull toward the seed. Always includes the base trip.
+const fitWeightsAll = memo((trips) => fitWeightsOf(trips, true));
 export function fitWeights(trips, { includeBase = true } = {}) {
+  return includeBase ? fitWeightsAll(trips) : fitWeightsOf(trips, false);
+}
+function fitWeightsOf(trips, includeBase) {
   const pool = includeBase ? withBase(trips) : trips;
   const rows = pool.filter(usable);
   if (!rows.length) return { ...SEED, n: 0 };
@@ -115,8 +133,13 @@ export function fitWeights(trips, { includeBase = true } = {}) {
 
 // How good the formula is on trips it hasn't seen: each of your trips predicted from all the
 // others (and the base trip).
-export function looError(trips) {
-  const mine = trips.filter((t) => !t.base && usable(t));
+// Tests every trip until there are more than 200; then the 200 most recent (each still predicted
+// from all the others), to keep it quick. Predictions never use this; it's only the accuracy stat.
+export const LOO_MAX = 200;
+export const looError = memo(looErrorOf);
+function looErrorOf(trips) {
+  const all = trips.filter((t) => !t.base && usable(t));
+  const mine = all.length > LOO_MAX ? [...all].sort((a, b) => b.ts - a.ts).slice(0, LOO_MAX) : all;
   if (mine.length < 2) return null;
   let abs = 0;
   let rel = 0;
@@ -127,7 +150,7 @@ export function looError(trips) {
     abs += Math.abs(p - t.actual);
     rel += Math.abs(p - t.actual) / t.actual;
   }
-  return { n: mine.length, avg: abs / mine.length, pct: rel / mine.length };
+  return { n: mine.length, avg: abs / mine.length, pct: rel / mine.length, of: all.length };
 }
 
 // ---- What Grab keeps ----
@@ -146,7 +169,8 @@ export function cutOf(t) {
 export const LOW_CUT = 0.15;
 export const isLowCut = (t) => { const c = cutOf(t); return Boolean(c) && c.rate < LOW_CUT; };
 
-export function fitCommission(trips) {
+export const fitCommission = memo(fitCommissionOf);
+function fitCommissionOf(trips) {
   // Trips paid at the driver's S$6.20 floor follow the floor, not the usual rule: leave them out.
   const all = withBase(trips).filter((t) => cutOf(t) && !(Math.abs(t.earned - (t.erp || 0) - MIN_DRIVER) < 0.005));
   const low = all.filter(isLowCut);
