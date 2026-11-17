@@ -3,6 +3,7 @@
 // table on the server (separate from fares and the shared jobs pool) so every driver's readings
 // build the picture of how long the queue takes at each hour.
 import * as db from './db.js';
+import { here, atAirport, locationState, onMove } from './where.js';
 
 const KEY = 'queueLog';
 const OPEN_FOR = 4 * 3600 * 1000; // a reading can be closed with "Got a job" for 4 hours
@@ -97,8 +98,10 @@ export async function buildQueue(root) {
   q.mine = (await db.getKV(KEY)) || [];
   q.shared = (await db.getKV('queueShared')) || {};
   q.device = await db.getKV('device');
+  onMove(() => render());
   root.innerHTML = `
     <h2>Airport queue</h2>
+    <p class="note" id="q-where"></p>
     <p class="note">When you join the airport queue, note what Grab shows. Tap <b>Got a job</b> when one comes, to record the real wait. Not used for fares: it builds a picture of queue times by hour.</p>
     <div class="row2">
       <div class="field"><label for="q-cars">Cars ahead</label>
@@ -146,6 +149,14 @@ async function gotJob(reading) {
 function render() {
   const r = q.root;
   if (!r) return;
+  // Shown in the airport zone, while a reading is still open, or when location isn't available.
+  const openNow = q.mine.some((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
+  const where = locationState();
+  const inZone = atAirport(here());
+  r.hidden = !(inZone || openNow || where !== 'ok');
+  $('#q-where', r).textContent = inZone ? 'You\'re in the airport zone.'
+    : openNow ? 'Shown because a reading is still open.'
+      : where === 'denied' ? 'Location is off, so this is always shown.' : 'Waiting for location; shown until it\'s known.';
   // The latest open reading of yours: Got a job closes it with the actual wait.
   const open = [...q.mine].reverse().find((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
   const openBox = $('#q-open', r);

@@ -224,7 +224,8 @@ const SCHEMA = [
     km REAL, min REAL, erp REAL, paid REAL, earned REAL, surge TEXT,
     predicted REAL, predicted_earned REAL,
     deleted INTEGER,
-    card_min REAL, pickup_km REAL
+    card_min REAL, pickup_km REAL,
+    lat REAL, lng REAL
   )`,
   'CREATE INDEX IF NOT EXISTS formula_rev ON formula_trips(rev)',
   // Airport queue readings (beta): cars ahead and Grab's estimated wait when a driver joins the
@@ -253,6 +254,8 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'deleted INTEGER'))
       .then(() => addColumn(db, 'card_min REAL', 'formula_trips'))
       .then(() => addColumn(db, 'pickup_km REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'lat REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'lng REAL', 'formula_trips'))
       .catch((e) => {
         schemaReady = null;
         throw e;
@@ -428,6 +431,8 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   const predictedEarned = n(t.predicted_earned);
   const cardMin = n(t.card_min);
   const pickupKm = n(t.pickup_km);
+  const where = cleanPoint(n(t.lat), n(t.lng)); // inside Singapore, about 1 km
+  if (!where) return null;
   if (!Number.isFinite(ts) || ts < now - 365 * 86400 * 1000 || ts > now + 10 * 60 * 1000) return null;
   // min is the trip time from the pickup (optional); card_min is the job card's total, which also
   // includes the drive to the pickup.
@@ -438,17 +443,17 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
-    card_min: r2(cardMin), pickup_km: r2(pickupKm),
+    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1],
   };
 }
 
 const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received_at, updated_at, rev, ts, km, min, erp, paid,
-    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15)
+    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
     min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
     predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0,
-    card_min = excluded.card_min, pickup_km = excluded.pickup_km
+    card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng
   WHERE formula_trips.device = excluded.device`;
 
 async function readJson(request) {
@@ -487,7 +492,7 @@ async function postFormula(request, env) {
     }
     await env.DB.prepare(FORMULA_UPSERT).bind(
       t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
-      t.card_min, t.pickup_km,
+      t.card_min, t.pickup_km, t.lat, t.lng,
     ).run();
     accepted.push(t.id);
   }
@@ -499,7 +504,7 @@ async function getFormula(url, env) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, deleted
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, deleted
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
@@ -525,7 +530,7 @@ async function deleteFormula(request, env) {
     if (!row || row.device !== device) { missing.push(id); continue; }
     await env.DB.prepare(`UPDATE formula_trips SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips),
         km = NULL, min = NULL, erp = NULL, paid = NULL, earned = NULL, surge = NULL, predicted = NULL, predicted_earned = NULL,
-        card_min = NULL, pickup_km = NULL
+        card_min = NULL, pickup_km = NULL, lat = NULL, lng = NULL
       WHERE id = ?1`).bind(id, Date.now()).run();
     deleted.push(id);
   }

@@ -6,6 +6,7 @@
 // and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
 import { buildQueue, syncQueue } from './queue.js';
+import { watchLocation, here, rounded } from './where.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
@@ -40,11 +41,11 @@ const commission = () => fitCommission(dataset());
 const toRow = (t) => ({
   id: t.id, ts: t.ts, km: t.km, min: t.min ?? null, erp: t.erp || 0, paid: t.actual, earned: t.earned ?? null,
   surge: t.surge, predicted: t.predicted ?? null, predicted_earned: t.predictedEarned ?? null,
-  card_min: t.cardMin ?? null, pickup_km: t.pickupKm ?? null,
+  card_min: t.cardMin ?? null, pickup_km: t.pickupKm ?? null, lat: t.lat ?? null, lng: t.lng ?? null,
 });
 const fromRow = (r) => ({
   id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
-  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, shared: true,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, shared: true,
 });
 // Surge or airport: the learned % on top of the normal fare (null for normal trips).
 const liftFor = (kind, ts) => (kind === 'surge' ? surgeLift(dataset(), ts) : kind === 'airport' ? airportLift(dataset(), ts) : null);
@@ -117,6 +118,7 @@ export async function buildLab(root) {
   lab.trips = (await db.getKV(KEY)) || [];
   lab.shared = (await db.getKV('formulaShared')) || {};
   lab.device = await db.getKV('device');
+  watchLocation();
   // Trips saved before trip time and card time were split held the job card's total time (which
   // includes the drive to the pickup) as their time. Keep it as card time; trip time unknown.
   let moved = false;
@@ -353,6 +355,7 @@ async function save() {
   const t = timeOfDay(dataset(), f.ts);
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...f,
+    ...(rounded(here()) || {}), // where the phone was on Save (about 1 km): usually near the drop-off
     predicted, predictedEarned, predictedNormal: normalFare, surgeLiftUsed: sl ? sl.lift : null, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
   });

@@ -1,5 +1,5 @@
 // Beta offline shell, separate from the main app's (scope /beta/, cache fareit-beta-…).
-const CACHE = 'fareit-beta-v18';
+const CACHE = 'fareit-beta-v19';
 const SHELL = [
   './',
   'index.html',
@@ -12,6 +12,7 @@ const SHELL = [
   'formula.js',
   'lab.js',
   'queue.js',
+  'where.js',
 ];
 
 self.addEventListener('install', (event) => {

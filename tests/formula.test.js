@@ -214,3 +214,14 @@ test('beta Window bands: normal, surge and now earnings for < 10, 10–20 and > 
   const afternoon = bandOutlook([...normal, ...slow], at('2026-11-20T15:30:00+08:00'));
   assert.ok(afternoon.some((b) => b.state === 'bad'), JSON.stringify(afternoon.map((b) => [b.state, b.vs])));
 });
+
+test('airport zone: Changi terminals and holding areas, not Changi Business Park or Tampines', async () => {
+  globalThis.navigator ??= {};
+  const { atAirport, rounded } = await import('../public/beta/where.js');
+  assert.equal(atAirport({ lat: 1.3603, lng: 103.9894 }), true, 'Jewel');
+  assert.equal(atAirport({ lat: 1.3480, lng: 103.9870 }), true, 'between T2 and T4');
+  assert.equal(atAirport({ lat: 1.3340, lng: 103.9630 }), false, 'Changi Business Park');
+  assert.equal(atAirport({ lat: 1.3530, lng: 103.9450 }), false, 'Tampines');
+  assert.equal(atAirport(null), false);
+  assert.deepEqual(rounded({ lat: 1.354321, lng: 103.987654 }), { lat: 1.35, lng: 103.99 });
+});
