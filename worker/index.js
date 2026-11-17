@@ -28,7 +28,7 @@
 //   GET  /api/events                          -> { venues, events }   events the owner has added
 //   POST /api/events { name, venue, starts_at, ends_at } -> { venues, events }   owner only
 //   POST /api/events/delete { id }            -> { venues, events }   owner only
-//   GET  /api/info                            -> checkpoint cameras, taxis at Changi (data.gov.sg)
+//   GET  /api/info                            -> taxis at Changi (data.gov.sg)
 //   POST /api/invites/create { label }        -> { token }       owner only
 //   GET  /api/invites                         -> { invites }     owner only
 //   POST /api/invites/revoke { token }        -> { revoked }     owner only: the invite and its phone
@@ -791,9 +791,8 @@ async function removeEvent(request, env) {
 }
 
 // ---------- Live info (data.gov.sg, free, no key) ----------
-// Checkpoint cameras and available street taxis around Changi, fetched at most every 2 minutes
+// Available street taxis around Changi, fetched at most every 2 minutes
 // and shared by every phone.
-const CHECKPOINT_CAMS = { 2701: 'Woodlands Causeway', 2702: 'Woodlands Checkpoint', 4703: 'Tuas Second Link', 4713: 'Tuas Checkpoint' };
 const CHANGI = [[1.3614, 103.9894], [1.3554, 103.9908], [1.3566, 103.9863], [1.3381, 103.9832], [1.3603, 103.9894]];
 const kmBetween = (a, b, c, d) => {
   const rad = (x) => (x * Math.PI) / 180;
@@ -811,12 +810,7 @@ async function fetchLive() {
     return res.json();
   };
   const out = {};
-  const [cams, taxis] = await Promise.allSettled([get('traffic-images'), get('taxi-availability')]);
-  if (cams.status === 'fulfilled') {
-    const list = (cams.value.items?.[0]?.cameras || []).filter((c) => CHECKPOINT_CAMS[c.camera_id]);
-    out.cameras = Object.keys(CHECKPOINT_CAMS).map((id) => list.find((c) => c.camera_id === id)).filter(Boolean)
-      .map((c) => ({ id: c.camera_id, name: CHECKPOINT_CAMS[c.camera_id], image: c.image, at: Date.parse(c.timestamp) || Date.now() }));
-  }
+  const [taxis] = await Promise.allSettled([get('taxi-availability')]);
   if (taxis.status === 'fulfilled') {
     const f = taxis.value.features?.[0];
     const coords = f?.geometry?.coordinates || [];

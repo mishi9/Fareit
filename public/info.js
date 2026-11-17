@@ -1,5 +1,5 @@
 // Info tab: what's going on around Singapore that matters for driving. Events (owner-added),
-// the airport (taxis waiting, queue readings), checkpoint cameras, and, once the LTA DataMall key
+// the airport (taxis waiting, queue readings), arrivals from JB, and, once the LTA DataMall key
 // is set up, road incidents and expressway travel times. Display only: nothing here changes the
 // estimates, except that trips around an event are kept apart from normal (formula.js).
 import { eventsList, venuesList, loadEvents, addEvent, deleteEvent, onEventsChange } from './events.js';
@@ -31,7 +31,7 @@ export function buildInfo(root) {
     <div id="info-old"></div>
     <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
     <section class="stack"><h2>Airport</h2><div id="info-airport" class="stack"></div></section>
-    <section class="stack"><h2>Checkpoints</h2><div id="info-cams" class="cam-grid"></div><p class="note" id="info-cams-note"></p></section>
+    <section class="stack"><h2>From JB</h2><div id="info-jb" class="stack"></div></section>
     <section class="stack"><h2>Road incidents</h2><div id="info-incidents"></div></section>
     <section class="stack"><h2>Expressway travel times</h2><div id="info-travel"></div></section>`;
   onEventsChange(() => renderEvents());
@@ -130,7 +130,7 @@ function buildEventForm() {
   });
 }
 
-// ---------- live: airport taxis, checkpoint cameras, LTA ----------
+// ---------- live: airport taxis, from JB, LTA ----------
 async function loadLive() {
   if (Date.now() - info.liveAt < LIVE_REFRESH) return;
   info.liveAt = Date.now();
@@ -159,15 +159,29 @@ function renderLive() {
       <div class="tile"><div class="v">${q && q.cars != null ? Math.round(q.cars) : '—'}</div><div class="k">cars ahead in the Grab queue, around this hour${q ? ` (${q.n} reading${q.n === 1 ? '' : 's'})` : ''}</div></div>
     </div>
     <p class="note">Taxis: available street taxis in the airport zone, from LTA (not Grab cars, but a fair sign of how crowded the airport rank is). Queue: from drivers' readings on Radar at the airport.${!L.taxis && info.liveErr ? ` ${esc(info.liveErr)}` : ''}</p>`;
-  const cams = L.cameras || [];
-  r.querySelector('#info-cams').innerHTML = cams.length
-    ? cams.map((c) => `<figure class="cam"><img src="${esc(c.image)}" alt="${esc(c.name)} traffic camera" loading="lazy"><figcaption>${esc(c.name)} · ${hm(c.at)}</figcaption></figure>`).join('')
-    : `<p class="note">${esc(info.liveErr || 'Loading cameras…')}</p>`;
-  r.querySelector('#info-cams-note').textContent = cams.length ? 'Live LTA cameras, refreshed every few minutes. ICA doesn’t publish wait times, so the queue you see is the best guide.' : '';
+  renderJb();
   const ltaText = L.lta && L.lta.ready ? 'Loading…'
     : isOwner() || isOwnerPhone() ? 'Needs the LTA DataMall key (free) to switch on.' : 'Coming soon.';
   r.querySelector('#info-incidents').innerHTML = `<p class="note">${ltaText}${L.lta && L.lta.ready ? '' : ' Accidents, breakdowns, roadworks and heavy traffic, nearest to you first.'}</p>`;
   r.querySelector('#info-travel').innerHTML = `<p class="note">${ltaText}${L.lta && L.lta.ready ? '' : ' e.g. "CTE to the city: 12 min".'}</p>`;
+}
+
+// People coming in from JB by bus or train often take a Grab from where they're dropped off.
+// Where each route ends in Singapore; live arrivals and the KTM timetable to come.
+const JB_ROUTES = [
+  { name: 'KTM Shuttle Tebrau', drop: 'Woodlands Train Checkpoint', note: 'Timetable to be added. Due to stop after the RTS Link opens (reported for early 2027).' },
+  { name: 'Causeway Link CW1', drop: 'Kranji MRT', note: '' },
+  { name: 'Causeway Link CW2', drop: 'Queen Street Bus Terminal', note: 'Runs 24 hours.' },
+  { name: 'Causeway Link CW5', drop: 'Newton (near the food centre)', note: '' },
+];
+function renderJb() {
+  const box = info.root?.querySelector('#info-jb');
+  if (!box) return;
+  const owner = isOwner() || isOwnerPhone();
+  box.innerHTML = `
+    ${JB_ROUTES.map((x) => `<div class="ev-card"><div class="ev-main"><b>${esc(x.name)}</b>
+      <div class="note">Drops off at ${esc(x.drop)}${x.note ? ` · ${esc(x.note)}` : ''}</div></div></div>`).join('')}
+    <p class="note">${owner ? 'Live bus arrivals: to be tested once the LTA DataMall key is in (it may not cover Causeway Link). KTM: send the current timetable to add it.' : 'Live arrivals coming soon.'}</p>`;
 }
 
 // Old jobs from before Radar (the slider) that still need a fare.

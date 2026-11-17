@@ -238,7 +238,7 @@ test('events: anyone let in can read them; only the owner adds or deletes', asyn
   assert.equal((await req('/api/events/delete', { body: { id: list.events[0].id }, key: okey })).body.events.length, 0);
 });
 
-test('info: checkpoint cameras and taxis at Changi, fetched once and shared', async (t) => {
+test('info: taxis at Changi, fetched once and shared', async (t) => {
   const { req, owner } = setup();
   const key = await owner();
   let calls = 0;
@@ -254,10 +254,10 @@ test('info: checkpoint cameras and taxis at Changi, fetched once and shared', as
     return new Response(JSON.stringify({ features: [{ geometry: { coordinates: [[103.9890, 1.3600], [103.9860, 1.3560], [103.85, 1.30]] }, properties: { timestamp: '2026-11-18T07:23:34+08:00' } }] }));
   });
   const a = (await req('/api/info', { key })).body;
-  assert.deepEqual(a.cameras.map((c) => c.name), ['Woodlands Causeway', 'Tuas Checkpoint']);
+  assert.equal(a.cameras, undefined, 'camera feed removed');
   assert.equal(a.taxis.changi, 2);
   assert.equal(a.taxis.total, 3);
   assert.equal(a.lta.ready, false);
   await req('/api/info', { key });
-  assert.equal(calls, 2, 'second request uses the shared copy');
+  assert.equal(calls, 1, 'second request uses the shared copy');
 });
