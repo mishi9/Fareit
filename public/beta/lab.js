@@ -6,7 +6,7 @@
 // and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, SURGE_HINT,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -155,6 +155,7 @@ export async function buildLab(root) {
       </div>
       <div class="s" id="lab-pred-sub">Type the distance and time.</div>
       <div class="s" id="lab-tod"></div>
+      <div class="s surge-est" id="lab-surge-est"></div>
     </div>
 
     <div class="row2">
@@ -249,7 +250,20 @@ function update() {
   pred.textContent = money(p.fare);
   predEarn.textContent = money(earn);
   const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
-  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.${f.surge === 'surge' ? ' Surge: expect the real fare to be higher.' : ''}`;
+  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.`;
+  // Surge pressed: the normal-price fare stays the headline; add what surge trips usually paid.
+  const surgeEl = $('#lab-surge-est', r);
+  if (f.surge === 'surge') {
+    const s = surgeLift(dataset(), f.ts);
+    if (s) {
+      const withSurge = Math.round(p.fare * (1 + s.lift) * 100) / 100;
+      surgeEl.innerHTML = `Normal <b>${money(p.fare)}</b> · with surge about <b>${money(withSurge)}</b> (${signed(s.lift)}, from ${s.n} surge trip${s.n === 1 ? '' : 's'}${s.near ? `, ${s.near} around this hour` : ''}). You'd earn about ${money(driverEarns(c, withSurge, f.erp))}.`;
+    } else {
+      surgeEl.textContent = 'Surge: no surge trips saved yet, so there\'s nothing to estimate the lift from. The real fare will be above the normal-price formula.';
+    }
+  } else {
+    surgeEl.textContent = '';
+  }
 
   // Time of day: how fares near this hour have run against the formula (surge-prone hours).
   const t = timeOfDay(dataset(), f.ts);
@@ -274,6 +288,15 @@ function update() {
   if (f.actual > 0) row('Passenger paid', p.fare, f.actual);
   if (f.earned > 0) row('You earned', earn, f.earned);
   if (!rows.length) { check.innerHTML = ''; return; }
+  // Marked normal but well above the normal formula: maybe untagged surge.
+  let hint = '';
+  if (f.actual > 0 && f.surge === 'normal') {
+    const above = (f.actual - p.fare) / p.fare;
+    if (above >= SURGE_HINT) {
+      hint = `<div class="surge-hint">This paid <b>${(above * 100).toFixed(0)}% above</b> the normal formula. Was it surge? An untagged surge trip pulls the normal rates up.
+        <button type="button" class="ghost small" data-act="mark-surge">Mark as surge</button></div>`;
+    }
+  }
   let kept = '';
   if (f.actual > 0 && f.earned > 0) {
     const cut = cutOf(f);
@@ -284,7 +307,9 @@ function update() {
       <div class="r h"><span></span><span>Formula</span><span>Actual</span><span>Difference</span></div>
       ${rows.join('')}
     </div>${kept}
-    <div class="key"><span class="close">Close</span> within 5% · <span class="off">Off</span> 5–15% · <span class="far">Far off</span> over 15%</div>`;
+    <div class="key"><span class="close">Close</span> within 5% · <span class="off">Off</span> 5–15% · <span class="far">Far off</span> over 15%</div>${hint}`;
+  const mark = check.querySelector('[data-act="mark-surge"]');
+  if (mark) mark.addEventListener('click', () => { lab.surge = 'surge'; update(); });
 }
 
 async function save() {

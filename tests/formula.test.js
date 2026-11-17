@@ -129,3 +129,23 @@ test('a driver never earns less than S$6.20, and trips at that floor stay out of
   const atFloor = { km: 2, min: 6, erp: 0, surge: 'normal', actual: 8.1, earned: 6.2, ts: Date.now() };
   assert.equal(fitCommission([atFloor]).n, 1, 'only the base trip counts');
 });
+
+test('surge estimate: how far surge trips ran above the normal formula, near this hour first', async () => {
+  const { surgeLift } = await import('../public/beta/formula.js');
+  const at = (iso) => Date.parse(iso);
+  const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
+    .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
+  assert.equal(surgeLift(normal, at('2026-11-20T18:00:00+08:00')), null, 'no surge trips: nothing to estimate');
+  const surge = [[10, 20], [15, 25], [8, 18]].map(([km, min], i) => {
+    const t = make(km, min, { ts: at(`2026-11-1${7 + i}T18:30:00+08:00`), surge: 'surge' });
+    return { ...t, actual: Math.round(t.actual * 1.25 * 100) / 100 };
+  });
+  const s = surgeLift([...normal, ...surge], at('2026-11-20T18:00:00+08:00'));
+  assert.equal(s.n, 3);
+  assert.equal(s.near, 3);
+  assert.ok(s.lift > 0.18 && s.lift < 0.32, `lift ${s.lift}`);
+  // Surge trips don't move the normal formula.
+  const w = fitWeights([...normal, ...surge], { includeBase: false });
+  const w0 = fitWeights(normal, { includeBase: false });
+  assert.equal(w.base, w0.base);
+});

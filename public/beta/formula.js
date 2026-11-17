@@ -241,3 +241,34 @@ export function byTimeBlock(trips) {
   }
   return blocks.map((b) => ({ ...b, lift: b.n ? Math.exp(b.sum / b.n) - 1 : null }));
 }
+
+// ---- Surge ----
+// How much surge-tagged trips paid above the normal-price formula: mostly from trips near this
+// hour, falling back on all surge trips (one pseudo-trip of each), so one trip can't run away.
+export function surgeLift(trips, ts) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const est = timeEstimator(all);
+  const h = hourOf(ts);
+  const rs = [];
+  for (const t of all) {
+    if (t.surge !== 'surge') continue;
+    const r = ratioToFormula(t, w, est);
+    if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
+  }
+  if (!rs.length) return null;
+  const overall = rs.reduce((s, x) => s + x.r, 0) / rs.length;
+  let sw = 0;
+  let swr = 0;
+  let near = 0;
+  for (const x of rs) {
+    const k = Math.exp(-(x.g * x.g) / (2 * HOUR_SD * HOUR_SD));
+    sw += k;
+    swr += k * x.r;
+    if (x.g <= 1.5) near++;
+  }
+  return { lift: Math.exp((swr + overall) / (sw + 1)) - 1, n: rs.length, near };
+}
+
+// How far an actual fare sits above the normal-price formula (for spotting untagged surge).
+export const SURGE_HINT = 0.15;
