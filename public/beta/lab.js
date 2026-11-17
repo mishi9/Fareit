@@ -7,7 +7,7 @@
 import * as db from './db.js';
 import { buildQueue, syncQueue } from './queue.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -198,7 +198,29 @@ export async function buildLab(root) {
   buildQueue($('#lab-queue', root));
 }
 
+// ---- Beta Window: earnings by distance band ----
+export function renderBands() {
+  const box = document.querySelector('#band-cards');
+  if (!box) return;
+  const now = Date.now();
+  const bands = bandOutlook(dataset(), now);
+  const h = new Date(now);
+  const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
+  const word = { good: 'Above normal', normal: 'Normal', bad: 'Below normal' };
+  box.innerHTML = `
+    <div class="band-head">What you'd earn now · ${at}</div>
+    ${bands.map((b) => `
+      <div class="band-card ${b.state}">
+        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
+        <div class="band-now">${money(b.now)}</div>
+        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)} <span class="band-km">(about ${Math.round(b.km)} km)</span></div>
+      </div>`).join('')}
+    <p class="note band-note">Grey: normal for now. Green: fares at this hour have been running 10% or more above normal. Red: 10% or more below. ${bands[0].nearHour ? `From ${bands[0].nearHour} trip${bands[0].nearHour === 1 ? '' : 's'} around this hour.` : 'No trips around this hour yet, so "now" equals normal.'} Learns from every trip saved in the Formula tab.</p>`;
+}
+setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
+
 function renderAll() {
+  renderBands();
   renderFormula();
   update();
   renderStats();

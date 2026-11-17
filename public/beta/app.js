@@ -202,6 +202,7 @@ function commitKm() {
 }
 
 function resetWindow() {
+  if (!$('#km-track')) return;
   clearTimeout(state.resetTimer);
   state.km = null;
   state.shown = null;

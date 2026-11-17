@@ -213,6 +213,7 @@ export function timeOfDay(trips, ts) {
   let near = 0;
   let surgeNear = 0;
   for (const t of all) {
+    if (!Number.isFinite(t.ts)) continue;
     const r = ratioToFormula(t, w, est);
     if (r === null) continue;
     const g = hourGap(hourOf(t.ts), h);
@@ -259,7 +260,7 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
   const h = hourOf(ts);
   const rs = [];
   for (const t of all) {
-    if (t.surge !== kind) continue;
+    if (t.surge !== kind || !Number.isFinite(t.ts)) continue;
     const r = ratioToFormula(t, w, est);
     if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
   }
@@ -280,3 +281,36 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
 
 // How far an actual fare sits above the normal-price formula (for spotting untagged surge).
 export const SURGE_HINT = 0.15;
+
+// ---- Earnings by distance band (beta Window) ----
+// For a typical trip in each band (the middle of your trips in it once there are 3, else 5 / 15 /
+// 25 km): what you'd earn at normal price, with surge, and "now" — normal adjusted by how fares
+// around this hour have been running. The state compares now with normal: good (10% or more
+// above), bad (10% or more below), or normal.
+export const EARN_BANDS = [
+  { id: 'short', label: '< 10 km', lo: 0, hi: 10, km: 5 },
+  { id: 'mid', label: '10–20 km', lo: 10, hi: 20, km: 15 },
+  { id: 'long', label: '> 20 km', lo: 20, hi: Infinity, km: 25 },
+];
+const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+
+export function bandOutlook(trips, ts) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const est = timeEstimator(all);
+  const c = fitCommission(trips);
+  const tod = timeOfDay(trips, ts);
+  const surge = surgeLift(trips, ts);
+  return EARN_BANDS.map((b) => {
+    const inBand = all.filter((t) => t.km >= b.lo && t.km < b.hi);
+    const km = inBand.length >= 3 ? median(inBand.map((t) => t.km)) : b.km;
+    const normalPaid = passengerFare(w, km, est(km)).fare;
+    const normal = driverEarns(c, normalPaid);
+    const nowLift = tod.near ? tod.lift : 0;
+    const now = driverEarns(c, normalPaid * (1 + nowLift));
+    const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
+    const vs = now / normal - 1;
+    const state = vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
+    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near };
+  });
+}

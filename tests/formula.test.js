@@ -185,3 +185,32 @@ test('airport queue summary: readings around this hour, from all drivers', async
   assert.deepEqual([s.n, s.cars, s.est, s.actual, s.nActual], [2, 50, 40, 50, 1]);
   assert.equal(queueSummary(readings, at('2026-11-20T08:00:00+08:00')), null);
 });
+
+test('beta Window bands: normal, surge and now earnings for < 10, 10–20 and > 20 km', async () => {
+  const { bandOutlook } = await import('../public/beta/formula.js');
+  const at = (iso) => Date.parse(iso);
+  const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
+    .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
+  const quiet = bandOutlook(normal, at('2026-11-20T12:00:00+08:00'));
+  assert.deepEqual(quiet.map((b) => b.label), ['< 10 km', '10–20 km', '> 20 km']);
+  for (const b of quiet) {
+    assert.equal(b.state, 'normal');
+    assert.ok(b.surge > b.normal, 'surge pays more (starting +20%)');
+    assert.ok(b.normal >= 6.2, 'never below the driver minimum');
+  }
+  assert.ok(quiet[0].normal < quiet[1].normal && quiet[1].normal < quiet[2].normal);
+  // Evening fares running 30% above normal turn the cards green at that hour.
+  const busy = [[10, 20], [15, 25], [8, 18], [22, 30]].map(([km, min], i) => {
+    const t = make(km, min, { ts: at(`2026-11-${17 + i}T18:30:00+08:00`), surge: 'surge' });
+    return { ...t, actual: Math.round(t.actual * 1.3 * 100) / 100 };
+  });
+  const evening = bandOutlook([...normal, ...busy], at('2026-11-20T18:30:00+08:00'));
+  assert.ok(evening.every((b) => b.state === 'good'), JSON.stringify(evening.map((b) => [b.state, b.vs])));
+  // Late at night, fares running 20% under: red.
+  const slow = [[10, 20], [15, 25], [8, 18], [22, 30]].map(([km, min], i) => {
+    const t = make(km, min, { ts: at(`2026-11-${17 + i}T15:30:00+08:00`) });
+    return { ...t, actual: Math.round(t.actual * 0.75 * 100) / 100 };
+  });
+  const afternoon = bandOutlook([...normal, ...slow], at('2026-11-20T15:30:00+08:00'));
+  assert.ok(afternoon.some((b) => b.state === 'bad'), JSON.stringify(afternoon.map((b) => [b.state, b.vs])));
+});

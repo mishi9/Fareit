@@ -28,7 +28,9 @@
 
 <main>
   <section id="view-window" class="view">
-    <!-- Prediction on top where it's easy to read; every tap sits at the bottom by the thumb. -->
+    <!-- Beta: earnings by distance band, refreshed every minute. The slider is kept hidden for now. -->
+    <div id="band-cards" class="band-cards" aria-live="polite"></div>
+    <div id="old-window" hidden>
     <div id="verdict" class="verdict idle" aria-live="polite"></div>
     <div class="thumb">
       <div id="decide" class="decide" hidden>
@@ -48,6 +50,7 @@
         </div>
         <div class="km-ticks" aria-hidden="true"></div>
       </div>
+    </div>
     </div>
   </section>
 
