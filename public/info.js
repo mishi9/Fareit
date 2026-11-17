@@ -8,6 +8,7 @@ import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow } from './lab.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
+import { FERRY_TERMINALS, ferryRowsHtml } from './ferries.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
 const LIVE_REFRESH = 2 * 60 * 1000;
@@ -34,6 +35,7 @@ export function buildInfo(root) {
     <section class="stack"><h2>Expressway travel times</h2><div id="info-travel"></div></section>
     <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
     <section class="stack"><h2>From JB</h2><div id="info-jb" class="stack"></div></section>
+    <section class="stack"><h2>Ferries</h2><div id="info-ferries" class="stack"></div></section>
     <section class="stack"><h2>Airport</h2><div id="info-airport" class="stack"></div></section>`;
   onEventsChange(() => renderEvents());
   buildEventForm();
@@ -163,6 +165,7 @@ function renderLive() {
     <div class="q-wait"><div class="q-wait-min">${taxis && Number.isFinite(taxis.changi) ? taxis.changi : '—'}</div>
       <div class="note">From LTA: not Grab cars, but a fair sign of how crowded the airport is.${taxis ? ` Last updated ${updatedText(taxis.at)}.` : info.liveErr ? ` ${esc(info.liveErr)}` : ''}</div></div>`;
   renderJb();
+  renderFerries();
   const ltaText = L.lta && L.lta.ready ? 'Loading…'
     : isOwner() || isOwnerPhone() ? 'Needs the LTA DataMall key (free) to switch on.' : 'Coming soon.';
   r.querySelector('#info-incidents').innerHTML = `<p class="note">${ltaText}${L.lta && L.lta.ready ? '' : ' Accidents, breakdowns, roadworks and heavy traffic, nearest to you first.'}</p>`;
@@ -176,6 +179,16 @@ function renderJb() {
   if (!box) return;
   box.innerHTML = `${jbRowsHtml(new Date())}
     <p class="note">Times with ~ are estimates: the published timetable plus rough journey and immigration times, so they slip when the checkpoints are busy. KTM: KTMB timetable (1 Jan 2026). Buses: Land Transport Guru (2026). The KTM shuttle is due to stop after the RTS Link opens (reported for early 2027).</p>`;
+}
+
+// Ferries from Batam and Bintan: the next few arrivals at each terminal, from the operators'
+// published timetables (ferries.js).
+function renderFerries() {
+  const box = info.root?.querySelector('#info-ferries');
+  if (!box) return;
+  const now = new Date();
+  box.innerHTML = `${FERRY_TERMINALS.map((t) => `<div class="band-head">Into ${esc(t.name)}</div>${ferryRowsHtml(t.id, now)}`).join('')}
+    <p class="note">From the operators' published timetables, not live. Indonesian departures are one hour behind Singapore; arrivals are in Singapore time, then immigration. On public holidays, weekend timetables usually apply.</p>`;
 }
 
 // Old jobs from before Radar (the slider) that still need a fare.

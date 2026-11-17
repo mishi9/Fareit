@@ -9,6 +9,7 @@ import { buildQueue, syncQueue, closeOpenReading } from './queue.js';
 import { renderFlights } from './flights.js';
 import { eventsList, onEventsChange, loadEvents } from './events.js';
 import { jbPlace, jbRowsHtml } from './jb.js';
+import { ferryTerminalAt, ferryRowsHtml } from './ferries.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
@@ -266,8 +267,10 @@ export function renderBands() {
   const placeBox = document.querySelector('#radar-place');
   if (placeBox) {
     const pl = jbPlace(loc);
-    placeBox.hidden = !pl;
+    const ferry = pl ? null : ferryTerminalAt(loc);
+    placeBox.hidden = !pl && !ferry;
     if (pl) placeBox.innerHTML = `<div class="band-head">Near ${pl.name} · from JB, ${pl.at === 'woodlands' ? 'out at Woodlands' : 'arriving'} (est.)</div>${jbRowsHtml(new Date(now), pl)}`;
+    else if (ferry) placeBox.innerHTML = `<div class="band-head">Near ${ferry.name} · next ferries in</div>${ferryRowsHtml(ferry.id, new Date(now), { compact: true })}`;
   }
   const airport = atAirport(loc);
   const ap = document.querySelector('#ap-flights');

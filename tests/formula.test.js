@@ -429,3 +429,22 @@ test('airport queue: estimated wait from the latest reading, else the usual for 
   assert.equal(queueWait([], t0), null);
   assert.match(updatedText(t0 - 12 * m, t0), /\(12 min ago\)$/);
 });
+
+import { ferryArrivals, ferryTerminalAt } from '../public/ferries.js';
+test('ferries: Indonesian departures become Singapore arrival times', () => {
+  // Wed 18 Nov 2026, 07:00 Singapore
+  const now = new Date(2026, 10, 18, 7, 0);
+  const next = ferryArrivals('tmft', now);
+  // Batam Fast Nongsapura 06:00 WIB = 07:00 SGT, + 60 min -> 08:00
+  assert.equal(next[0].arrive, '08:00');
+  assert.equal(next[0].from, 'Nongsapura (Batam)');
+  // BRF 08:35 Bintan time = 09:35 SGT + 70 -> 10:45
+  assert.ok(next.some((a) => a.from.startsWith('Bintan') && a.arrive === '10:45'));
+  // Majestic Tanjung Pinang runs weekends only: none on a Wednesday
+  assert.ok(!next.some((a) => a.op === 'Majestic' && a.from === 'Tanjung Pinang' && a.at.getDate() === 18));
+  // Batam Fast 07:45 runs Thu-Sun: not today, but tomorrow (Thursday)
+  assert.ok(!next.some((a) => a.departWib === '07:45' && a.at.getDate() === 18));
+  assert.ok(next.some((a) => a.departWib === '07:45' && a.at.getDate() === 19));
+  assert.equal(ferryTerminalAt({ lat: 1.3157, lng: 103.9893 }).id, 'tmft');
+  assert.equal(ferryTerminalAt({ lat: 1.3526, lng: 103.9447 }), null);
+});
