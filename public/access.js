@@ -97,7 +97,7 @@ function gate({ token, mode, error }) {
     const homeScreen = mode === 'ios-install';
     el.innerHTML = `
       <div class="gate-card stack">
-        <div class="gate-logo"><span class="logo" role="img" aria-label="Agaration"><svg class="logo-up" viewBox="0 0 24 28" aria-hidden="true"><path class="up-g" d="M5 10.5 12 3.5l7 7"/><path class="up-a" d="M5 17.5l7-7 7 7"/><path class="up-r" d="M5 24.5l7-7 7 7"/></svg><span aria-hidden="true">garation</span></span></div>
+        <div class="gate-logo"><span class="logo" role="img" aria-label="Agaration"><svg class="logo-up" viewBox="0 0 60 73" aria-hidden="true"><path class="up-g" d="M5 28.5 30 4.5l25 24"/><path class="up-a" d="M5 48.5l25-24 25 24"/><path class="up-r" d="M5 68.5l25-24 25 24"/></svg><span aria-hidden="true">garation</span></span></div>
         ${homeScreen ? `
           <h2>One step: add it to your Home Screen</h2>
           <ol class="gate-steps">
