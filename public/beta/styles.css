@@ -51,6 +51,15 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
   background: var(--bg); border-bottom: 1px solid var(--line);
 }
 .brand { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: -0.01em; }
+/* Logo: Aga · rat · ion as three small cards in the app's red, amber and green. */
+.logo { display: inline-flex; gap: 3px; vertical-align: middle; }
+.logo .lg { padding: 1px 6px 2px; border-radius: 7px; border: 2px solid; font-weight: 800; line-height: 1.15; }
+.logo .r { border-color: var(--stop); background: color-mix(in srgb, var(--stop) 22%, var(--surface)); }
+.logo .a { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 22%, var(--surface)); }
+.logo .g { border-color: var(--go); background: color-mix(in srgb, var(--go) 22%, var(--surface)); }
+.brand { white-space: nowrap; }
+@media (max-width: 360px) { .logo .lg { padding: 1px 4px 2px; } .brand { font-size: 16px; } .beta-tag { font-size: 10px; padding: 1px 4px; } }
+
 /* Formula tab */
 .lab-formula .k, .lab-predict .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .lab-formula .f { font-family: var(--mono); font-size: 15px; line-height: 1.5; margin: 6px 0; }
