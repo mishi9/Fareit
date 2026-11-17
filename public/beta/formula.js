@@ -227,7 +227,22 @@ const kmApart = (a, b) => {
 const RECENT_H = 3;
 const recentBoost = (ageMin) => (ageMin >= 0 && ageMin <= RECENT_H * 60 ? 1 + 2 * Math.exp(-ageMin / 45) : 1);
 
-export function timeOfDay(trips, ts, loc = null) {
+// Distance: with a band, trips in its range count fully and others less the further they are
+// (5 km outside 61%, 10 km 14%, never below 10%).
+const BAND_SD_KM = 5;
+const BAND_FLOOR = 0.1;
+const bandWeight = (km, band) => {
+  if (!band) return 1;
+  const out = km < band.lo ? band.lo - km : km >= band.hi ? km - band.hi : 0;
+  return BAND_FLOOR + (1 - BAND_FLOOR) * Math.exp(-(out * out) / (2 * BAND_SD_KM * BAND_SD_KM));
+};
+
+// opts.band: lean on trips of that distance; opts.prior: the lift to fall back on when the band
+// has little of its own (counts as one trip).
+export function timeOfDay(trips, ts, loc = null, opts = {}) {
+  const band = opts.band || null;
+  const priorLog = Math.log(1 + (opts.prior || 0));
+  let inBandNear = 0;
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
@@ -252,15 +267,16 @@ export function timeOfDay(trips, ts, loc = null) {
     if (r === null) continue;
     const g = hourGap(hourOf(t.ts), h);
     const ageMin = (ts - t.ts) / 60000;
-    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin);
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin) * bandWeight(t.km, band);
+    if (band && t.km >= band.lo && t.km < band.hi && g <= 1.5 && d <= NEAR_KM) inBandNear++;
     sw += x;
     swr += x * r;
     if (!closest || x > closest.x) closest = { x, ts: t.ts, km: Number.isFinite(d) ? d : null, gapH: g };
     if (g <= 1.5 && d <= NEAR_KM) { near++; if (t.surge === 'surge') surgeNear++; }
     if (ageMin >= 0 && ageMin <= 90 && d <= NEAR_KM) recent++;
   }
-  const m = swr / (sw + 1);
-  return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw, closest };
+  const m = (swr + priorLog) / (sw + 1);
+  return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw, closest, inBandNear };
 }
 
 // Fares vs the formula in 3-hour blocks, for the "By time of day" table.
@@ -349,12 +365,14 @@ export function bandOutlook(trips, ts, loc = null) {
     const km = inBand.length >= 3 ? median(inBand.map((t) => t.km)) : b.km;
     const normalPaid = passengerFare(w, km, est(km)).fare;
     const normal = driverEarns(c, normalPaid);
-    const nowLift = tod.lift;
+    // Each band leans on trips of its own distance, falling back on the overall picture.
+    const own = timeOfDay(trips, ts, loc, { band: b, prior: tod.lift });
+    const nowLift = own.lift;
     const now = driverEarns(c, normalPaid * (1 + nowLift));
     const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
     const vs = now / normal - 1;
     const state = vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight };
+    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
   });
 }
 

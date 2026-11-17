@@ -262,6 +262,7 @@ export function renderBands() {
         <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
         <div class="band-now">${money(b.now)}</div>
         <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)} <span class="band-km">(about ${Math.round(b.km)} km)</span></div>
+        <div class="band-km">${b.inBandNear ? `From ${b.inBandNear} trip${b.inBandNear === 1 ? '' : 's'} in this range${loc ? ' near you' : ''} around this hour.` : 'No trips in this range near now: following the overall picture.'}</div>
       </div>`).join('')}
     <p class="note band-note">Grey: normal for now. Green: fares here at this hour have been running 10% or more above normal. Red: 10% or more below. Learns from every trip saved in the Formula tab.</p>`;
 }

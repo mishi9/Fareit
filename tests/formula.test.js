@@ -277,3 +277,22 @@ test('quick Got a job entries (km + earnings only) move "now" for the area, not 
   assert.equal(j.earned, 20);
   assert.ok(j.vs > 0.1, `latest job vs normal ${j.vs}`);
 });
+
+test('each Window band leans on trips of its own distance', async () => {
+  const { bandOutlook } = await import('../public/beta/formula.js');
+  const at = (iso) => Date.parse(iso);
+  const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
+    .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
+  // Tonight: short trips paying 35% over normal, long trips normal.
+  const now = at('2026-11-22T03:50:00+08:00');
+  const shortHot = [4, 6, 7, 5].map((km, i) => {
+    const t = make(km, km * 1.5 + 4, { ts: now - (20 + 15 * i) * 60000 });
+    return { ...t, actual: Math.round(t.actual * 1.35 * 100) / 100 };
+  });
+  const longCalm = [24, 28, 22].map((km, i) => make(km, km + 6, { ts: now - (25 + 20 * i) * 60000 }));
+  const b = bandOutlook([...normal, ...shortHot, ...longCalm], now);
+  assert.equal(b[0].state, 'good', `short: ${b[0].vs}`);
+  assert.equal(b[2].state, 'normal', `long: ${b[2].vs}`);
+  assert.ok(b[0].vs > b[1].vs && b[1].vs > b[2].vs, `ordered: ${b.map((x) => x.vs.toFixed(3)).join(', ')}`);
+  assert.deepEqual([b[0].inBandNear, b[1].inBandNear, b[2].inBandNear], [4, 0, 3]);
+});
