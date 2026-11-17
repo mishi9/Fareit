@@ -119,6 +119,7 @@ function renderBadge() {
 
 // ---------- views ----------
 function show(view) {
+  if (view === 'radar') view = 'window'; // the Window is now called Radar
   if (!['window', 'reconcile', 'trips', 'lab', 'settings'].includes(view)) view = 'window';
   state.view = view;
   for (const v of $$('.view')) v.hidden = v.id !== `view-${view}`;
@@ -283,7 +284,7 @@ function renderReconList() {
   $('#recon-form').hidden = true;
   box.innerHTML = `
     <div class="head"><h2>To reconcile</h2><button type="button" class="primary small" id="add-trip">Add a trip</button></div>
-    ${pending.length ? '' : '<p class="empty">Nothing waiting. Every job you tap on the Window tab lands here, taken or cancelled, so you can add its fare once you are parked.</p>'}`;
+    ${pending.length ? '' : '<p class="empty">Nothing waiting. Every job you tap on Radar lands here, taken or cancelled, so you can add its fare once you are parked.</p>'}`;
   $('#add-trip').addEventListener('click', () => openForm(null));
   for (const t of pending) {
     const p = t.prediction;
@@ -982,7 +983,7 @@ async function boot() {
   state.device = device || uid();
   if (!device) await db.setKV('device', state.device);
 
-  // The Window fills the screen below the header so the distance buttons sit just above the tabs.
+  // Radar fills the screen below the header so the distance buttons sit just above the tabs.
   const sizeWindow = () => {
     const top = $('.top').offsetHeight + parseFloat(getComputedStyle($('main')).paddingTop || '0');
     document.documentElement.style.setProperty('--top-h', `${top}px`);

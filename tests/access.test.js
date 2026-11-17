@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import worker, { resetSchemaFlag } from '../worker/index.js';
+import worker, { resetSchemaFlag, FLIGHT_SOURCES, summarizeArrivals, terminalOf } from '../worker/index.js';
 
 function fakeD1() {
   const db = new DatabaseSync(':memory:');
@@ -174,4 +174,47 @@ test('what a tester sends is traced to their code name', async () => {
   assert.equal(row.trips, 1);
   assert.equal(row.jobs, 0);
   assert.ok(row.last_at > 0);
+});
+
+test('arrivals are counted per terminal: landed, next hour, the hour after', () => {
+  const now = Date.UTC(2026, 10, 18, 12, 0);
+  const m = 60000;
+  const s = summarizeArrivals([
+    { t: now - 10 * m, terminal: 'T1' }, { t: now + 5 * m, terminal: '1' }, { t: now + 59 * m, terminal: 'Terminal 1' },
+    { t: now + 61 * m, terminal: 'T3' }, { t: now + 30 * m, terminal: 'T3', cancelled: true },
+    { t: now - 45 * m, terminal: 'T2' }, { t: now + 3 * 60 * m, terminal: 'T4' }, { t: now + 10 * m, terminal: null },
+  ], now);
+  assert.deepEqual(s.terminals.T1, { landed: 1, next: 2, later: 0 });
+  assert.deepEqual(s.terminals.T3, { landed: 0, next: 0, later: 1 });
+  assert.deepEqual(s.terminals.T2, { landed: 0, next: 0, later: 0 });
+  assert.equal(s.unknown, 1);
+  assert.equal(terminalOf('Terminal 4'), 'T4');
+});
+
+test('flights: not set up until a provider and key are given; one fetch is shared', async (t) => {
+  const { req, owner } = setup();
+  const key = await owner();
+  assert.deepEqual((await req('/api/flights', { key })).body, { ready: false });
+  assert.equal((await req('/api/flights')).status, 401); // invite-only like everything else
+
+  let calls = 0;
+  const now = Date.now();
+  FLIGHT_SOURCES.fake = async () => { calls++; return [{ t: now + 10 * 60000, terminal: 'T2' }, { t: now + 20 * 60000, terminal: '2' }]; };
+  t.after(() => { delete FLIGHT_SOURCES.fake; });
+  const env = { FLIGHTS_PROVIDER: 'fake', FLIGHTS_KEY: 'k' };
+  resetSchemaFlag(); // a second database in the same test
+  const s2 = setup(env);
+  const k2 = await s2.owner();
+  const a = (await s2.req('/api/flights', { key: k2 })).body;
+  assert.equal(a.ready, true);
+  assert.equal(a.terminals.T2.next, 2);
+  await s2.req('/api/flights', { key: k2 });
+  assert.equal(calls, 1);
+
+  // the service fails later: the last list is still shown, marked stale
+  FLIGHT_SOURCES.fake = async () => { throw new Error('down'); };
+  t.mock.method(Date, 'now', () => now + 31 * 60000);
+  const b = (await s2.req('/api/flights', { key: k2 })).body;
+  assert.equal(b.stale, true);
+  assert.equal(b.terminals.T2.landed, 2);
 });

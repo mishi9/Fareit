@@ -36,7 +36,10 @@
 
 <main>
   <section id="view-window" class="view">
-    <!-- Beta: earnings by distance band, refreshed every minute. The slider is kept hidden for now. -->
+    <!-- Radar: earnings by distance band, refreshed every minute. At Changi it shows the airport
+         queue and arrivals instead (jobs there are auto-accepted: there's no 8-second window). -->
+    <div id="radar-queue" class="stack" hidden></div>
+    <div id="ap-flights" class="stack" hidden aria-live="polite"></div>
     <div id="band-cards" class="band-cards" aria-live="polite"></div>
     <button type="button" class="primary wide got-job" id="got-job">Got a job</button>
     <p class="note" id="got-job-msg" role="status"></p>
@@ -209,11 +212,11 @@
 </div>
 
 <nav class="tabs">
-  <button type="button" data-view="window">Window</button>
-  <button type="button" data-view="reconcile">Reconcile<span id="badge" class="badge" hidden></span></button>
-  <button type="button" data-view="trips">Trips</button>
-  <button type="button" data-view="lab">Est.</button>
-  <button type="button" data-view="settings">Settings</button>
+  <button type="button" data-view="window"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l6.4-6.4"/><circle cx="12" cy="12" r="1" class="dot"/></svg><span>Radar</span></button>
+  <button type="button" data-view="reconcile"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v3H9z"/><path d="m9 13.5 2 2 4-4"/></svg><span>Reconcile</span><span id="badge" class="badge" hidden></span></button>
+  <button type="button" data-view="trips"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.5" cy="6.5" r="1" class="dot"/><circle cx="4.5" cy="12" r="1" class="dot"/><circle cx="4.5" cy="17.5" r="1" class="dot"/></svg><span>Trips</span></button>
+  <button type="button" data-view="lab"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg><span>Est.</span></button>
+  <button type="button" data-view="settings"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span>Settings</span></button>
 </nav>
 </body>
 </html>

@@ -295,7 +295,12 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
   padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 6px) max(8px, env(safe-area-inset-left, 0px));
   background: var(--bg); border-top: 1px solid var(--line);
 }
-.tabs button { min-height: 50px; border: 0; background: none; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.tabs button { position: relative; min-height: 50px; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 2px 0; }
+.tabs .ti { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabs .ti .dot { fill: currentColor; stroke: none; }
+.tabs button.on .ti { stroke-width: 2.2; }
+.tabs .badge { position: absolute; top: 2px; left: calc(50% + 8px); }
 .tabs button.on { color: var(--ink); }
 .badge { background: var(--warn); color: #1b1300; border-radius: 999px; font-size: 11px; padding: 1px 6px; font-weight: 800; }
 
@@ -355,3 +360,13 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .invite-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
 .invite-row.off { opacity: 0.55; }
 .invite-row .note { margin: 2px 0 0; font-size: 13px; }
+
+/* Radar at the airport: queue first, then arrivals by terminal */
+.ap-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ap-term { border-radius: 14px; padding: 10px 12px; border: 2px solid var(--line); background: var(--surface); display: grid; gap: 1px; }
+.ap-term.busy { border-color: var(--go); background: color-mix(in srgb, var(--go) 10%, var(--surface)); }
+.ap-term.quiet { opacity: 0.7; }
+.ap-name { font-weight: 800; font-size: 15px; }
+.ap-big { font-family: var(--mono); font-size: 30px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ap-k { font-size: 13px; color: var(--muted); }
+.ap-sub { font-size: 12px; color: var(--muted); }

@@ -65,6 +65,15 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
+## Radar at the airport
+
+At Changi (within the airport zone, any terminal) jobs are auto-accepted, so there's no 8-second window to estimate for. Radar swaps the earnings cards for:
+
+- **Airport queue** at the top: note Grab's cars ahead and estimated wait. **Got a job** records how long you really waited, then opens the fare card with **Airport** already picked.
+- **Arrivals by terminal** (T1 to T4): flights landed in the last 30 min, landing in the next hour, and the hour after. Flight counts only, no passenger estimate.
+
+Arrivals come from a flight data service, fetched by the server at most every 30 minutes and shared by every phone (`FLIGHTS_PROVIDER`, `FLIGHTS_KEY` secret, optional `FLIGHTS_REFRESH_MIN`). Until a provider is set up, Radar says arrivals are coming soon.
+
 ## Invite-only
 
 Agaration is open only to phones you let in. There are no accounts and nothing personal is asked for.

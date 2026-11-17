@@ -5,8 +5,9 @@
 // Trips are uploaded to the formula dataset on the server (separate from the shared jobs pool)
 // and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
-import { buildQueue, syncQueue } from './queue.js';
-import { watchLocation, here, rounded, onMove } from './where.js';
+import { buildQueue, syncQueue, closeOpenReading } from './queue.js';
+import { renderFlights } from './flights.js';
+import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob,
@@ -193,7 +194,6 @@ export async function buildLab(root) {
     </div>
     </div></div>
 
-    <div id="lab-queue" class="stack"></div>
 
     <h2>How close it's getting</h2>
     <div id="lab-stats"></div>
@@ -217,7 +217,8 @@ export async function buildLab(root) {
   $('#lab-export', root).addEventListener('click', exportCsv);
   renderAll();
   syncLab();
-  buildQueue($('#lab-queue', root));
+  const rq = document.querySelector('#radar-queue');
+  if (rq) buildQueue(rq);
 }
 
 // ---- Beta Window: earnings by distance band ----
@@ -250,6 +251,16 @@ export function renderBands() {
   if (!box) return;
   const now = Date.now();
   const loc = here();
+  // At Changi there's no 8-second window (jobs are auto-accepted), so Radar shows the queue
+  // (above, from queue.js) and arrivals by terminal instead of the earnings cards.
+  const airport = atAirport(loc);
+  const ap = document.querySelector('#ap-flights');
+  if (ap) {
+    ap.hidden = !airport;
+    if (airport) renderFlights(ap, renderBands);
+  }
+  box.hidden = airport;
+  if (airport) return;
   const bands = bandOutlook(dataset(), now, loc);
   const h = new Date(now);
   const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
@@ -468,7 +479,7 @@ function buildQuick() {
     <div class="lab-check" id="qj-check"></div>
     <p class="msg" id="qj-msg" role="status"></p>
     <button type="button" class="primary wide" id="qj-save">Save job</button>
-    <p class="note">Only km and earnings: this updates the Window now. To also sharpen the estimates, add the passenger fare in the Est. tab.</p>`;
+    <p class="note">Only km and earnings: this updates Radar now. To also sharpen the estimates, add the passenger fare in the Est. tab.</p>`;
   body.querySelector('#qj-km').addEventListener('input', onTripInput);
   body.querySelector('#qj-earned').addEventListener('input', quickUpdate);
   for (const b of body.querySelectorAll('#qj-surge button')) b.addEventListener('click', () => { quick.surge = b.dataset.v; quickUpdate(); });
@@ -579,6 +590,8 @@ async function quickSave() {
 export function openJob() {
   const sheet = document.querySelector('#job-sheet');
   if (!sheet) return;
+  // In the airport queue: the job ends the wait, so record it now.
+  if (!lab.pending) closeOpenReading().catch(() => {});
   buildQuick();
   // precise stays on the phone (for working out the distance); only loc (about 1 km) is uploaded.
   if (!lab.pending) lab.pending = { ts: Date.now(), loc: rounded(here()), precise: here() };
@@ -589,6 +602,8 @@ export function openJob() {
   document.body.classList.add('sheet-open');
   const note = document.querySelector('#got-job-msg');
   if (note) note.textContent = '';
+  // At the airport every job is an airport job: start on Airport (it can still be changed).
+  if (atAirport(here()) && quick.surge === 'normal') quick.surge = 'airport';
   quickUpdate();
   setTimeout(() => document.querySelector('#qj-km')?.focus(), 50);
 }
@@ -636,7 +651,7 @@ function renderStats() {
       <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Paid: off with today's estimate${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
       <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length} / ${normal.length}</span><span class="k">Paid within 10 cents</span></div>
     </div>
-    <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they sharpen the estimates)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on the Window)` : ''}.`; })()}</p>
+    <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they sharpen the estimates)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on Radar)` : ''}.`; })()}</p>
     <p class="note">"Off with today's estimate" estimates each trip from all the others: the honest test of the estimates as they stand. Normal trips from every driver.</p>
     <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>
     <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs normal, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;

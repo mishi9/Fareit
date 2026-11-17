@@ -24,6 +24,7 @@
 //   POST /api/owner/claim { code, device }    -> { key, kind }   10 tries an hour per connection
 //   GET  /api/access                          -> { ok, kind }    is this phone's key still good
 //   GET  /api/manifest?invite=TOKEN           -> manifest whose start_url carries the invite
+//   GET  /api/flights                         -> Changi arrivals per terminal (Radar at the airport)
 //   POST /api/invites/create { label }        -> { token }       owner only
 //   GET  /api/invites                         -> { invites }     owner only
 //   POST /api/invites/revoke { token }        -> { revoked }     owner only: the invite and its phone
@@ -299,6 +300,8 @@ const SCHEMA = [
   // Which invite each sending phone came in on (by the device id its trips carry), so anything
   // odd in the data can be traced to a tester's code name. Only the owner ever sees this.
   'CREATE TABLE IF NOT EXISTS phones (device TEXT PRIMARY KEY, who TEXT NOT NULL, last_at INTEGER)',
+  // Shared copies of outside data (e.g. the arrivals list), so every phone shares one fetch.
+  'CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, value TEXT NOT NULL)',
 ];
 let schemaReady = null;
 // Pools created before a column existed get it added; on newer ones it's already there.
@@ -725,6 +728,62 @@ async function deleteQueue(request, env) {
   return json({ deleted, missing });
 }
 
+// ---------- Changi arrivals ----------
+// A flight data service is fetched at most every FLIGHTS_REFRESH_MIN minutes (default 30) for the
+// next few hours of arrivals; every phone gets the shared copy. Counts per terminal are worked out
+// on each request, so they roll forward between fetches. Flight counts only: no passenger numbers.
+// A source is a function (env, fromMs, toMs) -> [{ t: landing ms, terminal: 'T1'..'T4' | null, cancelled }].
+// The provider is picked once you've signed up for one (FLIGHTS_PROVIDER + FLIGHTS_KEY secret).
+export const FLIGHT_SOURCES = {};
+const FLIGHTS_AHEAD_MS = 4 * 3600 * 1000;
+
+export function terminalOf(v) {
+  const m = /([1-4])/.exec(String(v ?? ''));
+  return m ? `T${m[1]}` : null;
+}
+
+// Landed in the last 30 min / landing in the next hour / the hour after, per terminal.
+export function summarizeArrivals(list, now) {
+  const terminals = {};
+  for (const k of ['T1', 'T2', 'T3', 'T4']) terminals[k] = { landed: 0, next: 0, later: 0 };
+  let unknown = 0;
+  for (const a of list) {
+    if (!a || a.cancelled || !Number.isFinite(a.t)) continue;
+    const k = terminalOf(a.terminal);
+    const dt = a.t - now;
+    const slot = dt >= -30 * 60000 && dt < 0 ? 'landed' : dt >= 0 && dt < 3600000 ? 'next' : dt >= 3600000 && dt < 7200000 ? 'later' : null;
+    if (!slot) continue;
+    if (!k) { unknown++; continue; }
+    terminals[k][slot]++;
+  }
+  return { terminals, unknown };
+}
+
+async function getFlights(env) {
+  const source = FLIGHT_SOURCES[env.FLIGHTS_PROVIDER || ''];
+  if (!source || !env.FLIGHTS_KEY) return json({ ready: false });
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const refreshMs = Math.max(5, Number(env.FLIGHTS_REFRESH_MIN) || 30) * 60000;
+  const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'flights'").first();
+  let list = row ? JSON.parse(row.value) : null;
+  let at = row ? row.at : 0;
+  let stale = false;
+  if (!row || now - row.at >= refreshMs) {
+    try {
+      list = (await source(env, now - 3600000, now + FLIGHTS_AHEAD_MS))
+        .map((a) => ({ t: a.t, terminal: terminalOf(a.terminal), cancelled: Boolean(a.cancelled) }));
+      at = now;
+      await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('flights', ?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(at, JSON.stringify(list)).run();
+    } catch {
+      if (!list) return json({ error: 'Couldn’t get flights right now.' }, 502);
+      stale = true;
+    }
+  }
+  return json({ ready: true, updated_at: at, stale, ...summarizeArrivals(list, now) });
+}
+
 // ---------- invite-only access ----------
 const OPEN_PATHS = new Set(['/api/status', '/api/access/open', '/api/access/redeem', '/api/owner/claim', '/api/manifest']);
 // An invite link works for this long after it's first opened, then never again.
@@ -943,6 +1002,10 @@ export default {
         return json({ error: 'The database couldn’t be reached.' }, 502);
       }
       return json({ error: 'Not found' }, 404);
+    }
+    if (url.pathname === '/api/flights') {
+      if (!env.DB) return json({ ready: false });
+      try { return await getFlights(env); } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
     }
     if (!authorized(request, env)) return json({ error: 'Access key missing or wrong. Set it in Fareit under Settings.' }, 401);
 

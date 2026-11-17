@@ -3,7 +3,7 @@
 // table on the server (separate from fares and the shared jobs pool) so every driver's readings
 // build the picture of how long the queue takes at each hour.
 import * as db from './db.js';
-import { here, atAirport, locationState, onMove } from './where.js';
+import { here, atAirport, onMove } from './where.js';
 
 const KEY = 'queueLog';
 const OPEN_FOR = 4 * 3600 * 1000; // a reading can be closed with "Got a job" for 4 hours
@@ -100,9 +100,9 @@ export async function buildQueue(root) {
   q.device = await db.getKV('device');
   onMove(() => render());
   root.innerHTML = `
-    <h2>Airport queue</h2>
+    <div class="band-head">Airport queue</div>
     <p class="note" id="q-where"></p>
-    <p class="note">When you join the airport queue, note what Grab shows. Tap <b>Got a job</b> when one comes, to record the real wait. Not used for fares: it builds a picture of queue times by hour.</p>
+    <p class="note">Joined the queue? Note what Grab shows. When a job comes, tap <b>Got a job</b>: it records how long you really waited, then takes the fare.</p>
     <div class="row2">
       <div class="field"><label for="q-cars">Cars ahead</label>
         <input id="q-cars" type="number" inputmode="numeric" step="1" min="0"></div>
@@ -133,9 +133,17 @@ async function save() {
   $('#q-cars', r).value = '';
   $('#q-est', r).value = '';
   msg.classList.remove('err');
-  msg.textContent = `Saved at ${hm(Date.now())}. Tap Got a job when one comes.`;
+  msg.textContent = `Saved at ${hm(Date.now())}.`;
   render();
   syncQueue();
+}
+
+// Got a job (the main button) closes the open queue reading with the real wait. Returns it, or null.
+export async function closeOpenReading() {
+  const open = [...q.mine].reverse().find((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
+  if (!open) return null;
+  await gotJob(open);
+  return open;
 }
 
 async function gotJob(reading) {
@@ -149,14 +157,11 @@ async function gotJob(reading) {
 function render() {
   const r = q.root;
   if (!r) return;
-  // Shown in the airport zone, while a reading is still open, or when location isn't available.
+  // On Radar: shown in the airport zone, or anywhere while a reading is still open (to record the wait).
   const openNow = q.mine.some((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
-  const where = locationState();
   const inZone = atAirport(here());
-  r.hidden = !(inZone || openNow || where !== 'ok');
-  $('#q-where', r).textContent = inZone ? 'You\'re in the airport zone.'
-    : openNow ? 'Shown because a reading is still open.'
-      : where === 'denied' ? 'Location is off, so this is always shown.' : 'Waiting for location; shown until it\'s known.';
+  r.hidden = !(inZone || openNow);
+  $('#q-where', r).textContent = inZone ? `Changi · ${hm(Date.now())}` : 'Shown because a queue reading is still open.';
   // The latest open reading of yours: Got a job closes it with the actual wait.
   const open = [...q.mine].reverse().find((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
   const openBox = $('#q-open', r);
@@ -165,13 +170,7 @@ function render() {
     const mins = Math.round((Date.now() - open.ts) / 60000);
     const card = document.createElement('div');
     card.className = 'card q-open';
-    card.innerHTML = `<div class="meta">In the queue since ${hm(open.ts)} (${mins} min)${open.cars != null ? ` · ${open.cars} cars ahead` : ''}${open.est ? ` · Grab estimated ${open.est} min` : ''}</div>`;
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'primary';
-    b.textContent = 'Got a job';
-    b.addEventListener('click', () => gotJob(open));
-    card.append(b);
+    card.innerHTML = `<div class="meta">In the queue since ${hm(open.ts)} (${mins} min)${open.cars != null ? ` · ${open.cars} cars ahead` : ''}${open.est ? ` · Grab estimated ${open.est} min` : ''}. Tap <b>Got a job</b> when one comes.</div>`;
     openBox.append(card);
   }
   const s = queueSummary(all(), Date.now());
@@ -181,7 +180,7 @@ function render() {
     : `<p class="note">No queue readings around this hour yet.${q.note ? ` ${q.note}` : ''}</p>`;
   const list = $('#q-list', r);
   list.innerHTML = '';
-  for (const x of [...q.mine].reverse().slice(0, 10)) {
+  for (const x of [...q.mine].reverse().slice(0, 3)) {
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `<div class="meta">${new Date(x.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} · ${x.cars != null ? `${x.cars} cars ahead` : 'cars not noted'} · est ${x.est ? `${x.est} min` : '—'} · ${x.actual > 0 ? `waited ${x.actual} min` : 'wait not recorded'}</div>`;
