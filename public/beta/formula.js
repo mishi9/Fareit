@@ -243,8 +243,11 @@ export function byTimeBlock(trips) {
 }
 
 // ---- Surge ----
-// How much surge-tagged trips paid above the normal-price formula: mostly from trips near this
-// hour, falling back on all surge trips (one pseudo-trip of each), so one trip can't run away.
+// Grab doesn't publish a surge %, so it's learned: start from a guess (+20%), and with each
+// surge-tagged trip move toward how far surge trips really paid above the normal-price formula,
+// mostly trips near this hour. The guess and the all-hours average each count as one trip, so a
+// single surge trip can't swing it.
+export const SURGE_START = 0.2;
 export function surgeLift(trips, ts) {
   const all = withBase(trips);
   const w = fitWeights(trips);
@@ -256,7 +259,8 @@ export function surgeLift(trips, ts) {
     const r = ratioToFormula(t, w, est);
     if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
   }
-  if (!rs.length) return null;
+  const start = Math.log(1 + SURGE_START);
+  if (!rs.length) return { lift: SURGE_START, n: 0, near: 0, guess: true };
   const overall = rs.reduce((s, x) => s + x.r, 0) / rs.length;
   let sw = 0;
   let swr = 0;
@@ -267,7 +271,7 @@ export function surgeLift(trips, ts) {
     swr += k * x.r;
     if (x.g <= 1.5) near++;
   }
-  return { lift: Math.exp((swr + overall) / (sw + 1)) - 1, n: rs.length, near };
+  return { lift: Math.exp((swr + overall + start) / (sw + 2)) - 1, n: rs.length, near, guess: false };
 }
 
 // How far an actual fare sits above the normal-price formula (for spotting untagged surge).

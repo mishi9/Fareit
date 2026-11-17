@@ -135,7 +135,8 @@ test('surge estimate: how far surge trips ran above the normal formula, near thi
   const at = (iso) => Date.parse(iso);
   const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
     .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
-  assert.equal(surgeLift(normal, at('2026-11-20T18:00:00+08:00')), null, 'no surge trips: nothing to estimate');
+  const none = surgeLift(normal, at('2026-11-20T18:00:00+08:00'));
+  assert.deepEqual([none.lift, none.n, none.guess], [0.2, 0, true], 'no surge trips: the +20% starting guess');
   const surge = [[10, 20], [15, 25], [8, 18]].map(([km, min], i) => {
     const t = make(km, min, { ts: at(`2026-11-1${7 + i}T18:30:00+08:00`), surge: 'surge' });
     return { ...t, actual: Math.round(t.actual * 1.25 * 100) / 100 };
@@ -143,7 +144,14 @@ test('surge estimate: how far surge trips ran above the normal formula, near thi
   const s = surgeLift([...normal, ...surge], at('2026-11-20T18:00:00+08:00'));
   assert.equal(s.n, 3);
   assert.equal(s.near, 3);
-  assert.ok(s.lift > 0.18 && s.lift < 0.32, `lift ${s.lift}`);
+  assert.ok(s.lift > 0.2 && s.lift < 0.25, `3 trips at +25% pull the +20% guess toward 25%: ${s.lift}`);
+  // Many surge trips at +40%: the guess fades.
+  const many = Array.from({ length: 12 }, (_, i) => {
+    const t = make(8 + i, 15 + i, { ts: at(`2026-11-${10 + i}T18:20:00+08:00`), surge: 'surge' });
+    return { ...t, actual: Math.round(t.actual * 1.4 * 100) / 100 };
+  });
+  const m = surgeLift([...normal, ...many], at('2026-11-25T18:00:00+08:00'));
+  assert.ok(m.lift > 0.33, `lift ${m.lift}`);
   // Surge trips don't move the normal formula.
   const w = fitWeights([...normal, ...surge], { includeBase: false });
   const w0 = fitWeights(normal, { includeBase: false });

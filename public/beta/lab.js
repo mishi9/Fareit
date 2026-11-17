@@ -144,7 +144,7 @@ export async function buildLab(root) {
       <div class="field"><span class="flabel">Pricing</span>
         <div id="lab-surge" class="seg g2">
           <button type="button" data-v="normal">Normal</button>
-          <button type="button" data-v="surge">Surge</button>
+          <button type="button" data-v="surge">Surge ↑</button>
         </div></div>
     </div>
 
@@ -246,24 +246,19 @@ function update() {
   const mins = f.min > 0 ? f.min : estimate()(f.km);
   const p = passengerFare(weights(), f.km, mins, f.erp);
   const c = commission();
-  const earn = driverEarns(c, p.fare, f.erp);
-  pred.textContent = money(p.fare);
+  const normalEarn = driverEarns(c, p.fare, f.erp);
+  // Surge pressed: normal-price fare plus the learned surge % (starting at +20%).
+  const sl = f.surge === 'surge' ? surgeLift(dataset(), f.ts) : null;
+  const shown = sl ? Math.round(p.fare * (1 + sl.lift) * 100) / 100 : p.fare;
+  const earn = sl ? driverEarns(c, shown, f.erp) : normalEarn;
+  pred.textContent = money(shown);
   predEarn.textContent = money(earn);
   const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
   sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.`;
-  // Surge pressed: the normal-price fare stays the headline; add what surge trips usually paid.
   const surgeEl = $('#lab-surge-est', r);
-  if (f.surge === 'surge') {
-    const s = surgeLift(dataset(), f.ts);
-    if (s) {
-      const withSurge = Math.round(p.fare * (1 + s.lift) * 100) / 100;
-      surgeEl.innerHTML = `Normal <b>${money(p.fare)}</b> · with surge about <b>${money(withSurge)}</b> (${signed(s.lift)}, from ${s.n} surge trip${s.n === 1 ? '' : 's'}${s.near ? `, ${s.near} around this hour` : ''}). You'd earn about ${money(driverEarns(c, withSurge, f.erp))}.`;
-    } else {
-      surgeEl.textContent = 'Surge: no surge trips saved yet, so there\'s nothing to estimate the lift from. The real fare will be above the normal-price formula.';
-    }
-  } else {
-    surgeEl.textContent = '';
-  }
+  surgeEl.innerHTML = sl
+    ? `Surge: normal fare <b>${money(p.fare)}</b> ${signed(sl.lift)} = <b>${money(shown)}</b>. ${sl.guess ? 'The +20% is a starting guess: each surge trip you save adjusts it.' : `Learned from ${sl.n} surge trip${sl.n === 1 ? '' : 's'}${sl.near ? `, ${sl.near} around this hour` : ''}; adjusts with every surge trip.`}`
+    : '';
 
   // Time of day: how fares near this hour have run against the formula (surge-prone hours).
   const t = timeOfDay(dataset(), f.ts);
@@ -285,7 +280,7 @@ function update() {
     const diff = Math.abs(off) < 0.005 ? 'Exact' : `${money(Math.abs(off))} too ${off > 0 ? 'high' : 'low'} (${(rel * 100).toFixed(0)}%)`;
     rows.push(`<div class="r"><span class="l">${label}</span><span>${money(formula)}</span><span>${money(actual)}</span><span class="d ${grade[0]}">${diff}<b>${grade[1]}</b></span></div>`);
   };
-  if (f.actual > 0) row('Passenger paid', p.fare, f.actual);
+  if (f.actual > 0) row('Passenger paid', shown, f.actual);
   if (f.earned > 0) row('You earned', earn, f.earned);
   if (!rows.length) { check.innerHTML = ''; return; }
   // Marked normal but well above the normal formula: maybe untagged surge.
@@ -319,13 +314,17 @@ async function save() {
   if (!(f.actual > 0)) { msg.textContent = 'Add what the passenger actually paid.'; msg.classList.add('err'); return; }
   // Predictions are recorded before this trip changes anything: an honest test each time.
   const w = weights();
-  const predicted = passengerFare(w, f.km, f.min > 0 ? f.min : estimate()(f.km), f.erp).fare;
+  const normalFare = passengerFare(w, f.km, f.min > 0 ? f.min : estimate()(f.km), f.erp).fare;
+  // A surge trip's prediction is the normal fare plus the surge % it was shown: the honest test
+  // of the surge estimate. The normal-price figure is kept too.
+  const sl = f.surge === 'surge' ? surgeLift(dataset(), f.ts) : null;
+  const predicted = sl ? Math.round(normalFare * (1 + sl.lift) * 100) / 100 : normalFare;
   const c = commission();
   const predictedEarned = driverEarns(c, predicted, f.erp);
   const t = timeOfDay(dataset(), f.ts);
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...f,
-    predicted, predictedEarned, todLift: t.near ? t.lift : null,
+    predicted, predictedEarned, predictedNormal: normalFare, surgeLiftUsed: sl ? sl.lift : null, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
   });
   await db.setKV(KEY, lab.trips);
@@ -354,6 +353,9 @@ function renderStats() {
   const earnOffs = normal.filter((t) => t.earned > 0 && t.predictedEarned > 0).map((t) => Math.abs(t.predictedEarned - t.earned));
   const earnLast5 = earnOffs.slice(-5);
   const loo = looError(dataset());
+  const surgeTrips = dataset().filter((t) => t.surge === 'surge' && t.actual > 0 && t.predicted > 0).sort((a, b) => a.ts - b.ts);
+  const surgeOffs = surgeTrips.slice(-5).map((t) => Math.abs(t.predicted - t.actual));
+  const surgeNow = surgeLift(dataset(), Date.now());
   box.innerHTML = `
     <div class="tiles">
       <div class="tile"><span class="v">${money(avg(last5))}</span><span class="k">Paid: off on the last ${last5.length} (predicted before saving)</span></div>
@@ -361,7 +363,8 @@ function renderStats() {
       <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Paid: off with today's formula${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
       <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length} / ${normal.length}</span><span class="k">Paid within 10 cents</span></div>
     </div>
-    <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips from everyone in the dataset.</p>`;
+    <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips from everyone in the dataset.</p>
+    <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>`;
 }
 
 // Fares vs the normal-price formula by 3-hour block: where surge-prone hours show up.
