@@ -48,6 +48,9 @@ async function post(path, body) {
 }
 
 let syncing = null;
+// Around this hour, from every driver's readings (Info tab).
+export const queueNow = () => queueSummary(all(), Date.now());
+
 export function syncQueue() {
   if (!q.device || !q.root) return Promise.resolve();
   if (syncing) return syncing;

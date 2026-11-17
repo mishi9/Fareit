@@ -6,6 +6,7 @@ import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
 import { buildLab, syncLab } from './lab.js';
+import { buildInfo, showInfo, renderOldJobs } from './info.js';
 import { ready, isOwner, isOwnerPhone, hideWorkings, claimOwner, ownerApi, inviteLink } from './access.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -115,15 +116,18 @@ function renderBadge() {
   const b = $('#badge');
   b.hidden = n === 0;
   b.textContent = String(n);
+  renderOldJobs(n);
 }
 
 // ---------- views ----------
 function show(view) {
   if (view === 'radar') view = 'window'; // the Window is now called Radar
-  if (!['window', 'reconcile', 'trips', 'lab', 'settings'].includes(view)) view = 'window';
+  if (!['window', 'info', 'reconcile', 'trips', 'lab', 'settings'].includes(view)) view = 'window';
   state.view = view;
   for (const v of $$('.view')) v.hidden = v.id !== `view-${view}`;
-  for (const t of $$('.tabs button')) t.classList.toggle('on', t.dataset.view === view);
+  // Reconcile (older jobs waiting for a fare) is reached from Info, so Info stays lit.
+  for (const t of $$('.tabs button')) t.classList.toggle('on', t.dataset.view === (view === 'reconcile' ? 'info' : view));
+  if (view === 'info') showInfo();
   if (location.hash !== `#${view}`) history.replaceState(null, '', `#${view}`);
   if (view === 'reconcile') { if (!state.form) renderReconList(); }
   if (view === 'trips') renderTrips();
@@ -992,6 +996,7 @@ async function boot() {
   window.addEventListener('resize', sizeWindow);
   buildWindow();
   buildLab($('#view-lab'));
+  buildInfo($('#view-info'));
   buildReconForm();
   buildSettings();
   for (const t of $$('.tabs button')) t.addEventListener('click', () => { if (t.dataset.view === 'reconcile') state.form = null; show(t.dataset.view); });

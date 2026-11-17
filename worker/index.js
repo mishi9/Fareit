@@ -25,6 +25,10 @@
 //   GET  /api/access                          -> { ok, kind }    is this phone's key still good
 //   GET  /api/manifest?invite=TOKEN           -> manifest whose start_url carries the invite
 //   GET  /api/flights                         -> Changi arrivals per terminal (Radar at the airport)
+//   GET  /api/events                          -> { venues, events }   events the owner has added
+//   POST /api/events { name, venue, starts_at, ends_at } -> { venues, events }   owner only
+//   POST /api/events/delete { id }            -> { venues, events }   owner only
+//   GET  /api/info                            -> checkpoint cameras, taxis at Changi (data.gov.sg)
 //   POST /api/invites/create { label }        -> { token }       owner only
 //   GET  /api/invites                         -> { invites }     owner only
 //   POST /api/invites/revoke { token }        -> { revoked }     owner only: the invite and its phone
@@ -302,6 +306,10 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS phones (device TEXT PRIMARY KEY, who TEXT NOT NULL, last_at INTEGER)',
   // Shared copies of outside data (e.g. the arrivals list), so every phone shares one fetch.
   'CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, value TEXT NOT NULL)',
+  `CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, venue TEXT NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL,
+    starts_at INTEGER, ends_at INTEGER NOT NULL, created_at INTEGER NOT NULL, deleted INTEGER DEFAULT 0
+  )`,
 ];
 let schemaReady = null;
 // Pools created before a column existed get it added; on newer ones it's already there.
@@ -728,6 +736,111 @@ async function deleteQueue(request, env) {
   return json({ deleted, missing });
 }
 
+// ---------- Events ----------
+// Venues where crowds come out at once. Points are approximate (the event rule uses 1.5 km).
+export const VENUES = [
+  ['national-stadium', 'National Stadium', 1.3040, 103.8746],
+  ['indoor-stadium', 'Singapore Indoor Stadium', 1.3007, 103.8746],
+  ['star-theatre', 'The Star Theatre (Buona Vista)', 1.3071, 103.7883],
+  ['esplanade', 'Esplanade', 1.2898, 103.8555],
+  ['mbs', 'Marina Bay Sands (Expo, Arena)', 1.2826, 103.8590],
+  ['bayfront', 'Bayfront Event Space / Floating Platform', 1.2888, 103.8592],
+  ['f1', 'Marina Bay Street Circuit (F1)', 1.2914, 103.8640],
+  ['gardens', 'Gardens by the Bay', 1.2816, 103.8636],
+  ['padang', 'The Padang', 1.2925, 103.8521],
+  ['capitol', 'Capitol Theatre', 1.2932, 103.8514],
+  ['fort-canning', 'Fort Canning Park', 1.2946, 103.8457],
+  ['suntec', 'Suntec Convention Centre', 1.2936, 103.8573],
+  ['expo', 'Singapore Expo', 1.3352, 103.9584],
+  ['changi-exhibition', 'Changi Exhibition Centre', 1.3346, 104.0157],
+  ['rws', 'Resorts World Sentosa', 1.2540, 103.8238],
+  ['siloso', 'Siloso Beach, Sentosa', 1.2550, 103.8130],
+].map(([id, name, lat, lng]) => ({ id, name, lat, lng }));
+
+async function eventsOut(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, name, venue, lat, lng, starts_at, ends_at FROM events
+     WHERE deleted IS NOT 1 AND ends_at > ?1 ORDER BY ends_at LIMIT 500`,
+  ).bind(Date.now() - 180 * 86400000).all();
+  const names = Object.fromEntries(VENUES.map((v) => [v.id, v.name]));
+  return json({ venues: VENUES, events: results.map((e) => ({ ...e, venue_name: names[e.venue] || e.venue })) });
+}
+
+async function addEvent(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const name = String(body.name || '').trim().slice(0, 60);
+  const venue = VENUES.find((v) => v.id === body.venue);
+  const ends = Number(body.ends_at);
+  const starts = body.starts_at == null ? null : Number(body.starts_at);
+  const now = Date.now();
+  if (!name || !venue) return json({ error: 'Add what it is and pick a venue.' }, 400);
+  if (!Number.isFinite(ends) || ends < now - 2 * 86400000 || ends > now + 400 * 86400000) return json({ error: 'That end time doesn’t look right.' }, 400);
+  if (starts !== null && (!Number.isFinite(starts) || starts > ends || ends - starts > 3 * 86400000)) return json({ error: 'The start should be before the end.' }, 400);
+  const id = `ev-${randomKey().slice(0, 16)}`;
+  await env.DB.prepare('INSERT INTO events (id, name, venue, lat, lng, starts_at, ends_at, created_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)')
+    .bind(id, name, venue.id, venue.lat, venue.lng, starts, ends, now).run();
+  return eventsOut(env);
+}
+
+async function removeEvent(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  await env.DB.prepare('UPDATE events SET deleted = 1 WHERE id = ?1').bind(String(body.id || '')).run();
+  return eventsOut(env);
+}
+
+// ---------- Live info (data.gov.sg, free, no key) ----------
+// Checkpoint cameras and available street taxis around Changi, fetched at most every 2 minutes
+// and shared by every phone.
+const CHECKPOINT_CAMS = { 2701: 'Woodlands Causeway', 2702: 'Woodlands Checkpoint', 4703: 'Tuas Second Link', 4713: 'Tuas Checkpoint' };
+const CHANGI = [[1.3614, 103.9894], [1.3554, 103.9908], [1.3566, 103.9863], [1.3381, 103.9832], [1.3603, 103.9894]];
+const kmBetween = (a, b, c, d) => {
+  const rad = (x) => (x * Math.PI) / 180;
+  const h = Math.sin(rad(c - a) / 2) ** 2 + Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(rad(d - b) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+};
+export function changiTaxis(coords) {
+  return coords.filter(([lng, lat]) => CHANGI.some(([a, b]) => kmBetween(lat, lng, a, b) <= 1.5)).length;
+}
+
+async function fetchLive() {
+  const get = async (path) => {
+    const res = await fetch(`https://api.data.gov.sg/v1/transport/${path}`, { headers: { accept: 'application/json' } });
+    if (!res.ok) throw new Error(`data.gov.sg ${res.status}`);
+    return res.json();
+  };
+  const out = {};
+  const [cams, taxis] = await Promise.allSettled([get('traffic-images'), get('taxi-availability')]);
+  if (cams.status === 'fulfilled') {
+    const list = (cams.value.items?.[0]?.cameras || []).filter((c) => CHECKPOINT_CAMS[c.camera_id]);
+    out.cameras = Object.keys(CHECKPOINT_CAMS).map((id) => list.find((c) => c.camera_id === id)).filter(Boolean)
+      .map((c) => ({ id: c.camera_id, name: CHECKPOINT_CAMS[c.camera_id], image: c.image, at: Date.parse(c.timestamp) || Date.now() }));
+  }
+  if (taxis.status === 'fulfilled') {
+    const f = taxis.value.features?.[0];
+    const coords = f?.geometry?.coordinates || [];
+    out.taxis = { changi: changiTaxis(coords), total: coords.length, at: Date.parse(f?.properties?.timestamp) || Date.now() };
+  }
+  return out;
+}
+
+async function getInfo(env) {
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'info'").first();
+  let live = row ? JSON.parse(row.value) : null;
+  if (!row || now - row.at >= 2 * 60000) {
+    try {
+      const fresh = await fetchLive();
+      live = { ...(live || {}), ...fresh };
+      await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('info', ?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(now, JSON.stringify(live)).run();
+    } catch { /* keep the last copy */ }
+  }
+  return json({ ...(live || {}), lta: { ready: Boolean(env.LTA_KEY) } });
+}
+
 // ---------- Changi arrivals ----------
 // A flight data service is fetched at most every FLIGHTS_REFRESH_MIN minutes (default 30) for the
 // next few hours of arrivals; every phone gets the shared copy. Counts per terminal are worked out
@@ -966,7 +1079,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -1002,6 +1115,18 @@ export default {
         return json({ error: 'The database couldn’t be reached.' }, 502);
       }
       return json({ error: 'Not found' }, 404);
+    }
+    if (url.pathname === '/api/events' || url.pathname === '/api/events/delete' || url.pathname === '/api/info') {
+      if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
+      try {
+        if (url.pathname === '/api/info') return await getInfo(env);
+        if (request.method === 'GET' && url.pathname === '/api/events') return await eventsOut(env);
+        if (!who) who = await whoIs(request, env);
+        if (!who || who.kind !== 'owner') return json({ error: 'Owner only.' }, 403);
+        return url.pathname === '/api/events' ? await addEvent(request, env) : await removeEvent(request, env);
+      } catch {
+        return json({ error: 'The database couldn’t be reached.' }, 502);
+      }
     }
     if (url.pathname === '/api/flights') {
       if (!env.DB) return json({ ready: false });

@@ -218,3 +218,46 @@ test('flights: not set up until a provider and key are given; one fetch is share
   assert.equal(b.stale, true);
   assert.equal(b.terminals.T2.landed, 2);
 });
+
+test('events: anyone let in can read them; only the owner adds or deletes', async () => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const { token } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  const dkey = (await req('/api/access/redeem', { body: { token, device: 'driver-phone' } })).body.key;
+  const ends = Date.now() + 3 * 3600000;
+  assert.equal((await req('/api/events', { body: { name: 'Concert', venue: 'indoor-stadium', ends_at: ends }, key: dkey })).status, 403);
+  assert.equal((await req('/api/events', { body: { name: 'Concert', venue: 'nowhere', ends_at: ends }, key: okey })).status, 400);
+  const added = await req('/api/events', { body: { name: 'Concert', venue: 'indoor-stadium', starts_at: ends - 3 * 3600000, ends_at: ends }, key: okey });
+  assert.equal(added.status, 200);
+  const list = (await req('/api/events', { key: dkey })).body;
+  assert.equal(list.events.length, 1);
+  assert.equal(list.events[0].venue_name, 'Singapore Indoor Stadium');
+  assert.ok(list.events[0].lat > 1.29 && list.venues.length > 10);
+  assert.equal((await req('/api/events', {})).status, 401);
+  assert.equal((await req('/api/events/delete', { body: { id: list.events[0].id }, key: dkey })).status, 403);
+  assert.equal((await req('/api/events/delete', { body: { id: list.events[0].id }, key: okey })).body.events.length, 0);
+});
+
+test('info: checkpoint cameras and taxis at Changi, fetched once and shared', async (t) => {
+  const { req, owner } = setup();
+  const key = await owner();
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    calls++;
+    if (String(url).includes('traffic-images')) {
+      return new Response(JSON.stringify({ items: [{ cameras: [
+        { camera_id: '2701', image: 'https://images.data.gov.sg/a.jpg', timestamp: '2026-11-18T07:21:22+08:00' },
+        { camera_id: '1001', image: 'https://images.data.gov.sg/b.jpg', timestamp: '2026-11-18T07:21:22+08:00' },
+        { camera_id: '4713', image: 'https://images.data.gov.sg/c.jpg', timestamp: '2026-11-18T07:21:22+08:00' },
+      ] }] }));
+    }
+    return new Response(JSON.stringify({ features: [{ geometry: { coordinates: [[103.9890, 1.3600], [103.9860, 1.3560], [103.85, 1.30]] }, properties: { timestamp: '2026-11-18T07:23:34+08:00' } }] }));
+  });
+  const a = (await req('/api/info', { key })).body;
+  assert.deepEqual(a.cameras.map((c) => c.name), ['Woodlands Causeway', 'Tuas Checkpoint']);
+  assert.equal(a.taxis.changi, 2);
+  assert.equal(a.taxis.total, 3);
+  assert.equal(a.lta.ready, false);
+  await req('/api/info', { key });
+  assert.equal(calls, 2, 'second request uses the shared copy');
+});

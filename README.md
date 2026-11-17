@@ -65,6 +65,18 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
+## Info tab
+
+Replaces Reconcile (older jobs still waiting for a fare are linked from the top of Info). Display only: nothing here changes the estimates, except the event rule below.
+
+- **Events:** the owner adds them (what, venue from a list, date, rough end time); every phone sees them. **Ending soon** (within 2 hours, or ended up to an hour ago: the crowd is coming out) and **Coming up**, with the distance from you.
+- **Event rule:** trips saved within about 1.5 km of a listed event's venue, from 30 min before it ends to 90 min after, are kept out of the normal fare formula, the time-of-day / place adjustment and the surge %, so one concert night doesn't make that area look busy every night. They're learned on their own ("around events, fares have run +x%") and still teach Grab's cut.
+- **Airport:** available street taxis in the Changi zone (data.gov.sg, free, no key) and the Grab queue readings around this hour.
+- **Checkpoints:** live LTA cameras at Woodlands (Causeway, Checkpoint) and Tuas (Second Link, Checkpoint), via data.gov.sg.
+- **Road incidents** and **expressway travel times:** waiting for an LTA DataMall key (`LTA_KEY` secret).
+
+Live data is fetched by the server at most every 2 minutes and shared by every phone.
+
 ## Radar at the airport
 
 At Changi (within the airport zone, any terminal) jobs are auto-accepted, so there's no 8-second window to estimate for. Radar swaps the earnings cards for:

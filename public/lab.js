@@ -7,10 +7,12 @@
 import * as db from './db.js';
 import { buildQueue, syncQueue, closeOpenReading } from './queue.js';
 import { renderFlights } from './flights.js';
+import { eventsList, onEventsChange, loadEvents } from './events.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob,
+  markEvents, eventLift,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -44,11 +46,15 @@ const changed = () => { lab.version++; };
 const dataset = () => {
   if (!lab.cache || lab.cache.version !== lab.version) {
     const mine = new Set(lab.trips.map((t) => t.id));
-    lab.cache = { version: lab.version, trips: [...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))] };
+    // Trips around a listed event are marked, so they're kept apart from normal (formula.js).
+    lab.cache = { version: lab.version, trips: markEvents([...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))], eventsList()) };
   }
   return lab.cache.trips;
 };
 const weights = () => fitWeights(dataset());
+// Around events, how fares have run vs normal (Info tab).
+export const eventNow = () => eventLift(dataset());
+onEventsChange(() => { changed(); if (lab.root) renderAll(); });
 const commission = () => fitCommission(dataset());
 
 // ---- the formula dataset on the server ----
@@ -219,6 +225,7 @@ export async function buildLab(root) {
   syncLab();
   const rq = document.querySelector('#radar-queue');
   if (rq) buildQueue(rq);
+  loadEvents();
 }
 
 // ---- Beta Window: earnings by distance band ----
@@ -230,7 +237,7 @@ function latestLine(now) {
   const mins = Math.round((now - t.ts) / 60000);
   const where = t.lat && t.lng ? areaName({ lat: t.lat, lng: t.lng }) : null;
   const cls = j.vs >= 0.1 ? 'good' : j.vs <= -0.1 ? 'bad' : '';
-  return `<div class="band-latest ${cls}">Latest job · ${pad(d.getHours())}:${pad(d.getMinutes())} (${mins} min ago)${where ? ` · ${where}` : ''}${t.shared ? ' · another driver' : ''}: ${t.km} km, earned <b>${money(j.earned)}</b> (${signed(j.vs)} vs normal)</div>`;
+  return `<div class="band-latest ${cls}">Latest job · ${pad(d.getHours())}:${pad(d.getMinutes())} (${mins} min ago)${where ? ` · ${where}` : ''}${t.shared ? ' · another driver' : ''}${t.event ? ` · ${t.eventName || 'event'}` : ''}: ${t.km} km, earned <b>${money(j.earned)}</b> (${signed(j.vs)} vs normal)</div>`;
 }
 
 // The planning area for where the phone is, looked up once per ~1 km and kept for the session.

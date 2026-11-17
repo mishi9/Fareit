@@ -335,3 +335,39 @@ test('speed: 3,000 trips stay quick once remembered', async () => {
   assert.ok(perMinute < 150, `Window refresh with 3,000 trips ${perMinute.toFixed(1)} ms`);
   console.log(`# 3,000 trips: accuracy stat first ${firstLoo.toFixed(0)} ms, then ${againLoo.toFixed(2)} ms; Window refresh ${perMinute.toFixed(1)} ms`);
 });
+
+// ---- events: a concert night must not make the area look busy on normal nights ----
+import { markEvents, eventLift, eventFor, timeOfDay as tod2 } from '../public/formula.js';
+test('trips around an event are kept out of normal and learned on their own', () => {
+  const stadium = { id: 'ev-1', name: 'Concert', lat: 1.304, lng: 103.8746, ends_at: new Date('2026-11-21T22:30:00+08:00').getTime() };
+  const near = { lat: 1.30, lng: 103.87 }; // about 0.6 km from the stadium
+  const day = (d, h, m = 0) => new Date(`2026-11-${d}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00+08:00`).getTime();
+  // normal nights: fares at the formula. Concert night: +30%.
+  const normal = [14, 15, 17, 18].map((d) => make(10, 20, { ts: day(d, 22, 45), ...near }));
+  const concert = [0, 10, 20, 40].map((m) => {
+    const t = make(10, 20, { ts: day(21, 22, 40) + m * 60000, ...near });
+    return { ...t, actual: Math.round(t.actual * 1.3 * 100) / 100, earned: Math.round(t.earned * 1.3 * 100) / 100 };
+  });
+  const later = make(10, 20, { ts: day(22, 1, 0), ...near }); // 2.5 h after the end: not the event
+  const all = [...normal, ...concert, later];
+  assert.equal(eventFor(concert[0], [stadium]).id, 'ev-1');
+  assert.equal(eventFor(later, [stadium]), null);
+  assert.equal(eventFor({ ...concert[0], lat: 1.35, lng: 103.94 }, [stadium]), null, 'far away: not the event');
+
+  const marked = markEvents(all, [stadium]);
+  assert.equal(marked.filter((t) => t.event).length, 4);
+  const nextSat = day(28, 22, 45);
+  const withEvents = tod2(marked, nextSat, near);
+  const without = tod2(normal.concat(later), nextSat, near);
+  assert.ok(Math.abs(withEvents.lift - without.lift) < 1e-9, `normal unchanged: ${withEvents.lift} vs ${without.lift}`);
+  // and the formula itself isn't pulled up by the concert fares
+  const w1 = fitWeights(marked);
+  const w0 = fitWeights(normal.concat(later));
+  assert.deepEqual(w1, w0);
+  const ev = eventLift(marked);
+  assert.equal(ev.n, 4);
+  assert.ok(ev.lift > 0.15 && ev.lift < 0.3, `event lift ${ev.lift}`);
+  // unmarked, the same trips would have pushed the normal fare up
+  const fare = (w) => passengerFare(w, 10, 20).fare;
+  assert.ok(fare(fitWeights(all)) > fare(w0) + 0.2, `${fare(fitWeights(all))} vs ${fare(w0)}`);
+});

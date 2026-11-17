@@ -103,7 +103,7 @@ export const tripTime = (t, est) => (t.min > 0 ? t.min : est(t.km));
 
 // A trip can teach the formula if it's normal-priced, complete, and not held up by the minimum.
 export function usable(t) {
-  if (t.surge !== 'normal' || !(t.km > 0) || !(t.actual > 0)) return false;
+  if (t.event || t.surge !== 'normal' || !(t.km > 0) || !(t.actual > 0)) return false;
   return t.actual - (t.erp || 0) > MIN_PASSENGER + 0.005;
 }
 
@@ -279,7 +279,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
   let recent = 0;
   let closest = null;
   for (const t of all) {
-    if (!Number.isFinite(t.ts)) continue;
+    if (!Number.isFinite(t.ts) || t.event) continue; // event trips are learned on their own
     // Every trip counts, by how close it is: in time of day, in place, and in recency.
     let place = 1;
     let d = 0;
@@ -311,6 +311,7 @@ export function byTimeBlock(trips) {
   const c = fitCommission(trips);
   const blocks = Array.from({ length: 8 }, (_, i) => ({ from: i * 3, to: i * 3 + 3, n: 0, surge: 0, sum: 0 }));
   for (const t of all) {
+    if (t.event) continue;
     const r = ratioToFormula(t, w, est, c);
     if (r === null) continue;
     const b = blocks[Math.floor(hourOf(t.ts) / 3) % 8];
@@ -339,7 +340,7 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
   const h = hourOf(ts);
   const rs = [];
   for (const t of all) {
-    if (t.surge !== kind || !Number.isFinite(t.ts)) continue;
+    if (t.surge !== kind || t.event || !Number.isFinite(t.ts)) continue;
     const r = ratioToFormula(t, w, est, c);
     if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
   }
@@ -413,4 +414,45 @@ export function latestJob(trips, ts = Date.now(), withinMs = 3 * 3600 * 1000) {
   const normalEarn = driverEarns(c, normalPaid);
   const earned = t.earned > 0 ? t.earned : driverEarns(c, t.actual);
   return { trip: t, earned, normalEarn, vs: earned / normalEarn - 1 };
+}
+
+// ---- Events ----
+// A concert letting out isn't a normal night. Trips saved within EVENT_KM of a listed event's
+// venue, from EVENT_BEFORE_MIN before it ends to EVENT_AFTER_MIN after, are marked as event trips:
+// they're left out of the normal fare formula, the time-of-day / place adjustment and the surge %,
+// and learned on their own (eventLift). They still teach Grab's cut, which doesn't change with demand.
+export const EVENT_KM = 1.5;
+export const EVENT_BEFORE_MIN = 30;
+export const EVENT_AFTER_MIN = 90;
+export function eventFor(t, events) {
+  if (!events || !events.length || !(t.lat && t.lng) || !Number.isFinite(t.ts)) return null;
+  for (const e of events) {
+    if (!Number.isFinite(e.ends_at)) continue;
+    if (t.ts < e.ends_at - EVENT_BEFORE_MIN * 60000 || t.ts > e.ends_at + EVENT_AFTER_MIN * 60000) continue;
+    if (kmApart(t, e) <= EVENT_KM) return e;
+  }
+  return null;
+}
+// The same trips, with event trips marked (copies; the originals aren't changed).
+export function markEvents(trips, events) {
+  if (!events || !events.length) return trips;
+  return trips.map((t) => {
+    const e = eventFor(t, events);
+    return e ? { ...t, event: e.id, eventName: e.name } : t;
+  });
+}
+// How event trips paid against normal. A start of +0% counts as one trip.
+export function eventLift(trips) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const est = timeEstimator(all);
+  const c = fitCommission(trips);
+  const rs = [];
+  for (const t of all) {
+    if (!t.event) continue;
+    const r = ratioToFormula(t, w, est, c);
+    if (r !== null) rs.push(r);
+  }
+  if (!rs.length) return { lift: 0, n: 0, guess: true };
+  return { lift: Math.exp(rs.reduce((a, b) => a + b, 0) / (rs.length + 1)) - 1, n: rs.length, guess: false };
 }
