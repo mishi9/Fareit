@@ -448,3 +448,17 @@ test('ferries: Indonesian departures become Singapore arrival times', () => {
   assert.equal(ferryTerminalAt({ lat: 1.3157, lng: 103.9893 }).id, 'tmft');
   assert.equal(ferryTerminalAt({ lat: 1.3526, lng: 103.9447 }), null);
 });
+
+import { jbSoonest, JB_PLACES } from '../public/jb.js';
+test('Radar shows only what is immediately next, within the hour', () => {
+  const at = (h, m) => new Date(2026, 10, 18, h, m);
+  const W = JB_PLACES.find((p) => p.id === 'woodlands');
+  const K = JB_PLACES.find((p) => p.id === 'kranji');
+  // 22:30 at Woodlands: CW1/CW2 buses (out ~22:50) beat the 22:50 train (out ~23:05)
+  assert.equal(jbSoonest(at(22, 30), W).id !== 'ktm', true);
+  // 02:00 at Kranji: CW1 isn't running and nothing comes within the hour -> nothing
+  assert.equal(jbSoonest(at(2, 0), K), null);
+  const N = JB_PLACES.find((p) => p.id === 'newton');
+  // 23:30 at Newton: CW5 done for the day -> nothing
+  assert.equal(jbSoonest(at(23, 30), N), null);
+});

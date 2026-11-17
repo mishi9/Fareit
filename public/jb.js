@@ -112,8 +112,28 @@ export function jbPlace(loc) {
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Compact rows. place: show only its routes, and the time that matters there.
+// Minutes from now until an "HH:MM" today (past midnight counts as tomorrow).
+const minsUntil = (t, now) => { let d = mins(t) - minuteOfDay(now); if (d < -12 * 60) d += 24 * 60; return d; };
+
+// Radar: only what's immediately next at this place, and only if it's within the hour.
+export function jbSoonest(now = new Date(), place, withinMin = 60) {
+  let best = null;
+  for (const r of jbNext(now).filter((x) => place.routes.includes(x.id))) {
+    const when = place.at === 'woodlands' ? r.woodlands : r.dropAt;
+    if (!when) continue;
+    const d = minsUntil(when, now);
+    if (d < 0 || d > withinMin) continue;
+    if (!best || d < best.d) best = { ...r, when, d };
+  }
+  return best;
+}
+
 export function jbRowsHtml(now = new Date(), place = null) {
-  const rows = jbNext(now).filter((r) => !place || place.routes.includes(r.id));
+  if (place) {
+    const r = jbSoonest(now, place);
+    return r ? `<div class="jb-row compact"><b>${esc(r.id === 'ktm' ? 'KTM' : r.id)}</b><span class="note">${esc(r.short || r.what)}</span><span class="jb-eta">~${r.when}</span></div>` : '';
+  }
+  const rows = jbNext(now);
   return rows.map((r) => {
     const when = place && place.at === 'woodlands' ? r.woodlands : r.dropAt;
     const where = place && place.at === 'woodlands' ? 'out at Woodlands' : `at ${r.drop}`;

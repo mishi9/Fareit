@@ -83,7 +83,11 @@ export const ferryTerminalAt = (loc) => (loc ? FERRY_TERMINALS.find((t) => kmTo(
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // What's next into a terminal. compact: Radar's short rows.
 export function ferryRowsHtml(terminal, now = new Date(), { count = 3, compact = false } = {}) {
-  const list = ferryArrivals(terminal, now).slice(0, count);
+  // Radar: only the very next arrival, and only if it's within the hour.
+  const list = compact
+    ? ferryArrivals(terminal, now).filter((a) => a.at.getTime() >= now.getTime() && a.at.getTime() - now.getTime() <= 3600000).slice(0, 1)
+    : ferryArrivals(terminal, now).slice(0, count);
+  if (compact && !list.length) return '';
   if (!list.length) return '<p class="note">No more sailings listed today.</p>';
   return list.map((a) => {
     const day = a.at.getDate() !== now.getDate() ? ' tmrw' : '';

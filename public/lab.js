@@ -266,11 +266,14 @@ export function renderBands() {
   // head there or wait. (Ferry terminals next, once there's a timetable for them.)
   const placeBox = document.querySelector('#radar-place');
   if (placeBox) {
+    // Only what's immediately next, and only within the hour; nothing coming -> nothing shown.
     const pl = jbPlace(loc);
     const ferry = pl ? null : ferryTerminalAt(loc);
-    placeBox.hidden = !pl && !ferry;
-    if (pl) placeBox.innerHTML = `<div class="band-head">Near ${pl.name} · from JB, ${pl.at === 'woodlands' ? 'out at Woodlands' : 'arriving'} (est.)</div>${jbRowsHtml(new Date(now), pl)}`;
-    else if (ferry) placeBox.innerHTML = `<div class="band-head">Near ${ferry.name} · next ferries in</div>${ferryRowsHtml(ferry.id, new Date(now), { compact: true })}`;
+    const rows = pl ? jbRowsHtml(new Date(now), pl) : ferry ? ferryRowsHtml(ferry.id, new Date(now), { compact: true }) : '';
+    placeBox.hidden = !rows;
+    if (rows) placeBox.innerHTML = pl
+      ? `<div class="band-head">Next from JB · ${pl.at === 'woodlands' ? 'out at Woodlands' : `at ${pl.name}`} (est.)</div>${rows}`
+      : `<div class="band-head">Next ferry into ${ferry.short}</div>${rows}`;
   }
   const airport = atAirport(loc);
   const ap = document.querySelector('#ap-flights');

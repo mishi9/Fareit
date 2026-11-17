@@ -74,7 +74,7 @@ Replaces Reconcile (older jobs still waiting for a fare are linked from the top 
 - **Airport:** available street taxis in the Changi zone (data.gov.sg, free, no key) and the Grab queue readings around this hour.
 - **From JB:** published timetables (not live) for people crossing from Johor Bahru, who often take a Grab from where they're dropped off: the KTM Shuttle Tebrau's next arrivals at Woodlands (KTMB, effective 1 Jan 2026), whether Causeway Link CW1 (Kranji MRT) and CW2 (Queen Street) are running and how often, and CW5's next departures from Woodlands to Newton (Land Transport Guru, 2026). Each route shows only what's next, with a best-estimate time people are out in Singapore (`~`): the timetable plus rough journey and immigration times (`JB_EST` in `public/jb.js`, to be tuned). Data in `public/jb.js`.
 
-On **Radar**, near Woodlands Checkpoint (every route passes through) or a drop-off (Kranji MRT for CW1, Queen Street for CW2, Newton for CW5), the same arrivals show at the top above the earnings cards. Ferry terminals (Tanah Merah, HarbourFront) can be added the same way once there's a timetable.
+On **Radar**, near Woodlands Checkpoint (every route passes through) or a drop-off (Kranji MRT for CW1, Queen Street for CW2, Newton for CW5), Radar shows only the single soonest arrival there, and only if it's within the hour (otherwise nothing); the Info tab keeps the full list. The same goes for ferries near Tanah Merah or HarbourFront. Ferry terminals (Tanah Merah, HarbourFront) can be added the same way once there's a timetable.
 - **Road incidents** and **expressway travel times:** waiting for an LTA DataMall key (`LTA_KEY` secret).
 
 Live data is fetched by the server at most every 2 minutes and shared by every phone.
