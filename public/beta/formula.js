@@ -209,7 +209,10 @@ function ratioToFormula(t, w, est, c) {
 
 // With `loc`, only trips saved near there count, more the closer they are (1 km 80%, 3 km 14%,
 // 5 km 0.4%): Tampines at 2am isn't Orchard at 2am. Trips saved without a location don't count.
-const PLACE_SD_KM = 1.5;
+// Place: a trip 3 km away counts 61%, 6 km 14%; anything further (or saved without a location)
+// still counts a little (5%), so the closest available data always carries the estimate.
+const PLACE_SD_KM = 3;
+const PLACE_FLOOR = 0.05;
 export const NEAR_KM = 3;
 const kmApart = (a, b) => {
   const R = 6371;
@@ -219,9 +222,10 @@ const kmApart = (a, b) => {
 };
 
 // Jobs from the last couple of hours say most about right now: one from 10 minutes ago counts
-// about 6 times as much as one from last week at the same hour, fading over the next hours.
+// about 3 times as much as one from last week at the same hour, fading over the next hours, so
+// the latest entry leans on the estimate without taking it over.
 const RECENT_H = 3;
-const recentBoost = (ageMin) => (ageMin >= 0 && ageMin <= RECENT_H * 60 ? 1 + 6 * Math.exp(-ageMin / 45) : 1);
+const recentBoost = (ageMin) => (ageMin >= 0 && ageMin <= RECENT_H * 60 ? 1 + 2 * Math.exp(-ageMin / 45) : 1);
 
 export function timeOfDay(trips, ts, loc = null) {
   const all = withBase(trips);
@@ -234,28 +238,29 @@ export function timeOfDay(trips, ts, loc = null) {
   let near = 0;
   let surgeNear = 0;
   let recent = 0;
+  let closest = null;
   for (const t of all) {
     if (!Number.isFinite(t.ts)) continue;
+    // Every trip counts, by how close it is: in time of day, in place, and in recency.
     let place = 1;
     let d = 0;
     if (loc) {
-      if (!(t.lat && t.lng)) continue;
-      d = kmApart(loc, t);
-      place = Math.exp(-(d * d) / (2 * PLACE_SD_KM * PLACE_SD_KM));
+      d = t.lat && t.lng ? kmApart(loc, t) : Infinity;
+      place = PLACE_FLOOR + (1 - PLACE_FLOOR) * (Number.isFinite(d) ? Math.exp(-(d * d) / (2 * PLACE_SD_KM * PLACE_SD_KM)) : 0);
     }
     const r = ratioToFormula(t, w, est, c);
     if (r === null) continue;
     const g = hourGap(hourOf(t.ts), h);
-    if (loc && d > NEAR_KM && g > 1.5) continue;
     const ageMin = (ts - t.ts) / 60000;
     const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin);
     sw += x;
     swr += x * r;
+    if (!closest || x > closest.x) closest = { x, ts: t.ts, km: Number.isFinite(d) ? d : null, gapH: g };
     if (g <= 1.5 && d <= NEAR_KM) { near++; if (t.surge === 'surge') surgeNear++; }
     if (ageMin >= 0 && ageMin <= 90 && d <= NEAR_KM) recent++;
   }
   const m = swr / (sw + 1);
-  return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw };
+  return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw, closest };
 }
 
 // Fares vs the formula in 3-hour blocks, for the "By time of day" table.
@@ -335,21 +340,21 @@ export function bandOutlook(trips, ts, loc = null) {
   const w = fitWeights(trips);
   const est = timeEstimator(all);
   const c = fitCommission(trips);
-  const here = loc ? timeOfDay(trips, ts, loc) : null;
-  const scope = here && here.near ? 'here' : 'all';
-  const tod = scope === 'here' ? here : timeOfDay(trips, ts);
+  // Always the closest available data, blended: no switch between "near you" and "all areas".
+  const tod = timeOfDay(trips, ts, loc);
+  const scope = !loc ? 'all' : tod.near ? 'here' : 'nearest';
   const surge = surgeLift(trips, ts);
   return EARN_BANDS.map((b) => {
     const inBand = all.filter((t) => t.km >= b.lo && t.km < b.hi);
     const km = inBand.length >= 3 ? median(inBand.map((t) => t.km)) : b.km;
     const normalPaid = passengerFare(w, km, est(km)).fare;
     const normal = driverEarns(c, normalPaid);
-    const nowLift = tod.near ? tod.lift : 0;
+    const nowLift = tod.lift;
     const now = driverEarns(c, normalPaid * (1 + nowLift));
     const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
     const vs = now / normal - 1;
     const state = vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope };
+    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight };
   });
 }
 

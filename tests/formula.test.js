@@ -244,8 +244,13 @@ test('Window bands use trips near you around this hour, else all areas', async (
   assert.equal(inOrchard[0].scope, 'here');
   assert.ok(inOrchard.every((b) => b.state === 'good'), JSON.stringify(inOrchard.map((b) => b.vs)));
   const inTampines = bandOutlook(trips, when, TAMPINES);
-  assert.equal(inTampines[0].scope, 'all', 'nothing near Tampines: falls back to all areas');
-  assert.equal(inTampines[0].nearHour, 5, 'the 4 Orchard trips plus the built-in base trip (~01:30)');
+  assert.equal(inTampines[0].scope, 'nearest', 'nothing within 3 km: leans on the closest available data');
+  assert.ok(inTampines[0].now > inTampines[0].normal, 'Orchard\'s busy night still nudges Tampines up a little');
+  assert.ok(inTampines[0].vs < inOrchard[0].vs, 'but far less than in Orchard');
+  // The estimate moves with the clock, minute by minute, toward the closest data in time.
+  const later = [0, 30, 60, 90, 120].map((m) => bandOutlook(trips, when + m * 60000, ORCHARD)[1].now);
+  assert.ok(later[0] > later[4], `fades as 02:30 recedes: ${later.join(', ')}`);
+  assert.ok(later.every((v, i) => i === 0 || v <= later[i - 1] + 1e-9), 'smoothly, no jumps up');
 });
 
 test('quick Got a job entries (km + earnings only) move "now" for the area, not the formula', async () => {

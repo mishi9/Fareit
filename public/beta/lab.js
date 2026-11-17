@@ -241,12 +241,17 @@ export function renderBands() {
   const h = new Date(now);
   const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
   const place = loc ? (areaName(loc) || 'your area') : null;
-  const scope = bands[0].scope;
-  const basis = !bands[0].nearHour
-    ? `No trips ${loc ? `near ${place} ` : ''}around this hour yet, so "now" equals normal.`
-    : scope === 'here'
-      ? `From ${bands[0].nearHour} trip${bands[0].nearHour === 1 ? '' : 's'} near ${place} (within ${3} km) around this hour.`
-      : `${loc ? `No trips near ${place} around this hour yet; using all areas: ` : 'From '}${bands[0].nearHour} trip${bands[0].nearHour === 1 ? '' : 's'} around this hour.`;
+  // What "now" is leaning on: every trip counts by closeness in time, place and recency.
+  const b0 = bands[0];
+  const cl = b0.closest;
+  const clText = cl
+    ? `closest is ${(() => { const d = new Date(cl.ts); return `a ${pad(d.getHours())}:${pad(d.getMinutes())} trip`; })()}${cl.km != null ? `, ${cl.km < 1 ? 'under 1' : Math.round(cl.km)} km away` : ''}`
+    : '';
+  const basis = !cl
+    ? 'No trips yet, so "now" equals normal.'
+    : b0.scope === 'here'
+      ? `From all trips, closest counting most: ${b0.nearHour} within 3 km and 1½ h of now; ${clText}.`
+      : `Nothing within 3 km and 1½ h yet, so leaning on the closest available: ${clText}.`;
   const word = { good: 'Above normal', normal: 'Normal', bad: 'Below normal' };
   box.innerHTML = `
     <div class="band-head">What you'd earn now · ${place ? `${place} · ` : ''}${at}</div>
