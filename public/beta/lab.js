@@ -5,6 +5,7 @@
 // Trips are uploaded to the formula dataset on the server (separate from the shared jobs pool)
 // and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
+import { buildQueue, syncQueue } from './queue.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
@@ -63,6 +64,7 @@ async function post(path, body) {
 let syncing = null;
 export function syncLab() {
   if (!lab.device) return Promise.resolve(); // not set up yet: buildLab syncs once it is
+  syncQueue();
   if (syncing) return syncing;
   syncing = (async () => {
     try {
@@ -171,6 +173,8 @@ export async function buildLab(root) {
       <button type="button" class="ghost" id="lab-clear">Clear</button>
     </div>
 
+    <div id="lab-queue" class="stack"></div>
+
     <h2>How close it's getting</h2>
     <div id="lab-stats"></div>
     <h2>By time of day</h2>
@@ -191,6 +195,7 @@ export async function buildLab(root) {
   $('#lab-export', root).addEventListener('click', exportCsv);
   renderAll();
   syncLab();
+  buildQueue($('#lab-queue', root));
 }
 
 function renderAll() {

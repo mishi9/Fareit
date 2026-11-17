@@ -11,6 +11,9 @@
 //   POST /api/formula { device, trips }      -> { accepted, rejected }   beta formula dataset
 //   GET  /api/formula?since=REV              -> { trips, next, more }    (separate from the pool)
 //   POST /api/formula/delete { device, ids } -> { deleted, missing }
+//   POST /api/queue { device, readings }     -> { accepted, rejected }   airport queue readings
+//   GET  /api/queue?since=REV                -> { readings, next, more }
+//   POST /api/queue/delete { device, ids }   -> { deleted, missing }
 //
 // No accounts. Each phone sends a random device id so it can correct its own rows and nobody
 // else's. The pool holds no addresses, names or exact places: pickup and drop are rounded to
@@ -224,6 +227,20 @@ const SCHEMA = [
     card_min REAL, pickup_km REAL
   )`,
   'CREATE INDEX IF NOT EXISTS formula_rev ON formula_trips(rev)',
+  // Airport queue readings (beta): cars ahead and Grab's estimated wait when a driver joins the
+  // queue, and the actual wait once they get a job. Numbers and time only.
+  `CREATE TABLE IF NOT EXISTS airport_queue (
+    id TEXT PRIMARY KEY,
+    device TEXT NOT NULL,
+    ip_hash TEXT,
+    received_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    rev INTEGER NOT NULL,
+    ts INTEGER,
+    cars_ahead INTEGER, est_wait_min REAL, actual_wait_min REAL,
+    deleted INTEGER
+  )`,
+  'CREATE INDEX IF NOT EXISTS queue_rev ON airport_queue(rev)',
 ];
 let schemaReady = null;
 // Pools created before a column existed get it added; on newer ones it's already there.
@@ -515,6 +532,97 @@ async function deleteFormula(request, env) {
   return json({ deleted, missing });
 }
 
+// ---------- beta airport queue ----------
+export function cleanQueueReading(q, now = Date.now()) {
+  if (!q || typeof q !== 'object' || !ID_RE.test(String(q.id || ''))) return null;
+  const n = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const ts = n(q.ts);
+  const cars = n(q.cars_ahead);
+  const est = n(q.est_wait_min);
+  const actual = n(q.actual_wait_min);
+  if (!Number.isFinite(ts) || ts < now - 365 * 86400 * 1000 || ts > now + 10 * 60 * 1000) return null;
+  if (cars === null && est === null) return null;
+  if (!inRange(cars, 0, 1000) || !inRange(est, 0, 720) || !inRange(actual, 0, 1440)) return null;
+  return {
+    id: String(q.id), ts: Math.round(ts / 60000) * 60000,
+    cars_ahead: cars === null ? null : Math.round(cars), est_wait_min: r2(est), actual_wait_min: r2(actual),
+  };
+}
+
+const QUEUE_UPSERT = `INSERT INTO airport_queue (id, device, ip_hash, received_at, updated_at, rev, ts, cars_ahead,
+    est_wait_min, actual_wait_min, deleted)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM airport_queue), ?5, ?6, ?7, ?8, 0)
+  ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts,
+    cars_ahead = excluded.cars_ahead, est_wait_min = excluded.est_wait_min, actual_wait_min = excluded.actual_wait_min,
+    deleted = 0
+  WHERE airport_queue.device = excluded.device`;
+
+async function postQueue(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  const readings = Array.isArray(body.readings) ? body.readings.slice(0, FORMULA_MAX_PER_POST) : [];
+  if (!readings.length) return json({ accepted: [], rejected: [] });
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const ipHash = await hashIp(request, env);
+  const recent = await env.DB.prepare('SELECT COUNT(*) AS n FROM airport_queue WHERE ip_hash = ?1 AND received_at > ?2')
+    .bind(ipHash, now - 86400 * 1000).first();
+  let budget = FORMULA_MAX_NEW_PER_IP_PER_DAY - Number((recent && recent.n) || 0);
+  const accepted = [];
+  const rejected = [];
+  for (const raw of readings) {
+    const q = cleanQueueReading(raw, now);
+    if (!q) { rejected.push(raw && raw.id); continue; }
+    const existing = await env.DB.prepare('SELECT device FROM airport_queue WHERE id = ?1').bind(q.id).first();
+    if (existing && existing.device !== device) { rejected.push(q.id); continue; }
+    if (!existing) {
+      if (budget <= 0) { rejected.push(q.id); continue; }
+      budget--;
+    }
+    await env.DB.prepare(QUEUE_UPSERT).bind(q.id, device, ipHash, now, q.ts, q.cars_ahead, q.est_wait_min, q.actual_wait_min).run();
+    accepted.push(q.id);
+  }
+  return json({ accepted, rejected });
+}
+
+async function getQueue(url, env) {
+  const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
+  const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
+  await ensureSchema(env.DB);
+  const { results } = await env.DB.prepare(
+    `SELECT rev, id, ts, cars_ahead, est_wait_min, actual_wait_min, deleted
+       FROM airport_queue WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
+  ).bind(since, limit + 1).all();
+  const more = results.length > limit;
+  const readings = results.slice(0, limit).map((r) => {
+    if (r.deleted === 1) return { rev: r.rev, id: r.id, deleted: 1 };
+    const { deleted, ...rest } = r;
+    return rest;
+  });
+  return json({ readings, next: readings.length ? readings[readings.length - 1].rev : since, more });
+}
+
+async function deleteQueue(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((id) => ID_RE.test(id)).slice(0, FORMULA_MAX_PER_POST);
+  await ensureSchema(env.DB);
+  const deleted = [];
+  const missing = [];
+  for (const id of ids) {
+    const row = await env.DB.prepare('SELECT device FROM airport_queue WHERE id = ?1').bind(id).first();
+    if (!row || row.device !== device) { missing.push(id); continue; }
+    await env.DB.prepare(`UPDATE airport_queue SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM airport_queue),
+        cars_ahead = NULL, est_wait_min = NULL, actual_wait_min = NULL WHERE id = ?1`).bind(id, Date.now()).run();
+    deleted.push(id);
+  }
+  return json({ deleted, missing });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -523,7 +631,7 @@ export default {
     }
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
-    const isFormulaWrite = (url.pathname === '/api/formula' || url.pathname === '/api/formula/delete') && request.method === 'POST';
+    const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -534,6 +642,15 @@ export default {
     }
     if (!authorized(request, env)) return json({ error: 'Access key missing or wrong. Set it in Fareit under Settings.' }, 401);
 
+    if (url.pathname === '/api/queue' || url.pathname === '/api/queue/delete') {
+      if (!env.DB) return json({ error: 'The database isn’t set up on the server yet.' }, 503);
+      try {
+        if (url.pathname === '/api/queue/delete') return await deleteQueue(request, env);
+        return request.method === 'POST' ? await postQueue(request, env) : await getQueue(url, env);
+      } catch {
+        return json({ error: 'The database couldn’t be reached.' }, 502);
+      }
+    }
     if (url.pathname === '/api/formula' || url.pathname === '/api/formula/delete') {
       if (!env.DB) return json({ error: 'The database isn’t set up on the server yet.' }, 503);
       try {

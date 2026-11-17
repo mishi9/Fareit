@@ -172,3 +172,16 @@ test('airport trips: kept out of the normal formula, their difference learned fr
   assert.equal(a.n, 3);
   assert.ok(a.lift > 0.05 && a.lift < 0.15, `lift ${a.lift}`);
 });
+
+test('airport queue summary: readings around this hour, from all drivers', async () => {
+  const { queueSummary } = await import('../public/beta/queue.js');
+  const at = (iso) => Date.parse(iso);
+  const readings = [
+    { ts: at('2026-11-17T02:10:00+08:00'), cars: 40, est: 35, actual: 50 },
+    { ts: at('2026-11-18T01:40:00+08:00'), cars: 60, est: 45, actual: null },
+    { ts: at('2026-11-18T14:00:00+08:00'), cars: 5, est: 8, actual: 10 },
+  ];
+  const s = queueSummary(readings, at('2026-11-20T02:00:00+08:00'));
+  assert.deepEqual([s.n, s.cars, s.est, s.actual, s.nActual], [2, 50, 40, 50, 1]);
+  assert.equal(queueSummary(readings, at('2026-11-20T08:00:00+08:00')), null);
+});

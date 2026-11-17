@@ -269,3 +269,23 @@ test('formula dataset: separate table, own-device edits and deletes, numbers onl
   assert.deepEqual(after.body.trips.filter((t) => t.id === 'lab-trip-0001').map((t) => [t.id, t.deleted]), [['lab-trip-0001', 1]]);
   assert.ok(after.body.trips.every((t) => t.deleted === 1), 'only tombstones left');
 });
+
+test('airport queue readings: own table, numbers and time only, own-device edits', async () => {
+  const env = { DB: fakeD1() };
+  const call = (path, body) => worker.fetch(new Request(`https://fareit.test${path}`, body
+    ? { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': '8.8.8.8' }, body: JSON.stringify(body) } : {}), env)
+    .then(async (r) => ({ status: r.status, body: await r.json() }));
+  const q = (over = {}) => ({ id: 'queue-read-0001', ts: Date.now() - 60000, cars_ahead: 45, est_wait_min: 38, actual_wait_min: null, ...over });
+  const up = await call('/api/queue', { device: 'device-aaaaaaaa', readings: [q(), q({ id: 'queue-read-0002', cars_ahead: -3 }), q({ id: 'queue-read-0003', cars_ahead: null, est_wait_min: null })] });
+  assert.deepEqual(up.body, { accepted: ['queue-read-0001'], rejected: ['queue-read-0002', 'queue-read-0003'] });
+  // Got a job: the same reading updated with the actual wait.
+  assert.deepEqual((await call('/api/queue', { device: 'device-aaaaaaaa', readings: [q({ actual_wait_min: 52 })] })).body.accepted, ['queue-read-0001']);
+  assert.deepEqual((await call('/api/queue', { device: 'device-bbbbbbbb', readings: [q({ cars_ahead: 1 })] })).body.rejected, ['queue-read-0001']);
+  const all = await call('/api/queue?since=0');
+  assert.deepEqual(all.body.readings.map((r) => [r.cars_ahead, r.est_wait_min, r.actual_wait_min]), [[45, 38, 52]]);
+  assert.deepEqual(Object.keys(all.body.readings[0]).sort(), ['actual_wait_min', 'cars_ahead', 'est_wait_min', 'id', 'rev', 'ts']);
+  // Separate from the jobs pool and the formula dataset.
+  assert.equal((await call('/api/jobs?since=0')).body.jobs.length, 0);
+  assert.equal((await call('/api/formula?since=0')).body.trips.length, 0);
+  assert.deepEqual((await call('/api/queue/delete', { device: 'device-aaaaaaaa', ids: ['queue-read-0001'] })).body.deleted, ['queue-read-0001']);
+});

@@ -73,6 +73,8 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
 .lab-check .surge-hint { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--warn); font-size: 14px; display: grid; gap: 8px; }
 .lab-check .surge-hint button { justify-self: start; }
 .lab-predict .surge-est { color: var(--warn); }
+.q-open { display: grid; gap: 8px; border-color: var(--accent); }
+.q-open button { min-height: 52px; font-size: 17px; }
 .lab-two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; align-items: end; }
 .lab-predict .v.sm { font-size: 30px; }
 .lab-check { line-height: 1.5; }
