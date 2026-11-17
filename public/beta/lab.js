@@ -6,7 +6,7 @@
 // and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, SURGE_HINT,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -45,6 +45,9 @@ const fromRow = (r) => ({
   id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
   predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, shared: true,
 });
+// Surge or airport: the learned % on top of the normal fare (null for normal trips).
+const liftFor = (kind, ts) => (kind === 'surge' ? surgeLift(dataset(), ts) : kind === 'airport' ? airportLift(dataset(), ts) : null);
+
 // Trip time used for a prediction: what was typed, or the estimate from the km.
 const estimate = () => timeEstimator(withBase(dataset()));
 const printOf = (t) => JSON.stringify(toRow(t));
@@ -138,15 +141,12 @@ export async function buildLab(root) {
       <div class="field"><label for="lab-pickupkm">Km to pickup (optional)</label>
         <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0"></div>
     </div>
-    <div class="row2">
-      <div class="field"><label for="lab-erp">ERP / tolls (S$, if any)</label>
-        <input id="lab-erp" type="number" inputmode="decimal" step="0.01" min="0"></div>
-      <div class="field"><span class="flabel">Pricing</span>
-        <div id="lab-surge" class="seg g2">
-          <button type="button" data-v="normal">Normal</button>
-          <button type="button" data-v="surge">Surge ↑</button>
-        </div></div>
-    </div>
+    <div class="field"><span class="flabel">Pricing</span>
+      <div id="lab-surge" class="seg g3">
+        <button type="button" data-v="normal">Normal</button>
+        <button type="button" data-v="surge">Surge ↑</button>
+        <button type="button" data-v="airport">Airport</button>
+      </div></div>
 
     <div class="lab-predict" aria-live="polite">
       <div class="lab-two">
@@ -182,7 +182,7 @@ export async function buildLab(root) {
     <div id="lab-list" class="stack"></div>
     <button type="button" class="ghost wide" id="lab-export">Export CSV</button>`;
 
-  for (const id of ['lab-km', 'lab-min', 'lab-cardmin', 'lab-pickupkm', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
+  for (const id of ['lab-km', 'lab-min', 'lab-cardmin', 'lab-pickupkm', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
   for (const b of root.querySelectorAll('#lab-surge button')) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
@@ -210,15 +210,15 @@ function renderFormula() {
     : 'From the base trip only (11.58 km, paid S$16.80): it sets the level, more trips sort out the split.';
   $('#lab-formula', lab.root).innerHTML = `
     <div class="k">Grab's published formula (Standard, normal pricing)</div>
-    <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min) + ERP</div>
-    <div class="f">You earn = max(<b>${money(MIN_DRIVER)}</b>, ${(() => { const c = commission(); return c.kind === 'percent+fixed' ? `<b>${(c.keep * 100).toFixed(1)}%</b> × paid ${c.fixed < 0 ? '−' : '+'} <b>${money(Math.abs(c.fixed))}</b>` : `<b>${(c.keep * 100).toFixed(1)}%</b> × paid`; })()}) + ERP</div>
+    <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min)</div>
+    <div class="f">You earn = max(<b>${money(MIN_DRIVER)}</b>, ${(() => { const c = commission(); return c.kind === 'percent+fixed' ? `<b>${(c.keep * 100).toFixed(1)}%</b> × paid ${c.fixed < 0 ? '−' : '+'} <b>${money(Math.abs(c.fixed))}</b>` : `<b>${(c.keep * 100).toFixed(1)}%</b> × paid`; })()})</div>
     <div class="s">${basis} Weights update every time you save a trip.</div>`;
 }
 
 function readForm() {
   const r = lab.root;
   return {
-    km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: num($('#lab-erp', r)) || 0,
+    km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: 0, // ERP is added after the trip starts, not on the job card
     cardMin: num($('#lab-cardmin', r)), pickupKm: num($('#lab-pickupkm', r)), timeSplit: true,
     ts: Date.now(), // the trip's time is when you save it
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
@@ -248,7 +248,7 @@ function update() {
   const c = commission();
   const normalEarn = driverEarns(c, p.fare, f.erp);
   // Surge pressed: normal-price fare plus the learned surge % (starting at +20%).
-  const sl = f.surge === 'surge' ? surgeLift(dataset(), f.ts) : null;
+  const sl = liftFor(f.surge, f.ts);
   const shown = sl ? Math.round(p.fare * (1 + sl.lift) * 100) / 100 : p.fare;
   const earn = sl ? driverEarns(c, shown, f.erp) : normalEarn;
   pred.textContent = money(shown);
@@ -256,8 +256,10 @@ function update() {
   const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
   sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.`;
   const surgeEl = $('#lab-surge-est', r);
+  const kindName = f.surge === 'airport' ? 'airport' : 'surge';
+  const startText = f.surge === 'airport' ? 'No airport trips yet, so no difference is assumed: each airport trip you save shows whether they\'re priced differently.' : 'The +20% is a starting guess: each surge trip you save adjusts it.';
   surgeEl.innerHTML = sl
-    ? `Surge: normal fare <b>${money(p.fare)}</b> ${signed(sl.lift)} = <b>${money(shown)}</b>. ${sl.guess ? 'The +20% is a starting guess: each surge trip you save adjusts it.' : `Learned from ${sl.n} surge trip${sl.n === 1 ? '' : 's'}${sl.near ? `, ${sl.near} around this hour` : ''}; adjusts with every surge trip.`}`
+    ? `${f.surge === 'airport' ? 'Airport' : 'Surge'}: normal fare <b>${money(p.fare)}</b> ${signed(sl.lift)} = <b>${money(shown)}</b>. ${sl.guess ? startText : `Learned from ${sl.n} ${kindName} trip${sl.n === 1 ? '' : 's'}${sl.near ? `, ${sl.near} around this hour` : ''}; adjusts with every ${kindName} trip.`}`
     : '';
 
   // Time of day: how fares near this hour have run against the formula (surge-prone hours).
@@ -317,7 +319,7 @@ async function save() {
   const normalFare = passengerFare(w, f.km, f.min > 0 ? f.min : estimate()(f.km), f.erp).fare;
   // A surge trip's prediction is the normal fare plus the surge % it was shown: the honest test
   // of the surge estimate. The normal-price figure is kept too.
-  const sl = f.surge === 'surge' ? surgeLift(dataset(), f.ts) : null;
+  const sl = liftFor(f.surge, f.ts);
   const predicted = sl ? Math.round(normalFare * (1 + sl.lift) * 100) / 100 : normalFare;
   const c = commission();
   const predictedEarned = driverEarns(c, predicted, f.erp);
@@ -336,7 +338,7 @@ async function save() {
 }
 
 function clearForm(keepMsg) {
-  for (const id of ['lab-km', 'lab-min', 'lab-cardmin', 'lab-pickupkm', 'lab-erp', 'lab-actual', 'lab-earned']) $(`#${id}`, lab.root).value = '';
+  for (const id of ['lab-km', 'lab-min', 'lab-cardmin', 'lab-pickupkm', 'lab-actual', 'lab-earned']) $(`#${id}`, lab.root).value = '';
   lab.surge = 'normal';
   if (keepMsg !== true) $('#lab-msg', lab.root).textContent = '';
   update();
@@ -356,6 +358,9 @@ function renderStats() {
   const surgeTrips = dataset().filter((t) => t.surge === 'surge' && t.actual > 0 && t.predicted > 0).sort((a, b) => a.ts - b.ts);
   const surgeOffs = surgeTrips.slice(-5).map((t) => Math.abs(t.predicted - t.actual));
   const surgeNow = surgeLift(dataset(), Date.now());
+  const airportTrips = dataset().filter((t) => t.surge === 'airport' && t.actual > 0 && t.predicted > 0).sort((a, b) => a.ts - b.ts);
+  const airportOffs = airportTrips.slice(-5).map((t) => Math.abs(t.predicted - t.actual));
+  const airportNow = airportLift(dataset(), Date.now());
   box.innerHTML = `
     <div class="tiles">
       <div class="tile"><span class="v">${money(avg(last5))}</span><span class="k">Paid: off on the last ${last5.length} (predicted before saving)</span></div>
@@ -364,7 +369,8 @@ function renderStats() {
       <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length} / ${normal.length}</span><span class="k">Paid within 10 cents</span></div>
     </div>
     <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips from everyone in the dataset.</p>
-    <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>`;
+    <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>
+    <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs the normal formula, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;
 }
 
 // Fares vs the normal-price formula by 3-hour block: where surge-prone hours show up.
@@ -405,7 +411,7 @@ function renderList() {
     card.className = 'card';
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
-      <div class="meta">${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : ''}</div>
+      <div class="meta">${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}</div>
       <div class="meta">Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})${t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';

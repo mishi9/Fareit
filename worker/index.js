@@ -417,7 +417,7 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   if (!(km >= 0.3 && km <= 100) || !inRange(min, 1, 240) || !(paid >= 2 && paid <= 400)) return null;
   if (!inRange(cardMin, 1, 300) || !inRange(pickupKm, 0, 50)) return null;
   if (!inRange(erp, 0, 50) || !inRange(earned, 0.5, 400) || !inRange(predicted, 0, 1000) || !inRange(predictedEarned, 0, 1000)) return null;
-  if (!['normal', 'surge'].includes(t.surge)) return null;
+  if (!['normal', 'surge', 'airport'].includes(t.surge)) return null;
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),

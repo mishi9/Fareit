@@ -157,3 +157,18 @@ test('surge estimate: how far surge trips ran above the normal formula, near thi
   const w0 = fitWeights(normal, { includeBase: false });
   assert.equal(w.base, w0.base);
 });
+
+test('airport trips: kept out of the normal formula, their difference learned from +0%', async () => {
+  const { airportLift } = await import('../public/beta/formula.js');
+  const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20]].map(([km, min]) => make(km, min));
+  const none = airportLift(normal, Date.now());
+  assert.deepEqual([none.lift, none.guess], [0, true], 'no airport trips: no difference assumed');
+  const airport = [[18, 22], [22, 25], [25, 30]].map(([km, min]) => {
+    const t = make(km, min, { surge: 'airport' });
+    return { ...t, actual: Math.round(t.actual * 1.15 * 100) / 100 };
+  });
+  assert.equal(usable(airport[0]), false, 'not used for the normal formula');
+  const a = airportLift([...normal, ...airport], Date.now());
+  assert.equal(a.n, 3);
+  assert.ok(a.lift > 0.05 && a.lift < 0.15, `lift ${a.lift}`);
+});

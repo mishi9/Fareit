@@ -248,19 +248,23 @@ export function byTimeBlock(trips) {
 // mostly trips near this hour. The guess and the all-hours average each count as one trip, so a
 // single surge trip can't swing it.
 export const SURGE_START = 0.2;
-export function surgeLift(trips, ts) {
+// Airport trips are tracked the same way, to see whether they're priced differently: starting
+// at +0% (no assumption) and learning from airport-tagged trips.
+export const AIRPORT_START = 0;
+export function airportLift(trips, ts) { return surgeLift(trips, ts, 'airport', AIRPORT_START); }
+export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
   const h = hourOf(ts);
   const rs = [];
   for (const t of all) {
-    if (t.surge !== 'surge') continue;
+    if (t.surge !== kind) continue;
     const r = ratioToFormula(t, w, est);
     if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
   }
-  const start = Math.log(1 + SURGE_START);
-  if (!rs.length) return { lift: SURGE_START, n: 0, near: 0, guess: true };
+  const start = Math.log(1 + startLift);
+  if (!rs.length) return { lift: startLift, n: 0, near: 0, guess: true };
   const overall = rs.reduce((s, x) => s + x.r, 0) / rs.length;
   let sw = 0;
   let swr = 0;
