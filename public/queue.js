@@ -56,21 +56,21 @@ export function syncQueue() {
       if (!navigator.onLine) throw new Error('offline');
       const dels = (await db.getKV('queueDeletes')) || [];
       if (dels.length) {
-        const r = await post('../api/queue/delete', { device: q.device, ids: dels.slice(0, 50) });
+        const r = await post('/api/queue/delete', { device: q.device, ids: dels.slice(0, 50) });
         const done = new Set([...(r.deleted || []), ...(r.missing || [])]);
         await db.setKV('queueDeletes', dels.filter((id) => !done.has(id)));
       }
       const todo = q.mine.filter((r) => r.uploaded !== printOf(r));
       for (let i = 0; i < todo.length; i += 50) {
         const batch = todo.slice(i, i + 50);
-        const res = await post('../api/queue', { device: q.device, readings: batch.map(toRow) });
+        const res = await post('/api/queue', { device: q.device, readings: batch.map(toRow) });
         const seen = new Set([...(res.accepted || []), ...(res.rejected || [])]);
         for (const r of batch) if (seen.has(r.id)) r.uploaded = printOf(r);
       }
       if (todo.length) await db.setKV(KEY, q.mine);
       let cursor = (await db.getKV('queueCursor')) || 0;
       for (let page = 0; page < 20; page++) {
-        const res = await fetch(`../api/queue?since=${cursor}`);
+        const res = await fetch(`/api/queue?since=${cursor}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         for (const r of data.readings || []) {

@@ -65,11 +65,16 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
-## Beta
+## Invite-only
 
-Settings → Beta → code `52105` switches the phone to the beta at `/beta/`. It's a code, not security. Once unlocked, opening Fareit goes straight to the beta (marked **BETA** in the header) until Settings → **Leave beta**. The beta shares the same trips, settings and shared pool, so switching loses nothing.
+Agaration is open only to phones you let in. There are no accounts and nothing personal is asked for.
 
-`public/beta/` is a separate copy of the app (own service worker and cache) for testing new features without touching the main version. When a beta feature is ready, copy it into `public/`. Don't raise the database version in `public/beta/db.js`: both versions open the same database.
+- **Testers:** Settings → Owner → Invites → **Make invite link**, then Share it with one person. Opening the link lets that phone in for good. The link then stops working for anyone else, so a forwarded link is useless. On an iPhone the link opens Safari, which shows how to Add to Home Screen; the Home Screen app then lets itself in (Safari and Home Screen apps keep separate storage). The code is shown too, for anyone who already has the app on their Home Screen.
+- **Turning a phone off:** tap **Turn off** next to its invite (twice). That phone is locked out on its next sync and sees the invite screen.
+- **Owner:** on the invite screen or in Settings → Owner, enter the owner code. Owner phones see how the estimate is worked out (formula, Grab's cut, base trip, export) and the Invites list. **Hide the workings** shows what testers see. The code is checked on the server (`OWNER_CODE` secret, default `804613`), at most 10 tries an hour per connection.
+- Turned on by `"vars": { "INVITE_ONLY": "1" }` in `wrangler.jsonc`. Remove it to make the app open again. The server stores only a hash of each phone's key.
+
+The old `/beta/` address now just forwards to the app and clears the old beta's offline copy.
 
 ## Set up
 

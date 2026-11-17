@@ -5,6 +5,8 @@ const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
+import { buildLab, syncLab } from './lab.js';
+import { ready, isOwner, isOwnerPhone, hideWorkings, claimOwner, ownerApi, inviteLink } from './access.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -117,13 +119,14 @@ function renderBadge() {
 
 // ---------- views ----------
 function show(view) {
-  if (!['window', 'reconcile', 'trips', 'settings'].includes(view)) view = 'window';
+  if (!['window', 'reconcile', 'trips', 'lab', 'settings'].includes(view)) view = 'window';
   state.view = view;
   for (const v of $$('.view')) v.hidden = v.id !== `view-${view}`;
   for (const t of $$('.tabs button')) t.classList.toggle('on', t.dataset.view === view);
   if (location.hash !== `#${view}`) history.replaceState(null, '', `#${view}`);
   if (view === 'reconcile') { if (!state.form) renderReconList(); }
   if (view === 'trips') renderTrips();
+  if (view === 'lab') syncLab();
   keepAwake();
 }
 
@@ -200,6 +203,7 @@ function commitKm() {
 }
 
 function resetWindow() {
+  if (!$('#km-track')) return;
   clearTimeout(state.resetTimer);
   state.km = null;
   state.shown = null;
@@ -745,12 +749,7 @@ function buildSettings() {
     settingsMsg('Starting values restored.');
   });
   $('#st-export').addEventListener('click', exportData);
-  // Beta: a code, not real security. Unlocking switches this phone to the beta at /beta/.
-  $('#st-beta').addEventListener('click', () => {
-    if ($('#st-beta-code').value.trim() !== '52105') { settingsMsg('That beta code isn’t right.', true); return; }
-    try { localStorage.setItem('fareit-channel', 'beta'); } catch { /* still open it this once */ }
-    location.href = 'beta/#window';
-  });
+  buildOwner();
   $('#st-import').addEventListener('change', importData);
   let armed = false;
   let disarm;
@@ -866,8 +865,92 @@ async function keepAwake() {
   } catch { /* not supported or refused; the screen may dim */ }
 }
 
+// ---------- owner: workings and invites ----------
+function buildOwner() {
+  const owner = isOwnerPhone();
+  $('#st-owner-unlock').hidden = owner;
+  $('#st-owner-on').hidden = !owner;
+  $('#st-owner-note').textContent = !owner
+    ? 'For the app\'s owner: shows how the estimate is worked out, and lets testers in.'
+    : isOwner() ? 'Owner mode is on: the Est. tab shows how the estimate is worked out.'
+    : 'Owner mode is on, with the workings hidden: you see what testers see.';
+  $('#st-owner-workings').textContent = isOwner() ? 'Hide the workings' : 'Show the workings';
+  $('#st-owner').addEventListener('click', async () => {
+    const btn = $('#st-owner');
+    btn.disabled = true;
+    try { await claimOwner($('#st-owner-code').value); location.reload(); } catch (e) {
+      settingsMsg(e.message, true);
+      btn.disabled = false;
+    }
+  });
+  $('#st-owner-workings').addEventListener('click', () => { hideWorkings(isOwner()); location.reload(); });
+  if (!owner) return;
+
+  let current = '';
+  const when = (ms) => new Date(ms).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' });
+  const list = async () => {
+    const box = $('#st-invites');
+    try {
+      const { invites } = await ownerApi('/api/invites');
+      box.replaceChildren(...invites.map((inv) => {
+        const row = document.createElement('div');
+        row.className = `invite-row${inv.revoked ? ' off' : ''}`;
+        const status = inv.revoked ? 'Turned off' : inv.used_at ? `In use since ${when(inv.used_at)}` : `Not used yet · made ${when(inv.created_at)}`;
+        row.innerHTML = `<div><b></b><div class="note"></div></div>`;
+        row.querySelector('b').textContent = inv.label || inv.token;
+        row.querySelector('.note').textContent = `${inv.label ? `${inv.token} · ` : ''}${status}`;
+        if (!inv.revoked) {
+          const off = document.createElement('button');
+          off.type = 'button';
+          off.className = 'ghost small';
+          off.textContent = inv.used_at ? 'Turn off' : 'Cancel';
+          let armed = false;
+          off.addEventListener('click', async () => {
+            if (!armed) { armed = true; off.textContent = 'Tap again'; setTimeout(() => { armed = false; off.textContent = inv.used_at ? 'Turn off' : 'Cancel'; }, 4000); return; }
+            try { await ownerApi('/api/invites/revoke', { token: inv.token }); list(); } catch (e) { settingsMsg(e.message, true); }
+          });
+          row.append(off);
+        }
+        return row;
+      }));
+      if (!invites.length) box.innerHTML = '<p class="note">No invites yet.</p>';
+    } catch (e) {
+      box.innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'note';
+      p.textContent = navigator.onLine ? e.message : 'Connect to see your invites.';
+      box.append(p);
+    }
+  };
+  $('#st-invite-make').addEventListener('click', async () => {
+    const btn = $('#st-invite-make');
+    btn.disabled = true;
+    try {
+      const { token } = await ownerApi('/api/invites/create', { label: $('#st-invite-label').value });
+      current = inviteLink(token);
+      $('#st-invite-link').textContent = current;
+      $('#st-invite-new').hidden = false;
+      $('#st-invite-label').value = '';
+      list();
+    } catch (e) { settingsMsg(e.message, true); }
+    btn.disabled = false;
+  });
+  const message = () => `You're invited to try Agaration. Open this on your phone (on an iPhone, in Safari): ${current}\nIt works once, on one phone, so please don't share it.`;
+  $('#st-invite-share').addEventListener('click', async () => {
+    if (navigator.share) { try { await navigator.share({ title: 'Agaration invite', text: message() }); return; } catch { return; } }
+    $('#st-invite-copy').click();
+  });
+  $('#st-invite-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(message()); settingsMsg('Copied. Paste it into a chat with them.'); } catch {
+      settingsMsg('Couldn’t copy. Press and hold the link to copy it.', true);
+    }
+  });
+  list();
+}
+
 // ---------- boot ----------
 async function boot() {
+  await ready(); // invite-only: wait until this phone is let in
   const [trips, saved, key, shared, device] = await Promise.all([
     db.allTrips(), db.getKV('settings'), db.getKV('apiKey'), db.allShared(), db.getKV('device'),
   ]);
@@ -893,6 +976,7 @@ async function boot() {
   sizeWindow();
   window.addEventListener('resize', sizeWindow);
   buildWindow();
+  buildLab($('#view-lab'));
   buildReconForm();
   buildSettings();
   for (const t of $$('.tabs button')) t.addEventListener('click', () => { if (t.dataset.view === 'reconcile') state.form = null; show(t.dataset.view); });

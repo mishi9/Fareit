@@ -1,5 +1,5 @@
 // Offline shell: the app opens and predicts with no signal. /api calls always go to the network.
-const CACHE = 'fareit-v13';
+const CACHE = 'agaration-v2';
 const SHELL = [
   './',
   'index.html',
@@ -9,6 +9,11 @@ const SHELL = [
   'places.js',
   'db.js',
   'sync.js',
+  'formula.js',
+  'lab.js',
+  'queue.js',
+  'where.js',
+  'access.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -23,8 +28,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      // Only this app's old caches: the beta's (fareit-beta-…) belong to the beta's worker.
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('fareit-v') && k !== CACHE).map((k) => caches.delete(k))))
+      // Old caches from before the rename (fareit-…) and older Agaration ones.
+      .then((keys) => Promise.all(keys.filter((k) => (k.startsWith('fareit-') || k.startsWith('agaration-')) && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -33,7 +38,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
-  if (url.pathname.startsWith('/beta/')) return; // the beta has its own service worker and cache
+  if (url.pathname.startsWith('/beta/')) return; // the old beta address only redirects here
 
   // Stale-while-revalidate: answer from cache instantly, refresh in the background.
   event.respondWith(

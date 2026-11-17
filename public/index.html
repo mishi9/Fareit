@@ -10,12 +10,20 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Agaration">
-<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <script>
-  // Beta channel: once unlocked in Settings, opening Fareit goes straight to the beta at /beta/.
-  try { if (localStorage.getItem('fareit-channel') === 'beta') location.replace('beta/' + location.hash); } catch (e) {}
+  // The beta is now the main app: forget the old "open the beta" setting.
+  try { localStorage.removeItem('fareit-channel'); } catch (e) {}
+  // Opened from an invite link: Add to Home Screen should open the app with the invite, so the
+  // Home Screen app (which has its own storage on an iPhone) can let itself in.
+  (function () {
+    var m = /[?&]invite=([A-Za-z2-9-]{12,16})/.exec(location.search);
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = m ? '/api/manifest?invite=' + encodeURIComponent(m[1]) : 'manifest.webmanifest';
+    document.head.appendChild(link);
+  })();
 </script>
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="app.js"></script>
@@ -28,7 +36,11 @@
 
 <main>
   <section id="view-window" class="view">
-    <!-- Prediction on top where it's easy to read; every tap sits at the bottom by the thumb. -->
+    <!-- Beta: earnings by distance band, refreshed every minute. The slider is kept hidden for now. -->
+    <div id="band-cards" class="band-cards" aria-live="polite"></div>
+    <button type="button" class="primary wide got-job" id="got-job">Got a job</button>
+    <p class="note" id="got-job-msg" role="status"></p>
+    <div id="old-window" hidden>
     <div id="verdict" class="verdict idle" aria-live="polite"></div>
     <div class="thumb">
       <div id="decide" class="decide" hidden>
@@ -48,6 +60,7 @@
         </div>
         <div class="km-ticks" aria-hidden="true"></div>
       </div>
+    </div>
     </div>
   </section>
 
@@ -118,6 +131,8 @@
 
   <section id="view-trips" class="view stack" hidden></section>
 
+  <section id="view-lab" class="view stack" hidden></section>
+
   <section id="view-settings" class="view" hidden>
     <form id="settings-form" class="stack" novalidate>
       <h2>Shared pool</h2>
@@ -153,14 +168,30 @@
       <input id="st-import" type="file" accept="application/json,.json" hidden>
       <button type="button" class="danger" id="st-clear">Delete all trips</button>
 
-      <h2>Beta</h2>
-      <p class="note">Try features that are still being tested. The beta uses the same trips and shared pool, and you can come back here any time.</p>
-      <div class="row2">
-        <div class="field">
-          <label for="st-beta-code">Beta code</label>
-          <input id="st-beta-code" type="text" inputmode="numeric" autocomplete="off" placeholder="Code">
+      <h2>Owner</h2>
+      <p class="note" id="st-owner-note">For the app's owner: shows how the estimate is worked out, and lets testers in.</p>
+      <div class="row2" id="st-owner-unlock">
+        <div class="field"><label for="st-owner-code">Owner code</label>
+          <input id="st-owner-code" type="text" inputmode="numeric" autocomplete="off" placeholder="Code"></div>
+        <button type="button" class="ghost" id="st-owner">Unlock</button>
+      </div>
+      <div id="st-owner-on" class="stack" hidden>
+        <button type="button" class="ghost" id="st-owner-workings">Hide the workings</button>
+        <h2>Invites</h2>
+        <p class="note">Each link lets one phone in, once. Send it to one person; after it's used it can't let anyone else in.</p>
+        <div class="row2">
+          <div class="field"><label for="st-invite-label">Who it's for (just for you)</label>
+            <input id="st-invite-label" type="text" autocomplete="off" maxlength="40" placeholder="e.g. Ben"></div>
+          <button type="button" class="primary" id="st-invite-make">Make invite link</button>
         </div>
-        <button type="button" class="ghost" id="st-beta">Open beta</button>
+        <div id="st-invite-new" class="invite-new" hidden>
+          <div class="invite-link" id="st-invite-link"></div>
+          <div class="row2">
+            <button type="button" class="primary" id="st-invite-share">Share</button>
+            <button type="button" class="ghost" id="st-invite-copy">Copy</button>
+          </div>
+        </div>
+        <div id="st-invites" class="invite-list"></div>
       </div>
       <p id="st-msg" class="msg" role="status"></p>
     </form>
@@ -169,10 +200,18 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 
+<!-- Beta: the Formula form as a card over the Window, opened by Got a job. -->
+<div id="job-sheet" class="sheet" hidden role="dialog" aria-label="Got a job">
+  <div class="sheet-head"><div><div class="sheet-title">Got a job</div><div class="sheet-sub" id="job-when"></div></div>
+    <button type="button" class="ghost small" id="job-close">Close</button></div>
+  <div id="job-body" class="sheet-body stack"></div>
+</div>
+
 <nav class="tabs">
   <button type="button" data-view="window">Window</button>
   <button type="button" data-view="reconcile">Reconcile<span id="badge" class="badge" hidden></span></button>
   <button type="button" data-view="trips">Trips</button>
+  <button type="button" data-view="lab">Est.</button>
   <button type="button" data-view="settings">Settings</button>
 </nav>
 </body>

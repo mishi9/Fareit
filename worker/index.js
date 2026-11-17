@@ -16,6 +16,17 @@
 //   GET  /api/queue?since=REV                -> { readings, next, more }
 //   POST /api/queue/delete { device, ids }   -> { deleted, missing }
 //
+// Invite-only access (when the INVITE_ONLY variable is "1"): every /api call except the ones
+// below needs a phone's access key in x-agaration-key. A phone gets one by redeeming a one-time
+// invite link, or, for the owner, with the owner code. No names or contact details anywhere.
+//   POST /api/access/redeem { token, device } -> { key, kind }   one-time: an invite works once
+//   POST /api/owner/claim { code, device }    -> { key, kind }   10 tries an hour per connection
+//   GET  /api/access                          -> { ok, kind }    is this phone's key still good
+//   GET  /api/manifest?invite=TOKEN           -> manifest whose start_url carries the invite
+//   POST /api/invites/create { label }        -> { token }       owner only
+//   GET  /api/invites                         -> { invites }     owner only
+//   POST /api/invites/revoke { token }        -> { revoked }     owner only: the invite and its phone
+//
 // No accounts. Each phone sends a random device id so it can correct its own rows and nobody
 // else's. The pool holds no addresses, names or exact places: pickup and drop are rounded to
 // about 1 km and times to 5 minutes before they leave the phone, and again here.
@@ -273,6 +284,17 @@ const SCHEMA = [
     deleted INTEGER
   )`,
   'CREATE INDEX IF NOT EXISTS queue_rev ON airport_queue(rev)',
+  // Invite-only access. An invite is a one-time token; redeeming it gives one phone a key (only
+  // its hash is stored). label is the owner's own note (e.g. "brother"), optional.
+  `CREATE TABLE IF NOT EXISTS invites (
+    token TEXT PRIMARY KEY, label TEXT, created_at INTEGER NOT NULL,
+    used_at INTEGER, used_device TEXT, revoked INTEGER DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS access_keys (
+    key_hash TEXT PRIMARY KEY, device TEXT, kind TEXT NOT NULL, invite TEXT,
+    created_at INTEGER NOT NULL, revoked INTEGER DEFAULT 0
+  )`,
+  'CREATE TABLE IF NOT EXISTS owner_attempts (ip_hash TEXT, at INTEGER)',
 ];
 let schemaReady = null;
 // Pools created before a column existed get it added; on newer ones it's already there.
@@ -697,6 +719,116 @@ async function deleteQueue(request, env) {
   return json({ deleted, missing });
 }
 
+// ---------- invite-only access ----------
+const OPEN_PATHS = new Set(['/api/status', '/api/access/redeem', '/api/owner/claim', '/api/manifest']);
+const TOKEN_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L: easy to read out
+const TOKEN_RE = /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
+const OWNER_TRIES_PER_HOUR = 10;
+
+function randomToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const s = [...bytes].map((b) => TOKEN_CHARS[b % TOKEN_CHARS.length]).join('');
+  return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}`;
+}
+const randomKey = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('');
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Which phone is calling, from its access key: { kind: 'owner' | 'driver', device } or null.
+async function whoIs(request, env) {
+  const key = request.headers.get('x-agaration-key') || '';
+  if (!/^[0-9a-f]{64}$/.test(key) || !env.DB) return null;
+  await ensureSchema(env.DB);
+  const row = await env.DB.prepare('SELECT kind, device, revoked FROM access_keys WHERE key_hash = ?1').bind(await sha256(key)).first();
+  return row && row.revoked !== 1 ? { kind: row.kind, device: row.device } : null;
+}
+
+async function issueKey(env, device, kind, invite) {
+  const key = randomKey();
+  await env.DB.prepare('INSERT INTO access_keys (key_hash, device, kind, invite, created_at, revoked) VALUES (?1, ?2, ?3, ?4, ?5, 0)')
+    .bind(await sha256(key), device, kind, invite, Date.now()).run();
+  return key;
+}
+
+async function redeemInvite(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const token = String(body.token || '').toUpperCase().trim();
+  const device = String(body.device || '');
+  if (!TOKEN_RE.test(token) || !ID_RE.test(device)) return json({ error: 'That invite link isn’t valid.' }, 400);
+  await ensureSchema(env.DB);
+  const inv = await env.DB.prepare('SELECT used_at, used_device, revoked FROM invites WHERE token = ?1').bind(token).first();
+  if (!inv || inv.revoked === 1) return json({ error: 'That invite link isn’t valid. Ask for a new one.' }, 404);
+  if (inv.used_at && inv.used_device !== device) return json({ error: 'That invite has already been used. Ask for a new one.' }, 410);
+  // First use, or the same phone trying again (e.g. the first reply never arrived): one live key.
+  await env.DB.batch([
+    env.DB.prepare('UPDATE invites SET used_at = COALESCE(used_at, ?2), used_device = ?3 WHERE token = ?1').bind(token, Date.now(), device),
+    env.DB.prepare('UPDATE access_keys SET revoked = 1 WHERE invite = ?1').bind(token),
+  ]);
+  return json({ key: await issueKey(env, device, 'driver', token), kind: 'driver' });
+}
+
+async function claimOwner(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  await ensureSchema(env.DB);
+  const ipHash = await hashIp(request, env);
+  const now = Date.now();
+  const tries = await env.DB.prepare('SELECT COUNT(*) AS n FROM owner_attempts WHERE ip_hash = ?1 AND at > ?2').bind(ipHash, now - 3600 * 1000).first();
+  if (Number((tries && tries.n) || 0) >= OWNER_TRIES_PER_HOUR) return json({ error: 'Too many tries. Wait an hour.' }, 429);
+  await env.DB.prepare('INSERT INTO owner_attempts (ip_hash, at) VALUES (?1, ?2)').bind(ipHash, now).run();
+  if (String(body.code || '').trim() !== String(env.OWNER_CODE || '804613')) return json({ error: 'That owner code isn’t right.' }, 403);
+  return json({ key: await issueKey(env, device, 'owner', null), kind: 'owner' });
+}
+
+async function createInvite(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const label = String(body.label || '').trim().slice(0, 40) || null;
+  let token = randomToken();
+  for (let i = 0; i < 3 && await env.DB.prepare('SELECT 1 AS x FROM invites WHERE token = ?1').bind(token).first(); i++) token = randomToken();
+  await env.DB.prepare('INSERT INTO invites (token, label, created_at, revoked) VALUES (?1, ?2, ?3, 0)').bind(token, label, Date.now()).run();
+  return json({ token, label });
+}
+
+async function listInvites(env) {
+  const { results } = await env.DB.prepare(
+    'SELECT token, label, created_at, used_at, revoked FROM invites ORDER BY created_at DESC LIMIT 200',
+  ).all();
+  return json({ invites: results.map((r) => ({ ...r, revoked: r.revoked === 1 })) });
+}
+
+async function revokeInvite(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const token = String(body.token || '').toUpperCase().trim();
+  if (!TOKEN_RE.test(token)) return json({ error: 'Not an invite.' }, 400);
+  await env.DB.batch([
+    env.DB.prepare('UPDATE invites SET revoked = 1 WHERE token = ?1').bind(token),
+    env.DB.prepare('UPDATE access_keys SET revoked = 1 WHERE invite = ?1').bind(token),
+  ]);
+  return json({ revoked: token });
+}
+
+// The Home Screen app opens at start_url, so on an iPhone the invite has to travel in it: the
+// Home Screen app keeps its own storage, separate from Safari, and redeems the invite itself.
+function inviteManifest(url) {
+  const token = String(url.searchParams.get('invite') || '').toUpperCase();
+  const start = TOKEN_RE.test(token) ? `/?invite=${token}#window` : '/#window';
+  return new Response(JSON.stringify({
+    name: 'Agaration', short_name: 'Agaration', start_url: start, scope: '/', display: 'standalone',
+    background_color: '#131615', theme_color: '#131615',
+    icons: [
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+  }), { headers: { 'content-type': 'application/manifest+json', 'cache-control': 'no-store' } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -705,14 +837,41 @@ export default {
     }
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
-    const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete'].includes(url.pathname) && request.method === 'POST';
+    const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
+      '/api/access/redeem', '/api/owner/claim', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
       return json({
         ok: true, map: Boolean(env.ONEMAP_EMAIL && env.ONEMAP_PASSWORD), pool: Boolean(env.DB),
-        keyRequired: Boolean(env.APP_KEY), authorized: authorized(request, env),
+        keyRequired: Boolean(env.APP_KEY), authorized: authorized(request, env), inviteOnly: env.INVITE_ONLY === '1',
       });
+    }
+    if (url.pathname === '/api/manifest') return inviteManifest(url);
+
+    // Invite-only: everything else needs a phone that has been let in.
+    let who = null;
+    if (env.INVITE_ONLY === '1' && !OPEN_PATHS.has(url.pathname)) {
+      if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
+      who = await whoIs(request, env);
+      if (!who) return json({ error: 'Agaration is invite-only. Open your invite link to get in.', locked: true }, 401);
+    }
+    if (url.pathname.startsWith('/api/access/') || url.pathname === '/api/owner/claim' || url.pathname === '/api/access'
+      || url.pathname.startsWith('/api/invites')) {
+      if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
+      try {
+        if (url.pathname === '/api/access/redeem') return await redeemInvite(request, env);
+        if (url.pathname === '/api/owner/claim') return await claimOwner(request, env);
+        if (!who) who = await whoIs(request, env);
+        if (url.pathname === '/api/access') return who ? json({ ok: true, kind: who.kind }) : json({ error: 'Not let in.', locked: true }, 401);
+        if (!who || who.kind !== 'owner') return json({ error: 'Owner only.' }, 403);
+        if (url.pathname === '/api/invites/create') return await createInvite(request, env);
+        if (url.pathname === '/api/invites/revoke') return await revokeInvite(request, env);
+        if (url.pathname === '/api/invites') return await listInvites(env);
+      } catch {
+        return json({ error: 'The database couldn’t be reached.' }, 502);
+      }
+      return json({ error: 'Not found' }, 404);
     }
     if (!authorized(request, env)) return json({ error: 'Access key missing or wrong. Set it in Fareit under Settings.' }, 401);
 

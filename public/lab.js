@@ -17,8 +17,8 @@ const KEY = 'formulaLab';
 
 // The owner sees how the estimate is worked out (the formula, Grab's cut rule, the base trip,
 // the raw surge %); testers see the estimates. A code in Settings, not real security.
-export const OWNER_CODE = '804613';
-export const isOwner = () => { try { return localStorage.getItem('agaration-owner') === '1'; } catch { return false; } };
+import { isOwner } from './access.js';
+export { isOwner };
 // The form can sit in the Formula tab or in the Got a job card, so look it up anywhere.
 const $ = (s, root = document) => root.querySelector(s) || document.querySelector(s);
 const money = (n) => `S$${Number(n).toFixed(2)}`;
@@ -86,7 +86,7 @@ export function syncLab() {
       // deletions waiting from earlier
       const dels = (await db.getKV('formulaDeletes')) || [];
       if (dels.length) {
-        const r = await post('../api/formula/delete', { device: lab.device, ids: dels.slice(0, 50) });
+        const r = await post('/api/formula/delete', { device: lab.device, ids: dels.slice(0, 50) });
         const done = new Set([...(r.deleted || []), ...(r.missing || [])]);
         await db.setKV('formulaDeletes', dels.filter((id) => !done.has(id)));
       }
@@ -94,7 +94,7 @@ export function syncLab() {
       const todo = lab.trips.filter((t) => t.uploaded !== printOf(t));
       for (let i = 0; i < todo.length; i += 50) {
         const batch = todo.slice(i, i + 50);
-        const r = await post('../api/formula', { device: lab.device, trips: batch.map(toRow) });
+        const r = await post('/api/formula', { device: lab.device, trips: batch.map(toRow) });
         const seen = new Set([...(r.accepted || []), ...(r.rejected || [])]);
         for (const t of batch) if (seen.has(t.id)) t.uploaded = printOf(t);
       }
@@ -102,7 +102,7 @@ export function syncLab() {
       // everyone's trips since last time
       let cursor = (await db.getKV('formulaCursor')) || 0;
       for (let page = 0; page < 20; page++) {
-        const res = await fetch(`../api/formula?since=${cursor}`);
+        const res = await fetch(`/api/formula?since=${cursor}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         for (const r of data.trips || []) {
@@ -239,7 +239,7 @@ function areaName(p) {
   const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
   if (key in areaCache) return areaCache[key];
   areaCache[key] = null;
-  fetch(`../api/area?at=${key}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+  fetch(`/api/area?at=${key}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
     if (d && d.area) { areaCache[key] = d.area; renderBands(); }
   }).catch(() => {});
   return null;
@@ -502,13 +502,13 @@ async function routeTo(text) {
   try {
     let dest = findArea(text);
     if (!dest) {
-      const res = await fetch(`../api/search?q=${encodeURIComponent(text)}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(text)}`);
       const data = res.ok ? await res.json() : null;
       const r = data && data.results && data.results[0];
       if (!r) { done({ error: `Couldn't find “${text}”. Try a postal code or an area name.` }); return; }
       dest = { label: r.label, lat: r.lat, lng: r.lng };
     }
-    const res = await fetch(`../api/route?from=${from.lat.toFixed(5)},${from.lng.toFixed(5)}&to=${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}`);
+    const res = await fetch(`/api/route?from=${from.lat.toFixed(5)},${from.lng.toFixed(5)}&to=${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}`);
     const route = res.ok ? await res.json() : null;
     if (!route || !(route.km > 0)) { done({ error: 'Couldn\'t get the road distance right now. Type the km instead.' }); return; }
     done({ label: dest.label, km: route.km, min: route.min });

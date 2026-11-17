@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, usable, cutOf, toCsv, SEED, BASE_TRIPS, MIN_PASSENGER,
-} from '../public/beta/formula.js';
+} from '../public/formula.js';
 
 test('the base trip from Grab\'s job details: paid S$16.80, earned S$12.10, Grab keeps S$4.70', () => {
   const b = BASE_TRIPS[0];
@@ -68,7 +68,7 @@ test('CSV export matches the research dataset columns and leaves out the base tr
 });
 
 test('time of day: how fares near an hour ran against the formula, surge trips included', async () => {
-  const { timeOfDay, byTimeBlock } = await import('../public/beta/formula.js');
+  const { timeOfDay, byTimeBlock } = await import('../public/formula.js');
   const at = (iso) => Date.parse(iso);
   // Normal midday trips teach the formula; evening surge trips paid 30% over it.
   const midday = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14], [18, 35], [25, 30], [40, 50], [3, 9]]
@@ -91,7 +91,7 @@ test('time of day: how fares near an hour ran against the formula, surge trips i
 });
 
 test('low-cut trips (Grab keeps almost nothing) are counted apart, not fitted into the usual cut', async () => {
-  const { isLowCut } = await import('../public/beta/formula.js');
+  const { isLowCut } = await import('../public/formula.js');
   // The real trips from 17 Nov (base trip built in). #7: S$23.90 paid, S$23.80 earned.
   const real = [[17.76, 16, 17, 12.3], [3.93, 15, 11.43, 7.5], [10.77, 17, 18.7, 13.3], [12.39, 24, 16, 11.2], [2.38, 12, 10.82, 7.3], [20.34, 34, 23.9, 23.8]]
     .map(([km, min, actual, earned]) => ({ ts: Date.now(), km, min, erp: 0, surge: 'normal', actual, earned }));
@@ -104,7 +104,7 @@ test('low-cut trips (Grab keeps almost nothing) are counted apart, not fitted in
 });
 
 test('trip time: the job card total (which includes the way to the pickup) is never used as trip time', async () => {
-  const { timeEstimator, tripTime } = await import('../public/beta/formula.js');
+  const { timeEstimator, tripTime } = await import('../public/formula.js');
   const cardOnly = { km: 20.6, min: null, cardMin: 32, pickupKm: 0.92, surge: 'normal', actual: 25, ts: Date.now() };
   const est = timeEstimator([]);
   assert.equal(tripTime(cardOnly, est), est(20.6), 'estimated from km, not the card total of 32');
@@ -120,7 +120,7 @@ test('trip time: the job card total (which includes the way to the pickup) is ne
 });
 
 test('a driver never earns less than S$6.20, and trips at that floor stay out of the cut rule', async () => {
-  const { MIN_DRIVER } = await import('../public/beta/formula.js');
+  const { MIN_DRIVER } = await import('../public/formula.js');
   assert.equal(MIN_DRIVER, 6.2);
   const rule = { keep: 0.768, fixed: -1.02 };
   assert.equal(driverEarns(rule, 8.1), 6.2, 'minimum-fare trip: rule gives 5.20, floor lifts it');
@@ -131,7 +131,7 @@ test('a driver never earns less than S$6.20, and trips at that floor stay out of
 });
 
 test('surge estimate: how far surge trips ran above the normal formula, near this hour first', async () => {
-  const { surgeLift } = await import('../public/beta/formula.js');
+  const { surgeLift } = await import('../public/formula.js');
   const at = (iso) => Date.parse(iso);
   const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
     .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
@@ -159,7 +159,7 @@ test('surge estimate: how far surge trips ran above the normal formula, near thi
 });
 
 test('airport trips: kept out of the normal formula, their difference learned from +0%', async () => {
-  const { airportLift } = await import('../public/beta/formula.js');
+  const { airportLift } = await import('../public/formula.js');
   const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20]].map(([km, min]) => make(km, min));
   const none = airportLift(normal, Date.now());
   assert.deepEqual([none.lift, none.guess], [0, true], 'no airport trips: no difference assumed');
@@ -174,7 +174,7 @@ test('airport trips: kept out of the normal formula, their difference learned fr
 });
 
 test('airport queue summary: readings around this hour, from all drivers', async () => {
-  const { queueSummary } = await import('../public/beta/queue.js');
+  const { queueSummary } = await import('../public/queue.js');
   const at = (iso) => Date.parse(iso);
   const readings = [
     { ts: at('2026-11-17T02:10:00+08:00'), cars: 40, est: 35, actual: 50 },
@@ -187,7 +187,7 @@ test('airport queue summary: readings around this hour, from all drivers', async
 });
 
 test('beta Window bands: normal, surge and now earnings for < 10, 10–20 and > 20 km', async () => {
-  const { bandOutlook } = await import('../public/beta/formula.js');
+  const { bandOutlook } = await import('../public/formula.js');
   const at = (iso) => Date.parse(iso);
   const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
     .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
@@ -217,7 +217,7 @@ test('beta Window bands: normal, surge and now earnings for < 10, 10–20 and > 
 
 test('airport zone: Changi terminals and holding areas, not Changi Business Park or Tampines', async () => {
   globalThis.navigator ??= {};
-  const { atAirport, rounded } = await import('../public/beta/where.js');
+  const { atAirport, rounded } = await import('../public/where.js');
   assert.equal(atAirport({ lat: 1.3603, lng: 103.9894 }), true, 'Jewel');
   assert.equal(atAirport({ lat: 1.3480, lng: 103.9870 }), true, 'between T2 and T4');
   assert.equal(atAirport({ lat: 1.3340, lng: 103.9630 }), false, 'Changi Business Park');
@@ -227,7 +227,7 @@ test('airport zone: Changi terminals and holding areas, not Changi Business Park
 });
 
 test('Window bands use trips near you around this hour, else all areas', async () => {
-  const { bandOutlook } = await import('../public/beta/formula.js');
+  const { bandOutlook } = await import('../public/formula.js');
   const at = (iso) => Date.parse(iso);
   const TAMPINES = { lat: 1.353, lng: 103.945 };
   const ORCHARD = { lat: 1.304, lng: 103.832 };
@@ -254,7 +254,7 @@ test('Window bands use trips near you around this hour, else all areas', async (
 });
 
 test('quick Got a job entries (km + earnings only) move "now" for the area, not the formula', async () => {
-  const { bandOutlook, latestJob } = await import('../public/beta/formula.js');
+  const { bandOutlook, latestJob } = await import('../public/formula.js');
   const at = (iso) => Date.parse(iso);
   const TAMPINES = { lat: 1.353, lng: 103.945 };
   const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
@@ -279,7 +279,7 @@ test('quick Got a job entries (km + earnings only) move "now" for the area, not 
 });
 
 test('each Window band leans on trips of its own distance', async () => {
-  const { bandOutlook } = await import('../public/beta/formula.js');
+  const { bandOutlook } = await import('../public/formula.js');
   const at = (iso) => Date.parse(iso);
   const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
     .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
@@ -298,7 +298,7 @@ test('each Window band leans on trips of its own distance', async () => {
 });
 
 test('remembered results equal fresh ones, and a new trip is always taken into account', async () => {
-  const { looError, timeEstimator, LOO_MAX } = await import('../public/beta/formula.js');
+  const { looError, timeEstimator, LOO_MAX } = await import('../public/formula.js');
   const trips = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20]].map(([km, min]) => make(km, min));
   const a = fitWeights(trips);
   const b = fitWeights(trips);
@@ -315,7 +315,7 @@ test('remembered results equal fresh ones, and a new trip is always taken into a
 });
 
 test('speed: 3,000 trips stay quick once remembered', async () => {
-  const { bandOutlook, looError } = await import('../public/beta/formula.js');
+  const { bandOutlook, looError } = await import('../public/formula.js');
   const now = Date.parse('2026-11-22T02:00:00+08:00');
   const many = Array.from({ length: 3000 }, (_, i) => {
     const km = 2 + (i % 35);
