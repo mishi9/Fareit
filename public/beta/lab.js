@@ -262,20 +262,29 @@ function update() {
     tod.textContent = `Around ${at}: fares have run ${signed(t.lift)} vs the formula (${t.near} trip${t.near === 1 ? '' : 's'} within 1½ h${t.surgeNear ? `, ${t.surgeNear} surge` : ''}). With that, about ${money(likely)}.`;
   }
 
-  const lines = [];
-  if (f.actual > 0) {
-    const off = p.fare - f.actual;
-    lines.push(`<span class="${Math.abs(off) <= 0.5 ? 'good' : 'bad'}">Paid: formula ${offText(p.fare, f.actual)} (${pct(Math.abs(off) / f.actual)}).</span>`);
-  }
-  if (f.earned > 0) {
-    const off = earn - f.earned;
-    lines.push(`<span class="${Math.abs(off) <= 0.5 ? 'good' : 'bad'}">Earned: prediction ${offText(earn, f.earned)} (${pct(Math.abs(off) / f.earned)}).</span>`);
-  }
+  // Formula vs actual, in words: Close (within 5%), Off (5–15%), Far off (over 15%).
+  const rows = [];
+  const row = (label, formula, actual) => {
+    const off = formula - actual;
+    const rel = Math.abs(off) / actual;
+    const grade = rel <= 0.05 ? ['close', 'Close'] : rel <= 0.15 ? ['off', 'Off'] : ['far', 'Far off'];
+    const diff = Math.abs(off) < 0.005 ? 'Exact' : `${money(Math.abs(off))} too ${off > 0 ? 'high' : 'low'} (${(rel * 100).toFixed(0)}%)`;
+    rows.push(`<div class="r"><span class="l">${label}</span><span>${money(formula)}</span><span>${money(actual)}</span><span class="d ${grade[0]}">${diff}<b>${grade[1]}</b></span></div>`);
+  };
+  if (f.actual > 0) row('Passenger paid', p.fare, f.actual);
+  if (f.earned > 0) row('You earned', earn, f.earned);
+  if (!rows.length) { check.innerHTML = ''; return; }
+  let kept = '';
   if (f.actual > 0 && f.earned > 0) {
     const cut = cutOf(f);
-    lines.push(`Grab kept ${money(cut.cut)} (${pct(cut.rate)} of what the passenger paid).${cut.rate < 0.15 ? ' <b>Low-cut trip:</b> counted separately, not in the usual rule.' : ''}`);
+    kept = `<div class="kept">Grab kept <b>${money(cut.cut)}</b> (${pct(cut.rate)} of what the passenger paid).${cut.rate < 0.15 ? ' <b>Low-cut trip:</b> counted separately, not in the usual rule.' : ''}</div>`;
   }
-  check.innerHTML = lines.join('<br>');
+  check.innerHTML = `
+    <div class="cmp">
+      <div class="r h"><span></span><span>Formula</span><span>Actual</span><span>Difference</span></div>
+      ${rows.join('')}
+    </div>${kept}
+    <div class="key"><span class="close">Close</span> within 5% · <span class="off">Off</span> 5–15% · <span class="far">Far off</span> over 15%</div>`;
 }
 
 async function save() {

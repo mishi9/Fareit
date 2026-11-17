@@ -58,8 +58,18 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
 .lab-predict { border: 2px solid var(--accent); border-radius: 16px; padding: 14px 16px; display: grid; gap: 4px; background: var(--surface); }
 .lab-predict .v { font-family: var(--display); font-weight: 800; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
 .lab-check { font-size: 15px; min-height: 20px; }
-.lab-check .good { color: var(--go); font-weight: 700; }
-.lab-check .bad { color: var(--stop); font-weight: 700; }
+.lab-check .cmp { display: grid; gap: 4px; }
+.lab-check .r { display: grid; grid-template-columns: 1.15fr 0.8fr 0.8fr 1.45fr; gap: 6px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; font-variant-numeric: tabular-nums; }
+.lab-check .r.h { background: none; border: 0; padding: 0 10px; font-size: 12px; color: var(--muted); }
+.lab-check .r .l { font-weight: 700; }
+.lab-check .d { display: grid; gap: 2px; font-size: 13px; }
+.lab-check .d b { font-size: 13px; }
+.lab-check .close { color: var(--go); }
+.lab-check .off { color: var(--warn); }
+.lab-check .far { color: var(--stop); }
+.lab-check .kept { margin-top: 8px; font-size: 14px; }
+.lab-check .key { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.lab-check .key span { font-weight: 700; }
 .lab-two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; align-items: end; }
 .lab-predict .v.sm { font-size: 30px; }
 .lab-check { line-height: 1.5; }
