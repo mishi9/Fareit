@@ -14,6 +14,11 @@ import {
 } from './formula.js';
 
 const KEY = 'formulaLab';
+
+// The owner sees how the estimate is worked out (the formula, Grab's cut rule, the base trip,
+// the raw surge %); testers see the estimates. A code in Settings, not real security.
+export const OWNER_CODE = '804613';
+export const isOwner = () => { try { return localStorage.getItem('agaration-owner') === '1'; } catch { return false; } };
 // The form can sit in the Formula tab or in the Got a job card, so look it up anywhere.
 const $ = (s, root = document) => root.querySelector(s) || document.querySelector(s);
 const money = (n) => `S$${Number(n).toFixed(2)}`;
@@ -111,9 +116,9 @@ export function syncLab() {
       await db.setKV('formulaShared', lab.shared);
       await db.setKV('formulaCursor', cursor);
       const waiting = lab.trips.filter((t) => t.uploaded !== printOf(t)).length;
-      lab.syncNote = waiting ? `${waiting} trip${waiting === 1 ? '' : 's'} waiting to upload.` : `Synced with the formula dataset at ${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: false })}.`;
+      lab.syncNote = waiting ? `${waiting} trip${waiting === 1 ? '' : 's'} waiting to upload.` : `Synced at ${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: false })}.`;
     } catch {
-      lab.syncNote = 'Couldn’t reach the formula dataset. Your trips are kept here and will upload later.';
+      lab.syncNote = 'Couldn’t reach the server. Your trips are kept here and will upload later.';
     } finally {
       syncing = null;
       if (lab.root) renderAll();
@@ -194,7 +199,7 @@ export async function buildLab(root) {
     <div id="lab-stats"></div>
     <h2>By time of day</h2>
     <div id="lab-tod-table"></div>
-    <h2>Grab's cut</h2>
+    <h2 id="lab-cut-h">Grab's cut</h2>
     <div id="lab-cut"></div>
     <h2>Your trips</h2>
     <p class="note" id="lab-sync"></p>
@@ -272,7 +277,7 @@ export function renderBands() {
         <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)} <span class="band-km">(about ${Math.round(b.km)} km)</span></div>
         <div class="band-km">${b.inBandNear ? `From ${b.inBandNear} trip${b.inBandNear === 1 ? '' : 's'} in this range${loc ? ' near you' : ''} around this hour.` : 'No trips in this range near now: following the overall picture.'}</div>
       </div>`).join('')}
-    <p class="note band-note">Grey: normal for now. Green: fares here at this hour have been running 10% or more above normal. Red: 10% or more below. Learns from every trip saved in the Formula tab.</p>`;
+    <p class="note band-note">Grey: normal for now. Green: fares here at this hour have been running 10% or more above normal. Red: 10% or more below. Learns from every trip saved, from Got a job or the Est. tab.</p>`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
 
@@ -286,6 +291,9 @@ function renderAll() {
 }
 
 function renderFormula() {
+  const card = $('#lab-formula', lab.root);
+  card.hidden = !isOwner();
+  if (card.hidden) return;
   const w = weights();
   const learned = w.n - BASE_TRIPS.length;
   const others = Object.keys(lab.shared).filter((id) => !lab.trips.some((t) => t.id === id)).length;
@@ -339,11 +347,13 @@ function update() {
   pred.textContent = money(shown);
   predEarn.textContent = money(earn);
   const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
-  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.`;
+  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}${isOwner() ? `Normal-price formula. ${cutLabel}.` : 'Normal price, no surge.'}`;
   const surgeEl = $('#lab-surge-est', r);
   const kindName = f.surge === 'airport' ? 'airport' : 'surge';
   const startText = f.surge === 'airport' ? 'No airport trips yet, so no difference is assumed: each airport trip you save shows whether they\'re priced differently.' : 'The +20% is a starting guess: each surge trip you save adjusts it.';
-  surgeEl.innerHTML = sl
+  surgeEl.innerHTML = sl && !isOwner()
+    ? `${f.surge === 'airport' ? 'Airport' : 'Surge'} estimate: <b>${money(shown)}</b> (normal ${money(p.fare)}). ${sl.guess ? 'A starting guess for now: it learns from every ' + kindName + ' trip saved.' : `Learned from ${sl.n} ${kindName} trip${sl.n === 1 ? '' : 's'}.`}`
+    : sl
     ? `${f.surge === 'airport' ? 'Airport' : 'Surge'}: normal fare <b>${money(p.fare)}</b> ${signed(sl.lift)} = <b>${money(shown)}</b>. ${sl.guess ? startText : `Learned from ${sl.n} ${kindName} trip${sl.n === 1 ? '' : 's'}${sl.near ? `, ${sl.near} around this hour` : ''}; adjusts with every ${kindName} trip.`}`
     : '';
 
@@ -355,7 +365,7 @@ function update() {
     tod.textContent = `Around ${at}: no trips near this hour yet.`;
   } else {
     const likely = Math.round(p.fare * (1 + t.lift) * 100) / 100;
-    tod.textContent = `Around ${at}: fares have run ${signed(t.lift)} vs the formula (${t.near} trip${t.near === 1 ? '' : 's'} within 1½ h${t.surgeNear ? `, ${t.surgeNear} surge` : ''}). With that, about ${money(likely)}.`;
+    tod.textContent = `Around ${at}: fares have run ${signed(t.lift)} vs normal (${t.near} trip${t.near === 1 ? '' : 's'} within 1½ h${t.surgeNear ? `, ${t.surgeNear} surge` : ''}). With that, about ${money(likely)}.`;
   }
   // The prediction card in the Window's colours: green for surge or a busy hour (10%+ above
   // normal), red for a slow hour (10%+ below), grey otherwise.
@@ -380,7 +390,7 @@ function update() {
   if (f.actual > 0 && f.surge === 'normal') {
     const above = (f.actual - p.fare) / p.fare;
     if (above >= SURGE_HINT) {
-      hint = `<div class="surge-hint">This paid <b>${(above * 100).toFixed(0)}% above</b> the normal formula. Was it surge? An untagged surge trip pulls the normal rates up.
+      hint = `<div class="surge-hint">This paid <b>${(above * 100).toFixed(0)}% above</b> the normal estimate. Did the job card show the green ↑? If not, keep it Normal: it'll count as a busy time or area instead.
         <button type="button" class="ghost small" data-act="mark-surge">Mark as surge</button></div>`;
     }
   }
@@ -391,7 +401,7 @@ function update() {
   }
   check.innerHTML = `
     <div class="cmp">
-      <div class="r h"><span></span><span>Formula</span><span>Actual</span><span>Difference</span></div>
+      <div class="r h"><span></span><span>Estimate</span><span>Actual</span><span>Difference</span></div>
       ${rows.join('')}
     </div>${kept}
     <div class="key"><span class="close">Close</span> within 5% · <span class="off">Off</span> 5–15% · <span class="far">Far off</span> over 15%</div>${hint}`;
@@ -425,7 +435,7 @@ async function save() {
   await db.setKV(KEY, lab.trips);
   syncLab();
   msg.classList.remove('err');
-  msg.textContent = `Saved. Paid: formula ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Formula updated.`;
+  msg.textContent = `Saved. Paid: estimate ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Estimates updated.`;
   lab.pending = null;
   clearForm(true);
   renderAll();
@@ -458,7 +468,7 @@ function buildQuick() {
     <div class="lab-check" id="qj-check"></div>
     <p class="msg" id="qj-msg" role="status"></p>
     <button type="button" class="primary wide" id="qj-save">Save job</button>
-    <p class="note">Only km and earnings: this updates the Window now. To also teach the formula, add the passenger fare in the Formula tab.</p>`;
+    <p class="note">Only km and earnings: this updates the Window now. To also sharpen the estimates, add the passenger fare in the Est. tab.</p>`;
   body.querySelector('#qj-km').addEventListener('input', onTripInput);
   body.querySelector('#qj-earned').addEventListener('input', quickUpdate);
   for (const b of body.querySelectorAll('#qj-surge button')) b.addEventListener('click', () => { quick.surge = b.dataset.v; quickUpdate(); });
@@ -607,7 +617,7 @@ const avg = (xs) => xs.reduce((s, v) => s + v, 0) / xs.length;
 function renderStats() {
   const box = $('#lab-stats', lab.root);
   const normal = dataset().filter((t) => t.surge === 'normal' && t.actual > 0 && t.predicted > 0).sort((a, b) => a.ts - b.ts);
-  if (!normal.length) { box.innerHTML = '<p class="note">Save a few normal trips. Each one is predicted before it teaches the formula, so this shows how close the guesses are getting.</p>'; return; }
+  if (!normal.length) { box.innerHTML = '<p class="note">Save a few normal trips. Each one is estimated before it is learned from, so this shows how close the estimates are getting.</p>'; return; }
   const offs = normal.map((t) => Math.abs(t.predicted - t.actual));
   const last5 = offs.slice(-5);
   const earnOffs = normal.filter((t) => t.earned > 0 && t.predictedEarned > 0).map((t) => Math.abs(t.predictedEarned - t.earned));
@@ -623,13 +633,13 @@ function renderStats() {
     <div class="tiles">
       <div class="tile"><span class="v">${money(avg(last5))}</span><span class="k">Paid: off on the last ${last5.length} (predicted before saving)</span></div>
       <div class="tile"><span class="v">${earnLast5.length ? money(avg(earnLast5)) : '—'}</span><span class="k">Earned: off on the last ${earnLast5.length || ''} (predicted before saving)</span></div>
-      <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Paid: off with today's formula${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
+      <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Paid: off with today's estimate${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
       <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length} / ${normal.length}</span><span class="k">Paid within 10 cents</span></div>
     </div>
-    <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they teach the formula)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on the Window)` : ''}.`; })()}</p>
-    <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips from everyone in the dataset.</p>
+    <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they sharpen the estimates)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on the Window)` : ''}.`; })()}</p>
+    <p class="note">"Off with today's estimate" estimates each trip from all the others: the honest test of the estimates as they stand. Normal trips from every driver.</p>
     <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>
-    <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs the normal formula, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;
+    <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs normal, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;
 }
 
 // Fares vs the normal-price formula by 3-hour block: where surge-prone hours show up.
@@ -637,7 +647,7 @@ function renderTimeTable() {
   const box = $('#lab-tod-table', lab.root);
   const rows = byTimeBlock(dataset()).filter((b) => b.n);
   box.innerHTML = `
-    <p class="note">How real fares ran against the normal-price formula, by booking time. Surge trips are included, so busy hours show up here.</p>
+    <p class="note">How real fares ran against normal prices, by time of day. Surge trips are included, so busy hours show up here.</p>
     <div class="lab-table">${rows.map((b) => `
       <div class="row"><span>${pad(b.from)}:00–${pad(b.to % 24)}:00</span><span class="${b.lift > 0.05 ? 'up' : b.lift < -0.05 ? 'down' : ''}">${signed(b.lift)}</span><span>${b.n} trip${b.n === 1 ? '' : 's'}${b.surge ? `, ${b.surge} surge` : ''}</span></div>`).join('')}
     </div>`;
@@ -645,6 +655,10 @@ function renderTimeTable() {
 
 function renderCut() {
   const box = $('#lab-cut', lab.root);
+  box.hidden = !isOwner();
+  const head = $('#lab-cut-h', lab.root);
+  if (head) head.hidden = box.hidden;
+  if (box.hidden) return;
   const c = commission();
   const verdict = c.kind === 'flat'
     ? `Looks like a flat <b>${pct(c.avgRate)}</b> of what the passenger paid.`
@@ -661,7 +675,7 @@ function renderCut() {
 
 function renderList() {
   renderCut();
-  $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload to the formula dataset (separate from the shared jobs pool) so every tester learns from them.';
+  $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload so every driver\'s estimates learn from them.';
   const box = $('#lab-list', lab.root);
   box.innerHTML = lab.trips.length ? '' : '<p class="empty">No trips of yours yet.</p>';
   for (const t of [...lab.trips].reverse()) {
@@ -671,7 +685,7 @@ function renderList() {
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
       <div class="meta">${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}</div>
-      <div class="meta">${t.quick ? `Quick entry from Got a job: earned ${money(t.earned)}${t.predictedEarned ? ` (normal about ${money(t.predictedEarned)})` : ''}. Add the passenger fare in a full entry to teach the formula.` : ''}${t.quick ? '' : `Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})`}${!t.quick && t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
+      <div class="meta">${t.quick ? `Quick entry from Got a job: earned ${money(t.earned)}${t.predictedEarned ? ` (normal about ${money(t.predictedEarned)})` : ''}. Add the passenger fare in a full entry to sharpen the estimates.` : ''}${t.quick ? '' : `Paid: estimate said ${money(t.predicted)} (${offText(t.predicted, t.actual)})`}${!t.quick && t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     let armed = false;
@@ -695,7 +709,9 @@ function renderList() {
     card.append(acts);
     box.append(card);
   }
-  box.append(baseCard());
+  if (isOwner()) box.append(baseCard());
+  const exp = $('#lab-export', lab.root);
+  if (exp) exp.hidden = !isOwner();
 }
 
 // The built-in base trip, listed last so it's clear where the starting weights came from.
@@ -711,7 +727,7 @@ function baseCard() {
 }
 
 async function exportCsv() {
-  const name = `fareit-formula-${new Date().toISOString().slice(0, 10)}.csv`;
+  const name = `agaration-trips-${new Date().toISOString().slice(0, 10)}.csv`;
   const file = new File([toCsv(dataset())], name, { type: 'text/csv' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file], title: name }); return; } catch { /* fall back to download */ }

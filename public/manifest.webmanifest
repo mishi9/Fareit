@@ -1,6 +1,6 @@
 {
-  "name": "Fareit",
-  "short_name": "Fareit",
+  "name": "Agaration",
+  "short_name": "Agaration",
   "description": "Two-tap fare copilot for the 8-second job window.",
   "start_url": "./#window",
   "scope": "./",

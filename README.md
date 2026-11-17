@@ -1,4 +1,4 @@
-# Fareit
+# Agaration (formerly Fareit)
 
 A fare copilot for Grab drivers in Singapore. It runs as a PWA on your second mounted phone. When a job card appears, you tap the trip distance band. Fareit shows the predicted take-home fare and whether surge is likely where you are right now, while Cancel is still available. After the trip you add the real fare, and every reconciled trip makes the next prediction more accurate.
 

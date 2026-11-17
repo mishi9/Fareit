@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Fareit beta</title>
+<title>Agaration beta</title>
 <meta name="description" content="Two-tap fare copilot for the 8-second job window.">
 <meta name="theme-color" content="#131615">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Fareit">
+<meta name="apple-mobile-web-app-title" content="Agaration">
 <link rel="manifest" href="../manifest.webmanifest">
 <link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
@@ -22,7 +22,7 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand">Fareit <span class="beta-tag">BETA</span></div>
+  <div class="brand">Agaration <span class="beta-tag">BETA</span></div>
   <div id="status" class="chip">Starting</div>
 </header>
 
@@ -77,7 +77,7 @@
       <div class="field">
         <label for="rf-drop">Drop-off <small>(optional)</small></label>
         <input id="rf-drop" autocomplete="off" autocapitalize="words" placeholder="Address, postal code or area">
-        <div class="hint">With a drop-off, Fareit gets the road distance from OneMap. Without one, it uses the trip km below, or your band.</div>
+        <div class="hint">With a drop-off, Agaration gets the road distance from OneMap. Without one, it uses the trip km below, or your band.</div>
         <div class="suggest" id="rf-drop-s"></div>
       </div>
       <div class="field">
@@ -148,7 +148,7 @@
       <h2>Server</h2>
       <div class="field">
         <label for="st-key">Access key</label>
-        <input id="st-key" type="password" autocomplete="off" placeholder="Only if your Fareit server asks for one">
+        <input id="st-key" type="password" autocomplete="off" placeholder="Only if your server asks for one">
       </div>
 
       <h2>Your data</h2>
@@ -163,6 +163,15 @@
       <h2>Beta</h2>
       <p class="note">You're using the beta. It shares your trips and the shared pool with the main version.</p>
       <button type="button" class="ghost" id="st-beta-leave">Leave beta</button>
+
+      <h2>Owner</h2>
+      <p class="note" id="st-owner-note">For the app's owner: shows how the estimate is worked out.</p>
+      <div class="row2" id="st-owner-unlock">
+        <div class="field"><label for="st-owner-code">Owner code</label>
+          <input id="st-owner-code" type="text" inputmode="numeric" autocomplete="off" placeholder="Code"></div>
+        <button type="button" class="ghost" id="st-owner">Unlock</button>
+      </div>
+      <button type="button" class="ghost" id="st-owner-lock" hidden>Hide the workings again</button>
       <p id="st-msg" class="msg" role="status"></p>
     </form>
   </section>
@@ -181,7 +190,7 @@
   <button type="button" data-view="window">Window</button>
   <button type="button" data-view="reconcile">Reconcile<span id="badge" class="badge" hidden></span></button>
   <button type="button" data-view="trips">Trips</button>
-  <button type="button" data-view="lab">Formula</button>
+  <button type="button" data-view="lab">Est.</button>
   <button type="button" data-view="settings">Settings</button>
 </nav>
 </body>

@@ -509,7 +509,7 @@ async function saveRecon(ev) {
   if (!pickupText) return msg('Add the pickup.', true);
   if (kmTyped !== null && !(kmTyped > 0 && kmTyped <= 150)) return msg('Trip km should be between 0.1 and 150.', true);
   const formTrip = state.form.id ? state.trips.find((t) => t.id === state.form.id) : null;
-  if (!dropText && !kmTyped && !formTrip?.cardKm && !formTrip?.band) return msg('Add the drop-off or the trip km, so Fareit knows the distance.', true);
+  if (!dropText && !kmTyped && !formTrip?.cardKm && !formTrip?.band) return msg('Add the drop-off or the trip km, so Agaration knows the distance.', true);
   if (!(paid > 0)) return msg(state.form.decision === 'cancelled' ? 'Add the fare the card showed when you cancelled.' : 'Add the fare you were paid.', true);
   if (!Number.isFinite(jobTs)) return msg('Add the job time. Time of day matters for the prediction.', true);
   if (jobTs > Date.now() + 5 * 60 * 1000) return msg('The job time is in the future.', true);
@@ -785,7 +785,7 @@ function settingsMsg(text, isError = false) {
 }
 
 async function onSettingsChange(e) {
-  if (e.target.id === 'st-import') return;
+  if (['st-import', 'st-owner-code', 'st-beta-code'].includes(e.target.id)) return; // codes aren't settings
   if (e.target.id === 'st-key') {
     state.apiKey = e.target.value.trim();
     await db.setKV('apiKey', state.apiKey);
@@ -809,7 +809,7 @@ async function exportData() {
   const file = new File([payload], name, { type: 'application/json' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: 'Fareit trips' });
+      await navigator.share({ files: [file], title: 'Agaration trips' });
       settingsMsg(`Exported ${state.trips.length} trips.`);
       return;
     } catch (e) {
@@ -833,7 +833,7 @@ async function importData(e) {
   if (!file) return;
   try {
     const data = JSON.parse(await file.text());
-    if (data.app !== 'fareit' || !Array.isArray(data.trips)) throw new Error('This file isn’t a Fareit export.');
+    if (data.app !== 'fareit' || !Array.isArray(data.trips)) throw new Error('This file isn’t an Agaration (or Fareit) export.');
     const valid = data.trips.filter((t) => t && typeof t.id === 'string' && Number.isFinite(t.ts));
     const byId = new Map(state.trips.map((t) => [t.id, t]));
     for (const t of valid) byId.set(t.id, t);
@@ -906,7 +906,7 @@ async function boot() {
   show(location.hash.slice(1) || 'window');
   checkStatus();
   syncNow();
-  if (db.isMemoryOnly()) toast('This browser is blocking storage, so trips won’t be kept. Add Fareit to your Home Screen.');
+  if (db.isMemoryOnly()) toast('This browser is blocking storage, so trips won’t be kept. Add Agaration to your Home Screen.');
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   watchLocation();
