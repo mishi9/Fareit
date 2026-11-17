@@ -52,13 +52,13 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
 }
 .brand { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: -0.01em; }
 /* Logo: Aga · rat · ion as three small cards in the app's red, amber and green. */
-.logo { display: inline-flex; gap: 3px; vertical-align: middle; }
-.logo .lg { padding: 1px 6px 2px; border-radius: 7px; border: 2px solid; font-weight: 800; line-height: 1.15; }
-.logo .r { border-color: var(--stop); background: color-mix(in srgb, var(--stop) 22%, var(--surface)); }
-.logo .a { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 22%, var(--surface)); }
-.logo .g { border-color: var(--go); background: color-mix(in srgb, var(--go) 22%, var(--surface)); }
+.logo { display: inline-block; padding: 1px 10px 2px; border-radius: 10px; border: 2px solid transparent; font-weight: 800; line-height: 1.15;
+  /* one box: red, amber, green running into each other, a soft tint inside and a stronger edge */
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--stop) 26%, var(--surface)), color-mix(in srgb, var(--warn) 26%, var(--surface)), color-mix(in srgb, var(--go) 26%, var(--surface))) padding-box,
+    linear-gradient(90deg, var(--stop), var(--warn), var(--go)) border-box; }
 .brand { white-space: nowrap; }
-@media (max-width: 360px) { .logo .lg { padding: 1px 4px 2px; } .brand { font-size: 16px; } .beta-tag { font-size: 10px; padding: 1px 4px; } }
+@media (max-width: 360px) { .logo { padding: 1px 7px 2px; } .brand { font-size: 16px; } .beta-tag { font-size: 10px; padding: 1px 4px; } }
 
 /* Formula tab */
 .lab-formula .k, .lab-predict .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
@@ -336,7 +336,7 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
   padding: max(40px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
 .gate-card { width: 100%; max-width: 420px; }
 .gate-logo { font-family: var(--display); font-size: 30px; margin-bottom: 8px; }
-.gate-logo .lg { padding: 2px 10px 4px; border-radius: 11px; border-width: 3px; }
+.gate-logo .logo { padding: 4px 18px 7px; border-radius: 16px; border-width: 3px; }
 .gate h2 { margin: 0; font-size: 20px; }
 .gate-steps { margin: 0; padding-left: 22px; display: grid; gap: 8px; line-height: 1.4; }
 .gate-code { font-family: var(--mono); letter-spacing: 1px; user-select: all; }
