@@ -178,13 +178,14 @@
       <div id="st-owner-on" class="stack" hidden>
         <button type="button" class="ghost" id="st-owner-workings">Hide the workings</button>
         <h2>Invites</h2>
-        <p class="note">Each link lets one phone in, once. Send it to one person; after it's used it can't let anyone else in.</p>
+        <p class="note">Each link lets one phone in, once. Send it to one person; after it's used it can't let anyone else in. Each gets an animal code name so you can tell who sent what. Only you see it.</p>
         <div class="row2">
-          <div class="field"><label for="st-invite-label">Who it's for (just for you)</label>
-            <input id="st-invite-label" type="text" autocomplete="off" maxlength="40" placeholder="e.g. Ben"></div>
+          <div class="field"><label for="st-invite-label">Note (optional, only you see it)</label>
+            <input id="st-invite-label" type="text" autocomplete="off" maxlength="40" placeholder="e.g. night shift"></div>
           <button type="button" class="primary" id="st-invite-make">Make invite link</button>
         </div>
         <div id="st-invite-new" class="invite-new" hidden>
+          <div>Code name: <b id="st-invite-animal"></b> <span class="note">(they won't see it)</span></div>
           <div class="invite-link" id="st-invite-link"></div>
           <div class="row2">
             <button type="button" class="primary" id="st-invite-share">Share</button>

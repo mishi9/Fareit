@@ -295,6 +295,9 @@ const SCHEMA = [
     created_at INTEGER NOT NULL, revoked INTEGER DEFAULT 0
   )`,
   'CREATE TABLE IF NOT EXISTS owner_attempts (ip_hash TEXT, at INTEGER)',
+  // Which invite each sending phone came in on (by the device id its trips carry), so anything
+  // odd in the data can be traced to a tester's code name. Only the owner ever sees this.
+  'CREATE TABLE IF NOT EXISTS phones (device TEXT PRIMARY KEY, who TEXT NOT NULL, last_at INTEGER)',
 ];
 let schemaReady = null;
 // Pools created before a column existed get it added; on newer ones it's already there.
@@ -309,6 +312,7 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'pickup_km REAL', 'formula_trips'))
       .then(() => addColumn(db, 'lat REAL', 'formula_trips'))
       .then(() => addColumn(db, 'lng REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'animal TEXT', 'invites'))
       .catch((e) => {
         schemaReady = null;
         throw e;
@@ -724,6 +728,20 @@ const OPEN_PATHS = new Set(['/api/status', '/api/access/redeem', '/api/owner/cla
 const TOKEN_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L: easy to read out
 const TOKEN_RE = /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
 const OWNER_TRIES_PER_HOUR = 10;
+// Each invite gets an animal code name, for the owner's reference only (testers never see it).
+export const ANIMALS = ['Otter', 'Fox', 'Panda', 'Koala', 'Tiger', 'Falcon', 'Badger', 'Heron', 'Lynx', 'Walrus',
+  'Gecko', 'Hippo', 'Moose', 'Owl', 'Pelican', 'Rhino', 'Seal', 'Toucan', 'Wombat', 'Yak', 'Zebra', 'Bison',
+  'Camel', 'Dingo', 'Eagle', 'Ferret', 'Gibbon', 'Hornbill', 'Ibis', 'Jaguar', 'Kingfisher', 'Lemur', 'Mongoose',
+  'Narwhal', 'Ocelot', 'Pangolin', 'Quokka', 'Raccoon', 'Sloth', 'Tapir', 'Urchin', 'Vulture', 'Weasel', 'Beaver',
+  'Cheetah', 'Dolphin', 'Elephant', 'Flamingo', 'Giraffe', 'Hedgehog', 'Iguana', 'Kangaroo', 'Llama', 'Meerkat',
+  'Orca', 'Penguin', 'Rabbit', 'Squirrel', 'Turtle', 'Wolf'];
+async function pickAnimal(db) {
+  const { results } = await db.prepare('SELECT animal FROM invites WHERE animal IS NOT NULL').all();
+  const used = new Set(results.map((r) => r.animal));
+  const free = ANIMALS.filter((a) => !used.has(a));
+  if (free.length) return free[crypto.getRandomValues(new Uint32Array(1))[0] % free.length];
+  for (let n = 2; ; n++) { const a = ANIMALS.find((x) => !used.has(`${x} ${n}`)); if (a) return `${a} ${n}`; }
+}
 
 function randomToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
@@ -741,8 +759,20 @@ async function whoIs(request, env) {
   const key = request.headers.get('x-agaration-key') || '';
   if (!/^[0-9a-f]{64}$/.test(key) || !env.DB) return null;
   await ensureSchema(env.DB);
-  const row = await env.DB.prepare('SELECT kind, device, revoked FROM access_keys WHERE key_hash = ?1').bind(await sha256(key)).first();
-  return row && row.revoked !== 1 ? { kind: row.kind, device: row.device } : null;
+  const row = await env.DB.prepare('SELECT kind, device, invite, revoked FROM access_keys WHERE key_hash = ?1').bind(await sha256(key)).first();
+  return row && row.revoked !== 1 ? { kind: row.kind, device: row.device, invite: row.invite } : null;
+}
+
+// Note which invite a sending phone came in on (its trips carry this device id).
+async function notePhone(request, env, who) {
+  try {
+    const body = await request.clone().json();
+    const device = String((body && body.device) || '');
+    if (!ID_RE.test(device)) return;
+    await env.DB.prepare(`INSERT INTO phones (device, who, last_at) VALUES (?1, ?2, ?3)
+      ON CONFLICT(device) DO UPDATE SET who = excluded.who, last_at = excluded.last_at`)
+      .bind(device, who.kind === 'owner' ? 'owner' : who.invite, Date.now()).run();
+  } catch { /* tracing is best-effort; never block a save */ }
 }
 
 async function issueKey(env, device, kind, invite) {
@@ -791,13 +821,21 @@ async function createInvite(request, env) {
   const label = String(body.label || '').trim().slice(0, 40) || null;
   let token = randomToken();
   for (let i = 0; i < 3 && await env.DB.prepare('SELECT 1 AS x FROM invites WHERE token = ?1').bind(token).first(); i++) token = randomToken();
-  await env.DB.prepare('INSERT INTO invites (token, label, created_at, revoked) VALUES (?1, ?2, ?3, 0)').bind(token, label, Date.now()).run();
-  return json({ token, label });
+  const animal = await pickAnimal(env.DB);
+  await env.DB.prepare('INSERT INTO invites (token, label, created_at, revoked, animal) VALUES (?1, ?2, ?3, 0, ?4)').bind(token, label, Date.now(), animal).run();
+  return json({ token, label, animal });
 }
 
 async function listInvites(env) {
+  // Invites made before code names existed get one now.
+  const { results: unnamed } = await env.DB.prepare('SELECT token FROM invites WHERE animal IS NULL').all();
+  for (const r of unnamed) await env.DB.prepare('UPDATE invites SET animal = ?2 WHERE token = ?1').bind(r.token, await pickAnimal(env.DB)).run();
+  const count = (table) => `(SELECT COUNT(*) FROM ${table} WHERE deleted IS NOT 1 AND device IN (SELECT device FROM phones WHERE who = invites.token))`;
   const { results } = await env.DB.prepare(
-    'SELECT token, label, created_at, used_at, revoked FROM invites ORDER BY created_at DESC LIMIT 200',
+    `SELECT token, label, animal, created_at, used_at, revoked,
+       ${count('jobs')} AS jobs, ${count('formula_trips')} AS trips, ${count('airport_queue')} AS queue,
+       (SELECT MAX(last_at) FROM phones WHERE who = invites.token) AS last_at
+     FROM invites ORDER BY created_at DESC LIMIT 200`,
   ).all();
   return json({ invites: results.map((r) => ({ ...r, revoked: r.revoked === 1 })) });
 }
@@ -855,6 +893,7 @@ export default {
       if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
       who = await whoIs(request, env);
       if (!who) return json({ error: 'Agaration is invite-only. Open your invite link to get in.', locked: true }, 401);
+      if (request.method === 'POST' && ['/api/jobs', '/api/formula', '/api/queue'].includes(url.pathname)) await notePhone(request, env, who);
     }
     if (url.pathname.startsWith('/api/access/') || url.pathname === '/api/owner/claim' || url.pathname === '/api/access'
       || url.pathname.startsWith('/api/invites')) {

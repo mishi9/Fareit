@@ -896,9 +896,17 @@ function buildOwner() {
         const row = document.createElement('div');
         row.className = `invite-row${inv.revoked ? ' off' : ''}`;
         const status = inv.revoked ? 'Turned off' : inv.used_at ? `In use since ${when(inv.used_at)}` : `Not used yet · made ${when(inv.created_at)}`;
-        row.innerHTML = `<div><b></b><div class="note"></div></div>`;
-        row.querySelector('b').textContent = inv.label || inv.token;
-        row.querySelector('.note').textContent = `${inv.label ? `${inv.token} · ` : ''}${status}`;
+        const sent = inv.used_at ? [
+          `${inv.trips || 0} trip${inv.trips === 1 ? '' : 's'}`,
+          inv.jobs ? `${inv.jobs} job${inv.jobs === 1 ? '' : 's'}` : '',
+          inv.queue ? `${inv.queue} queue reading${inv.queue === 1 ? '' : 's'}` : '',
+          inv.last_at ? `last sent ${when(inv.last_at)} ${new Date(inv.last_at).toLocaleTimeString('en-SG', { hour: 'numeric', minute: '2-digit' })}` : 'nothing sent yet',
+        ].filter(Boolean).join(' · ') : '';
+        row.innerHTML = `<div><b></b><div class="note"></div><div class="note sent"></div></div>`;
+        row.querySelector('b').textContent = `${inv.animal || inv.token}${inv.label ? ` · ${inv.label}` : ''}`;
+        row.querySelector('.note').textContent = `${inv.token} · ${status}`;
+        row.querySelector('.sent').textContent = sent;
+        row.querySelector('.sent').hidden = !sent;
         if (!inv.revoked) {
           const off = document.createElement('button');
           off.type = 'button';
@@ -926,9 +934,10 @@ function buildOwner() {
     const btn = $('#st-invite-make');
     btn.disabled = true;
     try {
-      const { token } = await ownerApi('/api/invites/create', { label: $('#st-invite-label').value });
+      const { token, animal } = await ownerApi('/api/invites/create', { label: $('#st-invite-label').value });
       current = inviteLink(token);
       $('#st-invite-link').textContent = current;
+      $('#st-invite-animal').textContent = animal;
       $('#st-invite-new').hidden = false;
       $('#st-invite-label').value = '';
       list();

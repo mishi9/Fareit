@@ -124,3 +124,30 @@ test('without INVITE_ONLY the app stays open', async () => {
   const { req } = setup({ INVITE_ONLY: undefined });
   assert.equal((await req('/api/formula?since=0')).status, 200);
 });
+
+test('each invite gets its own animal code name, never shown to the tester', async () => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const a = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  const b = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  assert.ok(a.animal && b.animal && a.animal !== b.animal);
+  const redeemed = await req('/api/access/redeem', { body: { token: a.token, device: 'tester-phone' } });
+  assert.equal(JSON.stringify(redeemed.body).includes(a.animal), false);
+  assert.equal((await req('/api/access', { key: redeemed.body.key })).body.animal, undefined);
+});
+
+test('what a tester sends is traced to their code name', async () => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const { token, animal } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  const key = (await req('/api/access/redeem', { body: { token, device: 'tester-phone' } })).body.key;
+  const trip = { id: 'trip-trace-0001', ts: Date.now() - 60000, km: 12.3, min: 20, erp: 0, paid: 22.5, earned: 16.4, surge: 'normal' };
+  const r = await req('/api/formula', { body: { device: 'app-device-0001', trips: [trip] }, key });
+  assert.equal(r.status, 200);
+  const list = (await req('/api/invites', { key: okey })).body.invites;
+  const row = list.find((i) => i.token === token);
+  assert.equal(row.animal, animal);
+  assert.equal(row.trips, 1);
+  assert.equal(row.jobs, 0);
+  assert.ok(row.last_at > 0);
+});
