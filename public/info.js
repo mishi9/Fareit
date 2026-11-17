@@ -6,7 +6,7 @@ import { eventsList, venuesList, loadEvents, addEvent, deleteEvent, onEventsChan
 import { here } from './where.js';
 import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow } from './lab.js';
-import { queueNow } from './queue.js';
+import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
@@ -155,14 +155,13 @@ function renderLive() {
   const r = info.root;
   if (!r) return;
   const L = info.live || {};
-  const q = queueNow();
   const taxis = L.taxis;
   r.querySelector('#info-airport').innerHTML = `
-    <div class="tiles">
-      <div class="tile"><div class="v">${taxis && Number.isFinite(taxis.changi) ? taxis.changi : '—'}</div><div class="k">street taxis free at Changi${taxis ? ` · ${hm(taxis.at)}` : ''}</div></div>
-      <div class="tile"><div class="v">${q && q.cars != null ? Math.round(q.cars) : '—'}</div><div class="k">cars ahead in the Grab queue, around this hour${q ? ` (${q.n} reading${q.n === 1 ? '' : 's'})` : ''}</div></div>
-    </div>
-    <p class="note">Taxis: available street taxis in the airport zone, from LTA (not Grab cars, but a fair sign of how crowded the airport rank is). Queue: from drivers' readings on Radar at the airport.${!L.taxis && info.liveErr ? ` ${esc(info.liveErr)}` : ''}</p>`;
+    <div class="band-head">Grab queue</div>
+    ${waitHtml(queueWaitNow())}
+    <div class="band-head">Street taxis free at Changi</div>
+    <div class="q-wait"><div class="q-wait-min">${taxis && Number.isFinite(taxis.changi) ? taxis.changi : '—'}</div>
+      <div class="note">From LTA: not Grab cars, but a fair sign of how crowded the airport is.${taxis ? ` Last updated ${updatedText(taxis.at)}.` : info.liveErr ? ` ${esc(info.liveErr)}` : ''}</div></div>`;
   renderJb();
   const ltaText = L.lta && L.lta.ready ? 'Loading…'
     : isOwner() || isOwnerPhone() ? 'Needs the LTA DataMall key (free) to switch on.' : 'Coming soon.';

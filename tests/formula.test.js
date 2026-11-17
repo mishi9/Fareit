@@ -406,3 +406,26 @@ test('From JB: one line per route with a best-estimate time out in Singapore', (
   assert.equal(jbPlace({ lat: 1.4253, lng: 103.7622 }).id, 'kranji');
   assert.equal(jbPlace({ lat: 1.3526, lng: 103.9447 }), null);
 });
+
+import { queueWait, updatedText } from '../public/queue.js';
+test('airport queue: estimated wait from the latest reading, else the usual for this hour', () => {
+  const t0 = new Date(2026, 10, 18, 20, 0).getTime();
+  const m = 60000;
+  // past nights around 8pm: Grab said 30, people really waited 40 (x1.33); 40 cars -> 1 min/car
+  const past = [1, 2, 3].map((d) => ({ ts: t0 - d * 86400000, cars: 40, est: 30, actual: 40 }));
+  const fresh = { ts: t0 - 10 * m, cars: 30, est: 21, actual: null };
+  const w = queueWait([...past, fresh], t0);
+  assert.equal(w.basis, 'latest');
+  assert.equal(w.min, 28); // 21 x 1.33
+  assert.equal(w.at, fresh.ts);
+  assert.equal(w.corrected, true);
+  // only a car count: minutes per car from real waits
+  assert.equal(queueWait([...past, { ts: t0 - 5 * m, cars: 15 }], t0).min, 15);
+  // nothing recent: the usual around this hour (real waits)
+  const old = queueWait(past, t0);
+  assert.equal(old.basis, 'usual');
+  assert.equal(old.min, 40);
+  assert.equal(old.at, past[0].ts);
+  assert.equal(queueWait([], t0), null);
+  assert.match(updatedText(t0 - 12 * m, t0), /\(12 min ago\)$/);
+});

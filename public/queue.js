@@ -31,6 +31,35 @@ export function queueSummary(readings, ts, windowH = 1.5) {
   };
 }
 
+const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+export const QUEUE_FRESH_MIN = 45;
+
+// The wait for someone joining the queue now. From the latest reading if it's under 45 min old
+// (a queue that long then is about as long now), else from what readings around this hour usually
+// show. Recorded real waits correct Grab's estimate (e.g. it says 30, people wait 40 -> x1.33), and
+// give minutes per car ahead for readings with only a car count. Pure, for the page and the tests.
+export function queueWait(readings, ts) {
+  const valid = readings.filter((r) => Number.isFinite(r.ts) && r.ts <= ts);
+  if (!valid.length) return null;
+  const latest = valid.reduce((a, b) => (b.ts > a.ts ? b : a));
+  const done = valid.filter((r) => r.actual > 0);
+  const bias = done.filter((r) => r.est > 0).map((r) => r.actual / r.est);
+  const perCar = done.filter((r) => r.cars > 0).map((r) => r.actual / r.cars);
+  const grabPerCar = valid.filter((r) => r.est > 0 && r.cars > 0).map((r) => r.est / r.cars);
+  const factor = bias.length ? median(bias) : 1;
+  const minPerCar = perCar.length ? median(perCar) : grabPerCar.length ? median(grabPerCar) * factor : null;
+  const fromReading = (r) => (r.est > 0 ? r.est * factor : r.cars != null && minPerCar ? r.cars * minPerCar : null);
+  const ageMin = (ts - latest.ts) / 60000;
+  if (ageMin <= QUEUE_FRESH_MIN) {
+    const min = fromReading(latest);
+    if (min != null) return { min: Math.round(min), basis: 'latest', at: latest.ts, cars: latest.cars ?? null, corrected: bias.length > 0 };
+  }
+  const s = queueSummary(valid, ts);
+  if (!s) return { min: null, basis: 'none', at: latest.ts, cars: null };
+  const min = s.actual != null ? s.actual : s.est != null ? s.est * factor : s.cars != null && minPerCar ? s.cars * minPerCar : null;
+  return { min: min == null ? null : Math.round(min), basis: 'usual', at: latest.ts, cars: s.cars, n: s.n, corrected: bias.length > 0 };
+}
+
 const q = { root: null, device: null, mine: [], shared: {}, note: '' };
 const all = () => {
   const mine = new Set(q.mine.map((r) => r.id));
@@ -50,6 +79,21 @@ async function post(path, body) {
 let syncing = null;
 // Around this hour, from every driver's readings (Info tab).
 export const queueNow = () => queueSummary(all(), Date.now());
+export const queueWaitNow = () => queueWait(all(), Date.now());
+// "07:19 (12 min ago)", or a day for older readings.
+export function updatedText(at, now = Date.now()) {
+  const mins = Math.round((now - at) / 60000);
+  if (mins < 60) return `${hm(at)} (${mins < 1 ? 'just now' : `${mins} min ago`})`;
+  if (mins < 24 * 60) return `${hm(at)} (${Math.round(mins / 60)} h ago)`;
+  return new Date(at).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+export function waitHtml(w, now = Date.now()) {
+  if (!w) return '<p class="note">No queue readings yet. Drivers at the airport add them on Radar.</p>';
+  const basis = w.basis === 'latest' ? `from the latest reading${w.cars != null ? ` (${w.cars} cars ahead)` : ''}`
+    : w.basis === 'usual' ? `usual around this hour (${w.n} reading${w.n === 1 ? '' : 's'}${w.cars != null ? `, ~${Math.round(w.cars)} cars ahead` : ''})` : 'not enough to estimate';
+  return `<div class="q-wait"><div class="q-wait-min">${w.min != null ? `~${w.min} min` : '—'}</div>
+    <div class="note">Estimated wait, ${basis}${w.corrected ? ', adjusted by real waits' : ''}. Last updated ${updatedText(w.at, now)}.</div></div>`;
+}
 
 export function syncQueue() {
   if (!q.device || !q.root) return Promise.resolve();
@@ -105,6 +149,7 @@ export async function buildQueue(root) {
   root.innerHTML = `
     <div class="band-head">Airport queue</div>
     <p class="note" id="q-where"></p>
+    <div id="q-summary"></div>
     <p class="note">Joined the queue? Note what Grab shows. When a job comes, tap <b>Got a job</b>: it records how long you really waited, then takes the fare.</p>
     <div class="row2">
       <div class="field"><label for="q-cars">Cars ahead</label>
@@ -115,7 +160,6 @@ export async function buildQueue(root) {
     <p class="msg" id="q-msg" role="status"></p>
     <button type="button" class="primary wide" id="q-save">Save queue reading</button>
     <div id="q-open"></div>
-    <div id="q-summary"></div>
     <div id="q-list" class="stack"></div>`;
   $('#q-save', root).addEventListener('click', save);
   render();
@@ -176,11 +220,7 @@ function render() {
     card.innerHTML = `<div class="meta">In the queue since ${hm(open.ts)} (${mins} min)${open.cars != null ? ` · ${open.cars} cars ahead` : ''}${open.est ? ` · Grab estimated ${open.est} min` : ''}. Tap <b>Got a job</b> when one comes.</div>`;
     openBox.append(card);
   }
-  const s = queueSummary(all(), Date.now());
-  const fmt = (n) => (n == null ? '—' : Math.round(n));
-  $('#q-summary', r).innerHTML = s
-    ? `<p class="note">Around ${hm(Date.now())} (${s.n} reading${s.n === 1 ? '' : 's'} from all drivers): about <b>${fmt(s.cars)}</b> cars ahead, Grab estimates <b>${fmt(s.est)} min</b>${s.actual != null ? `, actual waits averaged <b>${fmt(s.actual)} min</b> (${s.nActual})` : ''}.</p>`
-    : `<p class="note">No queue readings around this hour yet.${q.note ? ` ${q.note}` : ''}</p>`;
+  $('#q-summary', r).innerHTML = waitHtml(queueWaitNow()) + (q.note ? `<p class="note">${q.note}</p>` : '');
   const list = $('#q-list', r);
   list.innerHTML = '';
   for (const x of [...q.mine].reverse().slice(0, 3)) {
