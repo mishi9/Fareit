@@ -8,7 +8,7 @@ import * as db from './db.js';
 import { buildQueue, syncQueue } from './queue.js';
 import { watchLocation, here, rounded, onMove } from './where.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -207,6 +207,17 @@ export async function buildLab(root) {
 }
 
 // ---- Beta Window: earnings by distance band ----
+function latestLine(now) {
+  const j = latestJob(dataset(), now);
+  if (!j) return '';
+  const t = j.trip;
+  const d = new Date(t.ts);
+  const mins = Math.round((now - t.ts) / 60000);
+  const where = t.lat && t.lng ? areaName({ lat: t.lat, lng: t.lng }) : null;
+  const cls = j.vs >= 0.1 ? 'good' : j.vs <= -0.1 ? 'bad' : '';
+  return `<div class="band-latest ${cls}">Latest job · ${pad(d.getHours())}:${pad(d.getMinutes())} (${mins} min ago)${where ? ` · ${where}` : ''}${t.shared ? ' · another driver' : ''}: ${t.km} km, earned <b>${money(j.earned)}</b> (${signed(j.vs)} vs normal)</div>`;
+}
+
 // The planning area for where the phone is, looked up once per ~1 km and kept for the session.
 const areaCache = {};
 function areaName(p) {
@@ -239,6 +250,7 @@ export function renderBands() {
   box.innerHTML = `
     <div class="band-head">What you'd earn now · ${place ? `${place} · ` : ''}${at}</div>
     <div class="band-basis">${loc ? '' : 'Location off: using all areas. '}${basis}</div>
+    ${latestLine(now)}
     ${bands.map((b) => `
       <div class="band-card ${b.state}">
         <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
@@ -395,38 +407,104 @@ async function save() {
   lab.pending = null;
   clearForm(true);
   renderAll();
-  if (jobOpen()) {
-    closeJob();
-    const note = document.querySelector('#got-job-msg');
-    if (note) note.textContent = msg.textContent;
-  }
 }
 
 // ---- Got a job (beta Window) ----
-// Tapping it notes the time and where you are (about 1 km, near the pickup), and brings the
-// Formula form up as a card over the Window. Close keeps what's typed; Save trip closes it.
+// A quick card: the trip km and what you'll earn, as the job card shows them. Tapping notes the
+// time and where you are (about 1 km, near the pickup). Saved, it updates the Window straight
+// away: the latest job, and "now" on the cards. Quick entries have no passenger fare, so they
+// don't touch the formula or Grab's cut; full trips still go in the Formula tab.
 const jobOpen = () => { const s = document.querySelector('#job-sheet'); return Boolean(s && !s.hidden); };
+const quick = { surge: 'normal' };
+
+function buildQuick() {
+  const body = document.querySelector('#job-body');
+  if (!body || body.dataset.built) return;
+  body.dataset.built = '1';
+  body.innerHTML = `
+    <div class="row2">
+      <div class="field"><label for="qj-km">Trip km</label>
+        <input id="qj-km" type="number" inputmode="decimal" step="0.1" min="0"></div>
+      <div class="field"><label for="qj-earned">You'll earn (S$)</label>
+        <input id="qj-earned" type="number" inputmode="decimal" step="0.01" min="0"></div>
+    </div>
+    <div id="qj-surge" class="seg g3">
+      <button type="button" data-v="normal">Normal</button>
+      <button type="button" data-v="surge">Surge ↑</button>
+      <button type="button" data-v="airport">Airport</button>
+    </div>
+    <div class="lab-check" id="qj-check"></div>
+    <p class="msg" id="qj-msg" role="status"></p>
+    <button type="button" class="primary wide" id="qj-save">Save job</button>
+    <p class="note">Only km and earnings: this updates the Window now. To also teach the formula, add the passenger fare in the Formula tab.</p>`;
+  for (const id of ['qj-km', 'qj-earned']) body.querySelector(`#${id}`).addEventListener('input', quickUpdate);
+  for (const b of body.querySelectorAll('#qj-surge button')) b.addEventListener('click', () => { quick.surge = b.dataset.v; quickUpdate(); });
+  body.querySelector('#qj-save').addEventListener('click', quickSave);
+}
+
+function quickRead() {
+  const n = (id) => { const v = parseFloat(document.querySelector(id).value); return Number.isFinite(v) ? v : null; };
+  return { km: n('#qj-km'), earned: n('#qj-earned'), surge: quick.surge };
+}
+
+function quickUpdate() {
+  for (const b of document.querySelectorAll('#qj-surge button')) b.classList.toggle('sel', b.dataset.v === quick.surge);
+  const f = quickRead();
+  const box = document.querySelector('#qj-check');
+  if (!(f.km > 0)) { box.innerHTML = ''; return; }
+  const est = estimate();
+  const normalPaid = passengerFare(weights(), f.km, est(f.km)).fare;
+  const normal = driverEarns(commission(), normalPaid);
+  if (!(f.earned > 0)) { box.innerHTML = `<div class="kept">Normal for ${f.km} km: you'd earn about <b>${money(normal)}</b>.</div>`; return; }
+  const vs = f.earned / normal - 1;
+  const cls = vs >= 0.1 ? 'close' : vs <= -0.1 ? 'far' : '';
+  box.innerHTML = `<div class="kept">Normal for ${f.km} km: about <b>${money(normal)}</b>. This job: <b class="${cls}">${money(f.earned)} (${signed(vs)})</b>.</div>`;
+}
+
+async function quickSave() {
+  const f = quickRead();
+  const msg = document.querySelector('#qj-msg');
+  if (!(f.km > 0) || !(f.earned > 0)) { msg.textContent = 'Add the trip km and what you\'ll earn.'; msg.classList.add('err'); return; }
+  const est = estimate();
+  const normalPaid = passengerFare(weights(), f.km, est(f.km)).fare;
+  lab.trips.push({
+    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, quick: true,
+    ts: lab.pending ? lab.pending.ts : Date.now(), km: f.km, min: null, erp: 0, actual: null, earned: f.earned, surge: f.surge,
+    ...((lab.pending && lab.pending.loc) || rounded(here()) || {}),
+    predicted: null, predictedEarned: driverEarns(commission(), normalPaid), timeSplit: true,
+  });
+  await db.setKV(KEY, lab.trips);
+  const saved = lab.pending ? new Date(lab.pending.ts) : new Date();
+  lab.pending = null;
+  msg.classList.remove('err');
+  for (const id of ['#qj-km', '#qj-earned']) document.querySelector(id).value = '';
+  quick.surge = 'normal';
+  closeJob();
+  const note = document.querySelector('#got-job-msg');
+  if (note) note.textContent = `Saved the ${pad(saved.getHours())}:${pad(saved.getMinutes())} job: ${f.km} km, ${money(f.earned)}.`;
+  renderAll();
+  syncLab();
+}
 
 export function openJob() {
   const sheet = document.querySelector('#job-sheet');
   if (!sheet) return;
+  buildQuick();
   if (!lab.pending) lab.pending = { ts: Date.now(), loc: rounded(here()) };
   const d = new Date(lab.pending.ts);
   const where = lab.pending.loc ? areaName(lab.pending.loc) : null;
   document.querySelector('#job-when').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}${where ? ` · ${where}` : ''}`;
-  document.querySelector('#job-body').append(document.querySelector('#lab-form'));
   sheet.hidden = false;
   document.body.classList.add('sheet-open');
   const note = document.querySelector('#got-job-msg');
   if (note) note.textContent = '';
-  update();
-  setTimeout(() => document.querySelector('#lab-km')?.focus(), 50);
+  quickUpdate();
+  setTimeout(() => document.querySelector('#qj-km')?.focus(), 50);
 }
 
 export function closeJob() {
   const sheet = document.querySelector('#job-sheet');
   if (!sheet) return;
-  document.querySelector('#lab-form-home').append(document.querySelector('#lab-form'));
   sheet.hidden = true;
   document.body.classList.remove('sheet-open');
   const note = document.querySelector('#got-job-msg');
@@ -467,6 +545,7 @@ function renderStats() {
       <div class="tile"><span class="v">${loo ? money(loo.avg) : '—'}</span><span class="k">Paid: off with today's formula${loo ? ` (${pct(loo.pct)})` : ''}</span></div>
       <div class="tile"><span class="v">${normal.filter((t, i) => offs[i] <= 0.1).length} / ${normal.length}</span><span class="k">Paid within 10 cents</span></div>
     </div>
+    <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they teach the formula)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on the Window)` : ''}.`; })()}</p>
     <p class="note">"Off with today's formula" predicts each trip from all the others: the honest test of the formula as it stands. Normal trips from everyone in the dataset.</p>
     <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>
     <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs the normal formula, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;
@@ -511,7 +590,7 @@ function renderList() {
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
       <div class="meta">${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}</div>
-      <div class="meta">Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})${t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
+      <div class="meta">${t.quick ? `Quick entry from Got a job: earned ${money(t.earned)}${t.predictedEarned ? ` (normal about ${money(t.predictedEarned)})` : ''}. Add the passenger fare in a full entry to teach the formula.` : ''}${t.quick ? '' : `Paid: formula said ${money(t.predicted)} (${offText(t.predicted, t.actual)})`}${!t.quick && t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     let armed = false;

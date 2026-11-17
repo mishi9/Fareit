@@ -467,7 +467,9 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   if (!Number.isFinite(ts) || ts < now - 365 * 86400 * 1000 || ts > now + 10 * 60 * 1000) return null;
   // min is the trip time from the pickup (optional); card_min is the job card's total, which also
   // includes the drive to the pickup.
-  if (!(km >= 0.3 && km <= 100) || !inRange(min, 1, 240) || !(paid >= 2 && paid <= 400)) return null;
+  // paid may be missing on a quick Got a job entry (km and earnings only), but not both.
+  if (!(km >= 0.3 && km <= 100) || !inRange(min, 1, 240) || !inRange(paid, 2, 400)) return null;
+  if (paid === null && earned === null) return null;
   if (!inRange(cardMin, 1, 300) || !inRange(pickupKm, 0, 50)) return null;
   if (!inRange(erp, 0, 50) || !inRange(earned, 0.5, 400) || !inRange(predicted, 0, 1000) || !inRange(predictedEarned, 0, 1000)) return null;
   if (!['normal', 'surge', 'airport'].includes(t.surge)) return null;

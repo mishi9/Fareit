@@ -196,10 +196,14 @@ const HOUR_SD = 1;
 export const hourOf = (ts) => { const d = new Date(ts); return d.getHours() + d.getMinutes() / 60; };
 const hourGap = (a, b) => { const g = Math.abs(a - b) % 24; return Math.min(g, 24 - g); };
 
-function ratioToFormula(t, w, est) {
-  if (!(t.actual > 0) || !(t.km > 0)) return null;
+// How a trip paid against normal, as a log ratio: the passenger fare against the formula, or, for
+// a quick entry with only what the driver earned, the earnings against normal earnings.
+function ratioToFormula(t, w, est, c) {
+  if (!(t.km > 0)) return null;
   const p = passengerFare(w, t.km, tripTime(t, est)).fare; // without ERP: compare like with like
-  const r = Math.log((t.actual - (t.erp || 0)) / p);
+  let r = null;
+  if (t.actual > 0) r = Math.log((t.actual - (t.erp || 0)) / p);
+  else if (t.earned > 0 && c) r = Math.log((t.earned - (t.erp || 0)) / driverEarns(c, p));
   return Number.isFinite(r) ? r : null;
 }
 
@@ -214,15 +218,22 @@ const kmApart = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
+// Jobs from the last couple of hours say most about right now: one from 10 minutes ago counts
+// about 6 times as much as one from last week at the same hour, fading over the next hours.
+const RECENT_H = 3;
+const recentBoost = (ageMin) => (ageMin >= 0 && ageMin <= RECENT_H * 60 ? 1 + 6 * Math.exp(-ageMin / 45) : 1);
+
 export function timeOfDay(trips, ts, loc = null) {
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
+  const c = fitCommission(trips);
   const h = hourOf(ts);
   let sw = 0;
   let swr = 0;
   let near = 0;
   let surgeNear = 0;
+  let recent = 0;
   for (const t of all) {
     if (!Number.isFinite(t.ts)) continue;
     let place = 1;
@@ -232,17 +243,19 @@ export function timeOfDay(trips, ts, loc = null) {
       d = kmApart(loc, t);
       place = Math.exp(-(d * d) / (2 * PLACE_SD_KM * PLACE_SD_KM));
     }
-    const r = ratioToFormula(t, w, est);
+    const r = ratioToFormula(t, w, est, c);
     if (r === null) continue;
     const g = hourGap(hourOf(t.ts), h);
     if (loc && d > NEAR_KM && g > 1.5) continue;
-    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place;
+    const ageMin = (ts - t.ts) / 60000;
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin);
     sw += x;
     swr += x * r;
     if (g <= 1.5 && d <= NEAR_KM) { near++; if (t.surge === 'surge') surgeNear++; }
+    if (ageMin >= 0 && ageMin <= 90 && d <= NEAR_KM) recent++;
   }
   const m = swr / (sw + 1);
-  return { lift: Math.exp(m) - 1, near, surgeNear, weight: sw };
+  return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw };
 }
 
 // Fares vs the formula in 3-hour blocks, for the "By time of day" table.
@@ -250,9 +263,10 @@ export function byTimeBlock(trips) {
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
+  const c = fitCommission(trips);
   const blocks = Array.from({ length: 8 }, (_, i) => ({ from: i * 3, to: i * 3 + 3, n: 0, surge: 0, sum: 0 }));
   for (const t of all) {
-    const r = ratioToFormula(t, w, est);
+    const r = ratioToFormula(t, w, est, c);
     if (r === null) continue;
     const b = blocks[Math.floor(hourOf(t.ts) / 3) % 8];
     b.n++;
@@ -276,11 +290,12 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
+  const c = fitCommission(trips);
   const h = hourOf(ts);
   const rs = [];
   for (const t of all) {
     if (t.surge !== kind || !Number.isFinite(t.ts)) continue;
-    const r = ratioToFormula(t, w, est);
+    const r = ratioToFormula(t, w, est, c);
     if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
   }
   const start = Math.log(1 + startLift);
@@ -334,6 +349,21 @@ export function bandOutlook(trips, ts, loc = null) {
     const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
     const vs = now / normal - 1;
     const state = vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, scope };
+    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope };
   });
+}
+
+// ---- Latest job (beta Window) ----
+// The most recent job in the dataset (yours or another driver's) and how it paid against normal.
+export function latestJob(trips, ts = Date.now(), withinMs = 3 * 3600 * 1000) {
+  const recent = trips.filter((t) => Number.isFinite(t.ts) && ts - t.ts >= 0 && ts - t.ts <= withinMs && t.km > 0 && (t.earned > 0 || t.actual > 0));
+  if (!recent.length) return null;
+  const t = recent.reduce((a, b) => (b.ts > a.ts ? b : a));
+  const w = fitWeights(trips);
+  const est = timeEstimator(withBase(trips));
+  const c = fitCommission(trips);
+  const normalPaid = passengerFare(w, t.km, tripTime(t, est)).fare;
+  const normalEarn = driverEarns(c, normalPaid);
+  const earned = t.earned > 0 ? t.earned : driverEarns(c, t.actual);
+  return { trip: t, earned, normalEarn, vs: earned / normalEarn - 1 };
 }

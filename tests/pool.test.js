@@ -256,6 +256,10 @@ test('formula dataset: separate table, own-device edits and deletes, numbers onl
   const placedRow = (await call(`/api/formula?since=${all.body.next}`)).body.trips.find((t) => t.id === 'lab-trip-0010');
   assert.deepEqual([placedRow.lat, placedRow.lng], [1.35, 103.99]);
   await call('/api/formula/delete', { device: 'device-aaaaaaaa', ids: ['lab-trip-0010'] });
+  // A quick Got a job entry: km and earnings, no passenger fare. Neither at all is refused.
+  const quick = await call('/api/formula', { device: 'device-aaaaaaaa', trips: [trip({ id: 'lab-trip-0012', paid: null, predicted: null, earned: 20 }), trip({ id: 'lab-trip-0013', paid: null, earned: null })] });
+  assert.deepEqual([quick.body.accepted, quick.body.rejected], [['lab-trip-0012'], ['lab-trip-0013']]);
+  await call('/api/formula/delete', { device: 'device-aaaaaaaa', ids: ['lab-trip-0012'] });
   // Trip time is optional (card total and km to pickup kept apart).
   const split = await call('/api/formula', { device: 'device-aaaaaaaa', trips: [trip({ id: 'lab-trip-0009', min: null, card_min: 32, pickup_km: 0.92 })] });
   assert.deepEqual(split.body.accepted, ['lab-trip-0009']);

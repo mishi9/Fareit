@@ -247,3 +247,28 @@ test('Window bands use trips near you around this hour, else all areas', async (
   assert.equal(inTampines[0].scope, 'all', 'nothing near Tampines: falls back to all areas');
   assert.equal(inTampines[0].nearHour, 5, 'the 4 Orchard trips plus the built-in base trip (~01:30)');
 });
+
+test('quick Got a job entries (km + earnings only) move "now" for the area, not the formula', async () => {
+  const { bandOutlook, latestJob } = await import('../public/beta/formula.js');
+  const at = (iso) => Date.parse(iso);
+  const TAMPINES = { lat: 1.353, lng: 103.945 };
+  const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
+    .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
+  const now = at('2026-11-22T02:40:00+08:00');
+  const before = bandOutlook(normal, now, TAMPINES);
+  // Two quick entries in the last 20 minutes near Tampines, both paying well above normal earnings.
+  const quickJobs = [[21, 20], [12, 15]].map(([km, earned], i) => ({
+    id: `quick${i}xxxx`, quick: true, ts: now - (10 + i * 10) * 60000, km, min: null, erp: 0, actual: null, earned, surge: 'normal', ...TAMPINES,
+  }));
+  const after = bandOutlook([...normal, ...quickJobs], now, TAMPINES);
+  assert.equal(after[0].scope, 'here');
+  assert.equal(after[0].recent, 2);
+  assert.ok(after.every((b, i) => b.now > before[i].now), 'recent good jobs lift "now"');
+  // The formula and the cut ignore quick entries.
+  assert.equal(fitWeights([...normal, ...quickJobs]).base, fitWeights(normal).base);
+  assert.equal(fitCommission([...normal, ...quickJobs]).n, fitCommission(normal).n);
+  const j = latestJob([...normal, ...quickJobs], now);
+  assert.equal(j.trip.km, 21);
+  assert.equal(j.earned, 20);
+  assert.ok(j.vs > 0.1, `latest job vs normal ${j.vs}`);
+});
