@@ -262,16 +262,14 @@ test('info: taxis at Changi, fetched once and shared', async (t) => {
   assert.equal(calls, 1, 'second request uses the shared copy');
 });
 
-test('surge reports: one per phone per 10 min, surge trips count too, only the last 30 min', async () => {
+test('surge points: Surge-tagged trips from the last 30 min, one tag per phone, ids never sent', async () => {
   const { req, owner } = setup();
   const key = await owner();
-  assert.equal((await req('/api/surge', { body: { device: 'phone-aaaa-1', lat: 3.1, lng: 101.6 }, key })).status, 400);
-  assert.equal((await req('/api/surge', { body: { device: 'phone-aaaa-1', lat: 1.3041, lng: 103.8321 }, key })).status, 200);
-  await req('/api/surge', { body: { device: 'phone-aaaa-1', lat: 1.3051, lng: 103.8331 }, key }); // same phone again: moves it
-  const trip = { id: 'trip-surge-0001', ts: Date.now() - 5 * 60000, km: 8, min: 15, erp: 0, paid: 20, earned: 14, surge: 'surge', lat: 1.30, lng: 103.83 };
-  await req('/api/formula', { body: { device: 'phone-bbbb-2', trips: [trip] }, key });
+  const mk = (id, mins, extra = {}) => ({ id, ts: Date.now() - mins * 60000, km: 8, min: 15, erp: 0, paid: 20, earned: 14, surge: 'surge', lat: 1.30, lng: 103.83, ...extra });
+  await req('/api/formula', { body: { device: 'phone-aaaa-1', trips: [mk('trip-s-0001', 5), mk('trip-s-0002', 3), mk('trip-s-0003', 50)] }, key });
+  await req('/api/formula', { body: { device: 'phone-bbbb-2', trips: [mk('trip-s-0004', 2), mk('trip-s-0005', 2, { surge: 'normal' })] }, key });
   const pts = (await req('/api/surge', { key })).body.points;
-  assert.equal(pts.length, 2);
+  assert.equal(pts.length, 3, 'normal and older-than-30-min trips left out');
   assert.equal(new Set(pts.map((p) => p.d)).size, 2);
   assert.ok(pts.every((p) => !String(p.d).includes('phone')), 'device ids are never sent out');
   assert.equal((await req('/api/surge')).status, 401);

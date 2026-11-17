@@ -1,8 +1,8 @@
-// "Likely surging" on Radar: when at least 2 different drivers have seen surge within about
-// 1.5 km of each other in the last 30 minutes (a "Surge here" tap, or a trip saved as Surge), drivers
+// "Likely surging" on Radar: when at least 2 different drivers have saved a Surge trip within about
+// 1.5 km of each other in the last 30 minutes (no extra taps: it comes from trips already saved), drivers
 // within 3 km see it at the top of Radar. 3 km is about 5-10 minutes' drive: close enough to get
 // there while it lasts. Inside 1.5 km it says "around you".
-import { here, rounded } from './where.js';
+import { here } from './where.js';
 
 export const SURGE_CLUSTER_KM = 1.5;
 export const SURGE_NOTIFY_KM = 3;
@@ -62,15 +62,6 @@ export async function loadSurge(onDone, force = false) {
 }
 export const surgeNow = () => surgeFor(here(), surgeSpots(sg.points));
 
-export async function reportSurge(device) {
-  const p = rounded(here());
-  if (!p) throw new Error('Location is off, so a surge can’t be placed.');
-  const res = await fetch('/api/surge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ device, ...p }) });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || 'Couldn’t send it. Try again.');
-  sg.at = 0;
-  return body;
-}
 
 // Banner text for Radar (area: the planning-area name, when known).
 export function surgeBanner(s, area, now = Date.now()) {
@@ -78,5 +69,5 @@ export function surgeBanner(s, area, now = Date.now()) {
   const dist = `${s.km < 1 ? 'under 1' : s.km.toFixed(1)} km away`;
   const where = s.inside ? `Likely surging around you${area ? ` (${area})` : ''}` : area ? `${area} likely surging · ${dist}` : `Likely surging ${dist}`;
   return `<div class="surge-alert"><div class="surge-up" aria-hidden="true">↑</div><div><b>${where}</b>
-    <div class="note">${s.drivers} drivers saw surge in the last 30 min · latest ${ago < 1 ? 'just now' : `${ago} min ago`}</div></div></div>`;
+    <div class="note">${s.drivers} drivers had surge trips in the last 30 min · latest ${ago < 1 ? 'just now' : `${ago} min ago`}</div></div></div>`;
 }

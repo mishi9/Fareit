@@ -403,4 +403,3 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
   background: color-mix(in srgb, var(--go) 16%, var(--surface)); }
 .surge-up { font-size: 28px; font-weight: 800; color: var(--go); line-height: 1; }
 .surge-alert .note { margin: 2px 0 0; }
-.surge-report { width: 100%; font-size: 14px; }

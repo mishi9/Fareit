@@ -29,8 +29,7 @@
 //   POST /api/events { name, venue, starts_at, ends_at } -> { venues, events }   owner only
 //   POST /api/events/delete { id }            -> { venues, events }   owner only
 //   GET  /api/info                            -> taxis at Changi (data.gov.sg)
-//   POST /api/surge { device, lat, lng }      -> { ok }    "surge here" (about 1 km, kept 30 min)
-//   GET  /api/surge                           -> { points }  surge reports + surge-tagged trips, last 30 min
+//   GET  /api/surge                           -> { points }  surge-tagged trips, last 30 min (about 1 km)
 //   POST /api/invites/create { label }        -> { token }       owner only
 //   GET  /api/invites                         -> { invites }     owner only
 //   POST /api/invites/revoke { token }        -> { revoked }     owner only: the invite and its phone
@@ -308,9 +307,6 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS phones (device TEXT PRIMARY KEY, who TEXT NOT NULL, last_at INTEGER)',
   // Shared copies of outside data (e.g. the arrivals list), so every phone shares one fetch.
   'CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, value TEXT NOT NULL)',
-  // "Surge here" taps: about 1 km, one per phone per 10 minutes (a newer tap moves it).
-  'CREATE TABLE IF NOT EXISTS surge_reports (id TEXT PRIMARY KEY, device TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL)',
-  'CREATE INDEX IF NOT EXISTS surge_ts ON surge_reports(ts)',
   `CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, venue TEXT NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL,
     starts_at INTEGER, ends_at INTEGER NOT NULL, created_at INTEGER NOT NULL, deleted INTEGER DEFAULT 0
@@ -841,40 +837,19 @@ async function getInfo(env) {
 }
 
 // ---------- Surge reports ----------
-// Who's seeing surge where, in the last half hour: "surge here" taps plus trips saved as Surge.
-// Each point carries an opaque tag per phone (so 2 taps from one phone count once), never the id.
+// Where drivers have had surge in the last half hour: trips saved as Surge (about 1 km).
+// Each point carries an opaque tag per phone (so one phone's trips count once), never the id.
 export const SURGE_WINDOW_MS = 30 * 60000;
-async function addSurgeReport(request, env) {
-  const { body, error } = await readJson(request);
-  if (error) return error;
-  const device = String(body.device || '');
-  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
-  const p = cleanPoint(Number(body.lat), Number(body.lng));
-  if (!p || p[0] === null) return json({ error: 'That location isn’t in Singapore.' }, 400);
-  await ensureSchema(env.DB);
-  const now = Date.now();
-  const recent = await env.DB.prepare('SELECT id FROM surge_reports WHERE device = ?1 AND ts > ?2 ORDER BY ts DESC LIMIT 1')
-    .bind(device, now - 10 * 60000).first();
-  if (recent) await env.DB.prepare('UPDATE surge_reports SET ts = ?2, lat = ?3, lng = ?4 WHERE id = ?1').bind(recent.id, now, p[0], p[1]).run();
-  else await env.DB.prepare('INSERT INTO surge_reports (id, device, ts, lat, lng) VALUES (?1, ?2, ?3, ?4, ?5)')
-    .bind(`sr-${randomKey().slice(0, 16)}`, device, now, p[0], p[1]).run();
-  return json({ ok: true, until: now + SURGE_WINDOW_MS });
-}
 
 async function getSurge(env) {
   await ensureSchema(env.DB);
   const since = Date.now() - SURGE_WINDOW_MS;
-  const [taps, trips] = await Promise.all([
-    env.DB.prepare('SELECT device, ts, lat, lng FROM surge_reports WHERE ts > ?1 ORDER BY ts DESC LIMIT 500').bind(since).all(),
-    env.DB.prepare(`SELECT device, ts, lat, lng FROM formula_trips WHERE surge = 'surge' AND deleted IS NOT 1
-      AND lat IS NOT NULL AND lng IS NOT NULL AND ts > ?1 ORDER BY ts DESC LIMIT 500`).bind(since).all(),
-  ]);
+  const trips = await env.DB.prepare(`SELECT device, ts, lat, lng FROM formula_trips WHERE surge = 'surge' AND deleted IS NOT 1
+      AND lat IS NOT NULL AND lng IS NOT NULL AND ts > ?1 ORDER BY ts DESC LIMIT 500`).bind(since).all();
   const tags = new Map();
   const tag = async (d) => { if (!tags.has(d)) tags.set(d, (await sha256(`surge:${d}`)).slice(0, 10)); return tags.get(d); };
   const points = [];
-  for (const [kind, rows] of [['tap', taps.results], ['trip', trips.results]]) {
-    for (const r of rows) points.push({ lat: r.lat, lng: r.lng, ts: r.ts, d: await tag(r.device), kind });
-  }
+  for (const r of trips.results) points.push({ lat: r.lat, lng: r.lng, ts: r.ts, d: await tag(r.device) });
   return json({ points });
 }
 
@@ -1116,7 +1091,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/surge', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -1133,7 +1108,7 @@ export default {
       if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
       who = await whoIs(request, env);
       if (!who) return json({ error: 'Agaration is invite-only. Open your invite link to get in.', locked: true }, 401);
-      if (request.method === 'POST' && ['/api/jobs', '/api/formula', '/api/queue', '/api/surge'].includes(url.pathname)) await notePhone(request, env, who);
+      if (request.method === 'POST' && ['/api/jobs', '/api/formula', '/api/queue'].includes(url.pathname)) await notePhone(request, env, who);
     }
     if (url.pathname.startsWith('/api/access/') || url.pathname === '/api/owner/claim' || url.pathname === '/api/access'
       || url.pathname.startsWith('/api/invites')) {
@@ -1155,7 +1130,7 @@ export default {
     }
     if (url.pathname === '/api/surge') {
       if (!env.DB) return json({ points: [] });
-      try { return request.method === 'POST' ? await addSurgeReport(request, env) : await getSurge(env); } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
+      try { return await getSurge(env); } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
     }
     if (url.pathname === '/api/events' || url.pathname === '/api/events/delete' || url.pathname === '/api/info') {
       if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
