@@ -30,6 +30,8 @@
   <section id="view-window" class="view">
     <!-- Beta: earnings by distance band, refreshed every minute. The slider is kept hidden for now. -->
     <div id="band-cards" class="band-cards" aria-live="polite"></div>
+    <button type="button" class="primary wide got-job" id="got-job">Got a job</button>
+    <p class="note" id="got-job-msg" role="status"></p>
     <div id="old-window" hidden>
     <div id="verdict" class="verdict idle" aria-live="polite"></div>
     <div class="thumb">
@@ -167,6 +169,13 @@
 </main>
 
 <div id="toast" class="toast" role="status" hidden></div>
+
+<!-- Beta: the Formula form as a card over the Window, opened by Got a job. -->
+<div id="job-sheet" class="sheet" hidden role="dialog" aria-label="Got a job">
+  <div class="sheet-head"><div><div class="sheet-title">Got a job</div><div class="sheet-sub" id="job-when"></div></div>
+    <button type="button" class="ghost small" id="job-close">Close</button></div>
+  <div id="job-body" class="sheet-body stack"></div>
+</div>
 
 <nav class="tabs">
   <button type="button" data-view="window">Window</button>

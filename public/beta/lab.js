@@ -13,7 +13,8 @@ import {
 } from './formula.js';
 
 const KEY = 'formulaLab';
-const $ = (s, root = document) => root.querySelector(s);
+// The form can sit in the Formula tab or in the Got a job card, so look it up anywhere.
+const $ = (s, root = document) => root.querySelector(s) || document.querySelector(s);
 const money = (n) => `S$${Number(n).toFixed(2)}`;
 const pct = (n) => `${(n * 100).toFixed(1)}%`;
 const signed = (n) => `${n >= 0 ? '+' : '−'}${Math.abs(n * 100).toFixed(0)}%`;
@@ -133,6 +134,7 @@ export async function buildLab(root) {
   root.innerHTML = `
     <div class="card lab-formula" id="lab-formula"></div>
 
+    <div id="lab-form-home"><div id="lab-form" class="stack">
     <div class="row2">
       <div class="field"><label for="lab-km">Trip km (pickup → drop-off)</label>
         <input id="lab-km" type="number" inputmode="decimal" step="0.1" min="0"></div>
@@ -175,6 +177,7 @@ export async function buildLab(root) {
       <button type="button" class="primary" id="lab-save">Save trip</button>
       <button type="button" class="ghost" id="lab-clear">Clear</button>
     </div>
+    </div></div>
 
     <div id="lab-queue" class="stack"></div>
 
@@ -194,7 +197,9 @@ export async function buildLab(root) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
   $('#lab-save', root).addEventListener('click', save);
-  $('#lab-clear', root).addEventListener('click', clearForm);
+  $('#lab-clear', root).addEventListener('click', () => { lab.pending = null; clearForm(); });
+  document.querySelector('#got-job')?.addEventListener('click', openJob);
+  document.querySelector('#job-close')?.addEventListener('click', closeJob);
   $('#lab-export', root).addEventListener('click', exportCsv);
   renderAll();
   syncLab();
@@ -272,7 +277,7 @@ function readForm() {
   return {
     km: num($('#lab-km', r)), min: num($('#lab-min', r)), erp: 0, // ERP is added after the trip starts, not on the job card
     cardMin: num($('#lab-cardmin', r)), pickupKm: num($('#lab-pickupkm', r)), timeSplit: true,
-    ts: Date.now(), // the trip's time is when you save it
+    ts: lab.pending ? lab.pending.ts : Date.now(), // when you tapped Got a job, else when you save
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
   };
 }
@@ -378,7 +383,8 @@ async function save() {
   const t = timeOfDay(dataset(), f.ts);
   lab.trips.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...f,
-    ...(rounded(here()) || {}), // where the phone was on Save (about 1 km): usually near the drop-off
+    // Where the phone was (about 1 km): on Got a job, near the pickup; otherwise on Save.
+    ...((lab.pending && lab.pending.loc) || rounded(here()) || {}),
     predicted, predictedEarned, predictedNormal: normalFare, surgeLiftUsed: sl ? sl.lift : null, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
   });
@@ -386,8 +392,48 @@ async function save() {
   syncLab();
   msg.classList.remove('err');
   msg.textContent = `Saved. Paid: formula ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Formula updated.`;
+  lab.pending = null;
   clearForm(true);
   renderAll();
+  if (jobOpen()) {
+    closeJob();
+    const note = document.querySelector('#got-job-msg');
+    if (note) note.textContent = msg.textContent;
+  }
+}
+
+// ---- Got a job (beta Window) ----
+// Tapping it notes the time and where you are (about 1 km, near the pickup), and brings the
+// Formula form up as a card over the Window. Close keeps what's typed; Save trip closes it.
+const jobOpen = () => { const s = document.querySelector('#job-sheet'); return Boolean(s && !s.hidden); };
+
+export function openJob() {
+  const sheet = document.querySelector('#job-sheet');
+  if (!sheet) return;
+  if (!lab.pending) lab.pending = { ts: Date.now(), loc: rounded(here()) };
+  const d = new Date(lab.pending.ts);
+  const where = lab.pending.loc ? areaName(lab.pending.loc) : null;
+  document.querySelector('#job-when').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}${where ? ` · ${where}` : ''}`;
+  document.querySelector('#job-body').append(document.querySelector('#lab-form'));
+  sheet.hidden = false;
+  document.body.classList.add('sheet-open');
+  const note = document.querySelector('#got-job-msg');
+  if (note) note.textContent = '';
+  update();
+  setTimeout(() => document.querySelector('#lab-km')?.focus(), 50);
+}
+
+export function closeJob() {
+  const sheet = document.querySelector('#job-sheet');
+  if (!sheet) return;
+  document.querySelector('#lab-form-home').append(document.querySelector('#lab-form'));
+  sheet.hidden = true;
+  document.body.classList.remove('sheet-open');
+  const note = document.querySelector('#got-job-msg');
+  if (note && lab.pending) {
+    const d = new Date(lab.pending.ts);
+    note.textContent = `Job at ${pad(d.getHours())}:${pad(d.getMinutes())} not saved yet. Tap Got a job to carry on.`;
+  }
 }
 
 function clearForm(keepMsg) {
