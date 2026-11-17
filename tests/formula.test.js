@@ -371,3 +371,21 @@ test('trips around an event are kept out of normal and learned on their own', ()
   const fare = (w) => passengerFare(w, 10, 20).fare;
   assert.ok(fare(fitWeights(all)) > fare(w0) + 0.2, `${fare(fitWeights(all))} vs ${fare(w0)}`);
 });
+
+// ---- From JB timetables ----
+import { KTM_ARRIVALS, CW5_FROM_WOODLANDS, nextTimes, busNow } from '../public/jb.js';
+test('From JB: next KTM arrivals, bus intervals by time of day', () => {
+  const at = (h, m) => { const d = new Date(2026, 10, 18, h, m); return d; };
+  assert.equal(KTM_ARRIVALS.length, 18);
+  assert.deepEqual(nextTimes(KTM_ARRIVALS, at(8, 0)).next, ['08:50', '10:05', '11:35']);
+  assert.deepEqual(nextTimes(KTM_ARRIVALS, at(22, 50)).next, ['22:50']);
+  const late = nextTimes(KTM_ARRIVALS, at(23, 10));
+  assert.equal(late.done, true);
+  assert.equal(late.first, '05:05');
+  assert.deepEqual(nextTimes(CW5_FROM_WOODLANDS, at(16, 31)).next, ['16:45', '17:00', '17:15']);
+  assert.equal(busNow('CW1', at(7, 0)).every, 'about every 5 min');
+  assert.equal(busNow('CW1', at(13, 0)).every, 'every 15–30 min');
+  assert.equal(busNow('CW1', at(2, 0)).running, false);
+  assert.equal(busNow('CW2', at(2, 0)).every, 'every 30 min (night)');
+  assert.equal(busNow('CW5', at(23, 0)).running, false);
+});

@@ -7,6 +7,7 @@ import { here } from './where.js';
 import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow } from './lab.js';
 import { queueNow } from './queue.js';
+import { KTM_ARRIVALS, CW5_FROM_WOODLANDS, nextTimes, busNow } from './jb.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
 const LIVE_REFRESH = 2 * 60 * 1000;
@@ -166,22 +167,30 @@ function renderLive() {
   r.querySelector('#info-travel').innerHTML = `<p class="note">${ltaText}${L.lta && L.lta.ready ? '' : ' e.g. "CTE to the city: 12 min".'}</p>`;
 }
 
-// People coming in from JB by bus or train often take a Grab from where they're dropped off.
-// Where each route ends in Singapore; live arrivals and the KTM timetable to come.
-const JB_ROUTES = [
-  { name: 'KTM Shuttle Tebrau', drop: 'Woodlands Train Checkpoint', note: 'Timetable to be added. Due to stop after the RTS Link opens (reported for early 2027).' },
-  { name: 'Causeway Link CW1', drop: 'Kranji MRT', note: '' },
-  { name: 'Causeway Link CW2', drop: 'Queen Street Bus Terminal', note: 'Runs 24 hours.' },
-  { name: 'Causeway Link CW5', drop: 'Newton (near the food centre)', note: '' },
-];
+// People coming in from JB by train or bus often take a Grab from where they're dropped off.
+// Published timetables (jb.js), worked out against the clock.
 function renderJb() {
   const box = info.root?.querySelector('#info-jb');
   if (!box) return;
-  const owner = isOwner() || isOwnerPhone();
+  const now = new Date();
+  const ktm = nextTimes(KTM_ARRIVALS, now);
+  const cw5 = nextTimes(CW5_FROM_WOODLANDS, now);
+  const bus = (code, drop) => {
+    const b = busNow(code, now);
+    return `<div class="ev-card"><div class="ev-main"><b>Causeway Link ${code} → ${esc(drop)}</b>
+      <div class="ev-when">${b.running ? `Running ${b.every}` : 'Not running now'}</div>
+      <div class="note">${esc(b.hours)}. Arrival depends on the checkpoint queues.</div></div></div>`;
+  };
   box.innerHTML = `
-    ${JB_ROUTES.map((x) => `<div class="ev-card"><div class="ev-main"><b>${esc(x.name)}</b>
-      <div class="note">Drops off at ${esc(x.drop)}${x.note ? ` · ${esc(x.note)}` : ''}</div></div></div>`).join('')}
-    <p class="note">${owner ? 'Live bus arrivals: to be tested once the LTA DataMall key is in (it may not cover Causeway Link). KTM: send the current timetable to add it.' : 'Live arrivals coming soon.'}</p>`;
+    <div class="ev-card"><div class="ev-main"><b>KTM Shuttle Tebrau → Woodlands Train Checkpoint</b>
+      <div class="ev-when">${ktm.done ? `No more trains today. First tomorrow arrives ${ktm.first}` : `Next trains arrive ${ktm.next.join(', ')}`}</div>
+      <div class="note">Arrival at Woodlands (5 min from JB Sentral), then Singapore immigration. ${KTM_ARRIVALS.length} a day, last ${ktm.last}.</div></div></div>
+    ${bus('CW1', 'Kranji MRT')}
+    ${bus('CW2', 'Queen Street Bus Terminal')}
+    <div class="ev-card"><div class="ev-main"><b>Causeway Link CW5 → Newton Circus</b>
+      <div class="ev-when">${cw5.done ? `Done for today. First tomorrow leaves Woodlands ${cw5.first}` : `Next leave Woodlands Checkpoint ${cw5.next.join(', ')}`}</div>
+      <div class="note">Drops off at the Newton Food Centre car park. ${esc(busNow('CW5', now).hours)}.</div></div></div>
+    <p class="note">Published timetables, not live: KTMB (effective 1 Jan 2026); bus hours from Land Transport Guru (2026), as Causeway Link's own sheet is from April 2023. Buses run to traffic. The KTM shuttle is due to stop after the RTS Link opens (reported for early 2027).</p>`;
 }
 
 // Old jobs from before Radar (the slider) that still need a fare.
