@@ -8,6 +8,7 @@ import * as db from './db.js';
 import { buildQueue, syncQueue, closeOpenReading } from './queue.js';
 import { renderFlights } from './flights.js';
 import { eventsList, onEventsChange, loadEvents } from './events.js';
+import { jbPlace, jbRowsHtml } from './jb.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
@@ -260,6 +261,14 @@ export function renderBands() {
   const loc = here();
   // At Changi there's no 8-second window (jobs are auto-accepted), so Radar shows the queue
   // (above, from queue.js) and arrivals by terminal instead of the earnings cards.
+  // Near Woodlands or a JB bus drop-off: what's arriving next, at the top, to decide whether to
+  // head there or wait. (Ferry terminals next, once there's a timetable for them.)
+  const placeBox = document.querySelector('#radar-place');
+  if (placeBox) {
+    const pl = jbPlace(loc);
+    placeBox.hidden = !pl;
+    if (pl) placeBox.innerHTML = `<div class="band-head">Near ${pl.name} · from JB, ${pl.at === 'woodlands' ? 'out at Woodlands' : 'arriving'} (est.)</div>${jbRowsHtml(new Date(now), pl)}`;
+  }
   const airport = atAirport(loc);
   const ap = document.querySelector('#ap-flights');
   if (ap) {

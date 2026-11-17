@@ -389,3 +389,20 @@ test('From JB: next KTM arrivals, bus intervals by time of day', () => {
   assert.equal(busNow('CW2', at(2, 0)).every, 'every 30 min (night)');
   assert.equal(busNow('CW5', at(23, 0)).running, false);
 });
+
+import { jbNext, jbPlace, JB_EST } from '../public/jb.js';
+test('From JB: one line per route with a best-estimate time out in Singapore', () => {
+  const at = (h, m) => new Date(2026, 10, 18, h, m);
+  const r = Object.fromEntries(jbNext(at(8, 0)).map((x) => [x.id, x]));
+  assert.equal(r.ktm.what, 'Train arrives 08:50');
+  assert.equal(r.ktm.woodlands, '09:05'); // + immigration
+  // 08:00 is the morning rush into Singapore: JB -> out of Woodlands takes longer
+  assert.equal(r.CW1.woodlands, `0${8 + Math.floor(JB_EST.jbToWoodlandsHeavy / 60)}:${String(JB_EST.jbToWoodlandsHeavy % 60).padStart(2, '0')}`);
+  assert.equal(r.CW5.what, 'Next leaves Woodlands 08:10');
+  const night = Object.fromEntries(jbNext(at(23, 30)).map((x) => [x.id, x]));
+  assert.equal(night.ktm.dropAt, null);
+  assert.equal(night.CW2.dropAt, '00:25'); // runs all night, past midnight
+  assert.equal(jbPlace({ lat: 1.4452, lng: 103.7690 }).id, 'woodlands');
+  assert.equal(jbPlace({ lat: 1.4253, lng: 103.7622 }).id, 'kranji');
+  assert.equal(jbPlace({ lat: 1.3526, lng: 103.9447 }), null);
+});

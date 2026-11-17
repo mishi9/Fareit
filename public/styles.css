@@ -381,3 +381,16 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .ev-add summary { color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px 0; }
 .ev-add .stack { margin-top: 8px; }
 #view-info input[type=date], #view-info input[type=time] { min-width: 0; width: 100%; }
+
+/* From JB rows (Info and Radar) */
+.jb-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+.jb-row .note { margin: 1px 0 0; font-size: 13px; }
+.jb-eta { text-align: right; font-family: var(--mono); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.jb-eta .note { font-family: var(--body); font-weight: 400; font-size: 12px; }
+#radar-place { gap: 6px; }
+.ev-more summary { color: var(--accent); font-weight: 600; cursor: pointer; padding: 4px 0; }
+.ev-more .stack { margin-top: 6px; }
+.jb-row.compact { padding: 6px 10px; gap: 8px; border-radius: 10px; }
+.jb-row.compact b { min-width: 34px; }
+.jb-row.compact .note { flex: 1; margin: 0; font-size: 13px; }
+.jb-row.compact .jb-eta { font-size: 16px; }

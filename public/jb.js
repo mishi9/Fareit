@@ -47,3 +47,81 @@ export function busNow(route, now = new Date()) {
   }
   return null;
 }
+
+// ---- Best-estimate arrival in Singapore ----
+// Not published anywhere: rough journey times, to be tuned (LTA travel times on the BKE once the
+// key is in, and what drivers see). Heavy = the morning rush into Singapore (05:00–09:00).
+export const JB_EST = {
+  ktmOut: 15, // train arrives at Woodlands -> through immigration and out
+  jbToWoodlands: 20, jbToWoodlandsHeavy: 45, // bus leaves JB CIQ -> out of Woodlands Checkpoint
+  woodlandsToKranji: 10, woodlandsToQueenSt: 35, woodlandsToNewton: 25, woodlandsToNewtonHeavy: 35,
+};
+const heavy = (m) => m >= 5 * 60 && m < 9 * 60;
+const atMin = (now, m) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return new Date(d.getTime() + m * 60000); };
+const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+// What's coming next on each route: one line each, with the estimated time people come out at
+// Woodlands and at the route's drop-off.
+export function jbNext(now = new Date()) {
+  const m = minuteOfDay(now);
+  const E = JB_EST;
+  const rows = [];
+  const ktm = nextTimes(KTM_ARRIVALS, now, 1);
+  if (!ktm.done) {
+    const arr = mins(ktm.next[0]);
+    rows.push({ id: 'ktm', name: 'KTM Shuttle Tebrau', drop: 'Woodlands Train Checkpoint', what: `Train arrives ${ktm.next[0]}`, short: `Train ${ktm.next[0]}`,
+      woodlands: hhmm(atMin(now, arr + E.ktmOut)), dropAt: hhmm(atMin(now, arr + E.ktmOut)) });
+  } else rows.push({ id: 'ktm', name: 'KTM Shuttle Tebrau', drop: 'Woodlands Train Checkpoint', what: `No more trains today (first ${ktm.first})`, woodlands: null, dropAt: null });
+  const toW = heavy(m) ? E.jbToWoodlandsHeavy : E.jbToWoodlands;
+  for (const [id, drop, extra] of [['CW1', 'Kranji MRT', E.woodlandsToKranji], ['CW2', 'Queen Street', E.woodlandsToQueenSt]]) {
+    const b = busNow(id, now);
+    rows.push(b.running
+      ? { id, name: `Causeway Link ${id}`, drop, what: `Leaving JB ${b.every}`, short: b.every.replace('about every ', 'every ~').replace(' (night)', ''), woodlands: hhmm(atMin(now, m + toW)), dropAt: hhmm(atMin(now, m + toW + extra)) }
+      : { id, name: `Causeway Link ${id}`, drop, what: `Not running now (${b.hours.toLowerCase()})`, woodlands: null, dropAt: null });
+  }
+  const cw5 = nextTimes(CW5_FROM_WOODLANDS, now, 1);
+  rows.push(!cw5.done
+    ? { id: 'CW5', name: 'Causeway Link CW5', drop: 'Newton', what: `Next leaves Woodlands ${cw5.next[0]}`, short: `Leaves ${cw5.next[0]}`, woodlands: cw5.next[0],
+      dropAt: hhmm(atMin(now, mins(cw5.next[0]) + (heavy(mins(cw5.next[0])) ? E.woodlandsToNewtonHeavy : E.woodlandsToNewton))) }
+    : { id: 'CW5', name: 'Causeway Link CW5', drop: 'Newton', what: `Done for today (first ${cw5.first})`, woodlands: null, dropAt: null });
+  return rows;
+}
+
+// Where a driver can be when these matter. At Woodlands every route passes through (everyone
+// clears immigration there); at a drop-off, only that route.
+export const JB_PLACES = [
+  { id: 'woodlands', name: 'Woodlands Checkpoint', lat: 1.4450, lng: 103.7686, km: 2, routes: ['ktm', 'CW1', 'CW2', 'CW5'], at: 'woodlands' },
+  { id: 'kranji', name: 'Kranji MRT', lat: 1.4251, lng: 103.7620, km: 0.8, routes: ['CW1'], at: 'drop' },
+  { id: 'queen-street', name: 'Queen Street Bus Terminal', lat: 1.3008, lng: 103.8555, km: 0.6, routes: ['CW2'], at: 'drop' },
+  { id: 'newton', name: 'Newton (CW5 stop)', lat: 1.3123, lng: 103.8393, km: 0.6, routes: ['CW5'], at: 'drop' },
+];
+const kmTo = (a, b) => {
+  const rad = (d) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+};
+export function jbPlace(loc) {
+  if (!loc) return null;
+  let best = null;
+  for (const p of JB_PLACES) {
+    const d = kmTo(loc, p);
+    if (d <= p.km && (!best || d < best.d)) best = { ...p, d };
+  }
+  return best;
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Compact rows. place: show only its routes, and the time that matters there.
+export function jbRowsHtml(now = new Date(), place = null) {
+  const rows = jbNext(now).filter((r) => !place || place.routes.includes(r.id));
+  return rows.map((r) => {
+    const when = place && place.at === 'woodlands' ? r.woodlands : r.dropAt;
+    const where = place && place.at === 'woodlands' ? 'out at Woodlands' : `at ${r.drop}`;
+    if (place) {
+      // Radar: one short line each, so the earnings cards stay in view.
+      return `<div class="jb-row compact"><b>${esc(r.id === 'ktm' ? 'KTM' : r.id)}</b><span class="note">${esc(r.short || r.what)}</span><span class="jb-eta">${when ? `~${when}` : '—'}</span></div>`;
+    }
+    return `<div class="jb-row"><div><b>${esc(r.name)}</b><div class="note">${esc(r.what)}</div></div>
+      <div class="jb-eta">${when ? `~${when}<div class="note">${esc(where)}</div>` : '<div class="note">—</div>'}</div></div>`;
+  }).join('');
+}

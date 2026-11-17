@@ -7,7 +7,7 @@ import { here } from './where.js';
 import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow } from './lab.js';
 import { queueNow } from './queue.js';
-import { KTM_ARRIVALS, CW5_FROM_WOODLANDS, nextTimes, busNow } from './jb.js';
+import { jbRowsHtml } from './jb.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
 const LIVE_REFRESH = 2 * 60 * 1000;
@@ -30,11 +30,11 @@ export function buildInfo(root) {
   info.root = root;
   root.innerHTML = `
     <div id="info-old"></div>
-    <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
-    <section class="stack"><h2>Airport</h2><div id="info-airport" class="stack"></div></section>
-    <section class="stack"><h2>From JB</h2><div id="info-jb" class="stack"></div></section>
     <section class="stack"><h2>Road incidents</h2><div id="info-incidents"></div></section>
-    <section class="stack"><h2>Expressway travel times</h2><div id="info-travel"></div></section>`;
+    <section class="stack"><h2>Expressway travel times</h2><div id="info-travel"></div></section>
+    <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
+    <section class="stack"><h2>From JB</h2><div id="info-jb" class="stack"></div></section>
+    <section class="stack"><h2>Airport</h2><div id="info-airport" class="stack"></div></section>`;
   onEventsChange(() => renderEvents());
   buildEventForm();
 }
@@ -69,10 +69,13 @@ function renderEvents() {
         <div class="ev-when">${ended ? `Ended ${hm(e.ends_at)}: crowd leaving now` : `${e.ends_at > now + 2 * 3600000 ? `${dayLabel(e.ends_at)} · ` : ''}${e.starts_at ? `${hm(e.starts_at)} to ` : 'ends '}~${hm(e.ends_at)}`}</div>
       </div>${del}</div>`;
   };
+  // Only what's next: everything ending soon, then the next one coming up; the rest folded away.
+  const more = later.slice(1);
   box.innerHTML = `
     ${soon.length ? `<div class="band-head">Ending soon</div>${soon.map(card).join('')}` : '<p class="note">Nothing letting out in the next 2 hours.</p>'}
-    ${later.length ? `<div class="band-head">Coming up</div>${later.map(card).join('')}` : ''}
-    <p class="note">${lift.n ? `Around events, fares have run <b>${signed(lift.lift)}</b> vs normal (${lift.n} trip${lift.n === 1 ? '' : 's'}).` : 'No trips around events yet.'} Trips within about 1.5 km of a venue, from 30 min before an event ends to 90 min after, are kept out of the normal estimates, so a busy event night doesn't make that area look busy every night.</p>`;
+    ${later.length ? `<div class="band-head">Next up</div>${card(later[0])}` : ''}
+    ${more.length ? `<details class="ev-more"><summary>${more.length} more this week</summary><div class="stack">${more.map(card).join('')}</div></details>` : ''}
+    <p class="note">${lift.n ? `Around events, fares have run <b>${signed(lift.lift)}</b> vs normal (${lift.n} trip${lift.n === 1 ? '' : 's'}).` : 'No trips around events yet.'} Trips near a venue as it lets out are kept out of normal estimates.</p>`;
   for (const b of box.querySelectorAll('[data-del]')) {
     let armed = false;
     b.addEventListener('click', async () => {
@@ -168,29 +171,12 @@ function renderLive() {
 }
 
 // People coming in from JB by train or bus often take a Grab from where they're dropped off.
-// Published timetables (jb.js), worked out against the clock.
+// What's next on each route, with a best-estimate time they're out in Singapore (jb.js).
 function renderJb() {
   const box = info.root?.querySelector('#info-jb');
   if (!box) return;
-  const now = new Date();
-  const ktm = nextTimes(KTM_ARRIVALS, now);
-  const cw5 = nextTimes(CW5_FROM_WOODLANDS, now);
-  const bus = (code, drop) => {
-    const b = busNow(code, now);
-    return `<div class="ev-card"><div class="ev-main"><b>Causeway Link ${code} → ${esc(drop)}</b>
-      <div class="ev-when">${b.running ? `Running ${b.every}` : 'Not running now'}</div>
-      <div class="note">${esc(b.hours)}. Arrival depends on the checkpoint queues.</div></div></div>`;
-  };
-  box.innerHTML = `
-    <div class="ev-card"><div class="ev-main"><b>KTM Shuttle Tebrau → Woodlands Train Checkpoint</b>
-      <div class="ev-when">${ktm.done ? `No more trains today. First tomorrow arrives ${ktm.first}` : `Next trains arrive ${ktm.next.join(', ')}`}</div>
-      <div class="note">Arrival at Woodlands (5 min from JB Sentral), then Singapore immigration. ${KTM_ARRIVALS.length} a day, last ${ktm.last}.</div></div></div>
-    ${bus('CW1', 'Kranji MRT')}
-    ${bus('CW2', 'Queen Street Bus Terminal')}
-    <div class="ev-card"><div class="ev-main"><b>Causeway Link CW5 → Newton Circus</b>
-      <div class="ev-when">${cw5.done ? `Done for today. First tomorrow leaves Woodlands ${cw5.first}` : `Next leave Woodlands Checkpoint ${cw5.next.join(', ')}`}</div>
-      <div class="note">Drops off at the Newton Food Centre car park. ${esc(busNow('CW5', now).hours)}.</div></div></div>
-    <p class="note">Published timetables, not live: KTMB (effective 1 Jan 2026); bus hours from Land Transport Guru (2026), as Causeway Link's own sheet is from April 2023. Buses run to traffic. The KTM shuttle is due to stop after the RTS Link opens (reported for early 2027).</p>`;
+  box.innerHTML = `${jbRowsHtml(new Date())}
+    <p class="note">Times with ~ are estimates: the published timetable plus rough journey and immigration times, so they slip when the checkpoints are busy. KTM: KTMB timetable (1 Jan 2026). Buses: Land Transport Guru (2026). The KTM shuttle is due to stop after the RTS Link opens (reported for early 2027).</p>`;
 }
 
 // Old jobs from before Radar (the slider) that still need a fare.

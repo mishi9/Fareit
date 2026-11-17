@@ -67,12 +67,14 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 
 ## Info tab
 
-Replaces Reconcile (older jobs still waiting for a fare are linked from the top of Info). Display only: nothing here changes the estimates, except the event rule below.
+Replaces Reconcile (older jobs still waiting for a fare are linked from the top of Info). In order: road incidents and expressway travel times, events (what's ending soon and the next one; the rest folded away), From JB, the airport. Display only: nothing here changes the estimates, except the event rule below.
 
 - **Events:** the owner adds them (what, venue from a list, date, rough end time); every phone sees them. **Ending soon** (within 2 hours, or ended up to an hour ago: the crowd is coming out) and **Coming up**, with the distance from you.
 - **Event rule:** trips saved within about 1.5 km of a listed event's venue, from 30 min before it ends to 90 min after, are kept out of the normal fare formula, the time-of-day / place adjustment and the surge %, so one concert night doesn't make that area look busy every night. They're learned on their own ("around events, fares have run +x%") and still teach Grab's cut.
 - **Airport:** available street taxis in the Changi zone (data.gov.sg, free, no key) and the Grab queue readings around this hour.
-- **From JB:** published timetables (not live) for people crossing from Johor Bahru, who often take a Grab from where they're dropped off: the KTM Shuttle Tebrau's next arrivals at Woodlands (KTMB, effective 1 Jan 2026), whether Causeway Link CW1 (Kranji MRT) and CW2 (Queen Street) are running and how often, and CW5's next departures from Woodlands to Newton (Land Transport Guru, 2026). Data in `public/jb.js`.
+- **From JB:** published timetables (not live) for people crossing from Johor Bahru, who often take a Grab from where they're dropped off: the KTM Shuttle Tebrau's next arrivals at Woodlands (KTMB, effective 1 Jan 2026), whether Causeway Link CW1 (Kranji MRT) and CW2 (Queen Street) are running and how often, and CW5's next departures from Woodlands to Newton (Land Transport Guru, 2026). Each route shows only what's next, with a best-estimate time people are out in Singapore (`~`): the timetable plus rough journey and immigration times (`JB_EST` in `public/jb.js`, to be tuned). Data in `public/jb.js`.
+
+On **Radar**, near Woodlands Checkpoint (every route passes through) or a drop-off (Kranji MRT for CW1, Queen Street for CW2, Newton for CW5), the same arrivals show at the top above the earnings cards. Ferry terminals (Tanah Merah, HarbourFront) can be added the same way once there's a timetable.
 - **Road incidents** and **expressway travel times:** waiting for an LTA DataMall key (`LTA_KEY` secret).
 
 Live data is fetched by the server at most every 2 minutes and shared by every phone.
