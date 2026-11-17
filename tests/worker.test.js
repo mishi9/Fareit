@@ -90,3 +90,18 @@ test('near turns a tap location into the closest address', async () => {
   assert.deepEqual(await res.json(), { label: '111 TAMPINES STREET 11', address: '111 TAMPINES STREET 11 521111', postal: '521111', lat: 1.34691, lng: 103.94742 });
   assert.equal((await call('/api/near?at=40,0')).status, 400);
 });
+
+test('area names a point by its planning area, falling back to the road', async () => {
+  mockOneMap([tokenHandler, ['getPlanningarea', (url) => {
+    assert.equal(url.searchParams.get('latitude'), '1.35');
+    return okJson([{ pln_area_n: 'TAMPINES' }]);
+  }]]);
+  const res = await call('/api/area?at=1.35,103.95');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { area: 'Tampines', source: 'planning-area' });
+  resetTokenCache();
+  mockOneMap([tokenHandler, ['getPlanningarea', () => new Response('nope', { status: 500 })],
+    ['revgeocode', () => okJson({ GeocodeInfo: [{ BLOCK: '111', ROAD: 'TAMPINES STREET 11', POSTALCODE: '521111', LATITUDE: '1.3469', LONGITUDE: '103.9474' }] })]]);
+  assert.deepEqual(await (await call('/api/area?at=1.3469,103.9474')).json(), { area: 'Tampines Street 11', source: 'road' });
+  assert.equal((await call('/api/area?at=40,0')).status, 400);
+});

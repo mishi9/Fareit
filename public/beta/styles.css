@@ -90,6 +90,7 @@ h2 { font-family: var(--display); font-size: 17px; margin: 8px 0 0; font-weight:
 .band-sub { font-size: 14px; color: var(--muted); }
 .band-km { font-size: 12px; }
 .band-note { font-size: 12px; }
+.band-basis { font-size: 13px; color: var(--muted); margin-top: -4px; }
 @media (max-height: 720px) {
   .band-cards { gap: 6px; }
   .band-card { padding: 8px 12px; gap: 2px; border-radius: 12px; }

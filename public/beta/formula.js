@@ -203,7 +203,18 @@ function ratioToFormula(t, w, est) {
   return Number.isFinite(r) ? r : null;
 }
 
-export function timeOfDay(trips, ts) {
+// With `loc`, only trips saved near there count, more the closer they are (1 km 80%, 3 km 14%,
+// 5 km 0.4%): Tampines at 2am isn't Orchard at 2am. Trips saved without a location don't count.
+const PLACE_SD_KM = 1.5;
+export const NEAR_KM = 3;
+const kmApart = (a, b) => {
+  const R = 6371;
+  const rad = (d) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
+export function timeOfDay(trips, ts, loc = null) {
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
@@ -214,13 +225,21 @@ export function timeOfDay(trips, ts) {
   let surgeNear = 0;
   for (const t of all) {
     if (!Number.isFinite(t.ts)) continue;
+    let place = 1;
+    let d = 0;
+    if (loc) {
+      if (!(t.lat && t.lng)) continue;
+      d = kmApart(loc, t);
+      place = Math.exp(-(d * d) / (2 * PLACE_SD_KM * PLACE_SD_KM));
+    }
     const r = ratioToFormula(t, w, est);
     if (r === null) continue;
     const g = hourGap(hourOf(t.ts), h);
-    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD));
+    if (loc && d > NEAR_KM && g > 1.5) continue;
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place;
     sw += x;
     swr += x * r;
-    if (g <= 1.5) { near++; if (t.surge === 'surge') surgeNear++; }
+    if (g <= 1.5 && d <= NEAR_KM) { near++; if (t.surge === 'surge') surgeNear++; }
   }
   const m = swr / (sw + 1);
   return { lift: Math.exp(m) - 1, near, surgeNear, weight: sw };
@@ -294,12 +313,16 @@ export const EARN_BANDS = [
 ];
 const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 
-export function bandOutlook(trips, ts) {
+// With `loc`: "now" comes from trips near here around this hour; if there are none yet, from all
+// areas at this hour (scope says which).
+export function bandOutlook(trips, ts, loc = null) {
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
   const c = fitCommission(trips);
-  const tod = timeOfDay(trips, ts);
+  const here = loc ? timeOfDay(trips, ts, loc) : null;
+  const scope = here && here.near ? 'here' : 'all';
+  const tod = scope === 'here' ? here : timeOfDay(trips, ts);
   const surge = surgeLift(trips, ts);
   return EARN_BANDS.map((b) => {
     const inBand = all.filter((t) => t.km >= b.lo && t.km < b.hi);
@@ -311,6 +334,6 @@ export function bandOutlook(trips, ts) {
     const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
     const vs = now / normal - 1;
     const state = vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near };
+    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, scope };
   });
 }

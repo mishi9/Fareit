@@ -5,6 +5,7 @@
 //   GET  /api/search?q=...                   -> { results: [{ label, address, postal, lat, lng }] }
 //   GET  /api/route?from=lat,lng&to=lat,lng  -> { km, min, source: "onemap" }
 //   GET  /api/near?at=lat,lng                -> { label, address, postal, lat, lng } nearest address
+//   GET  /api/area?at=lat,lng                -> { area } planning area (e.g. "Tampines")
 //   POST /api/jobs   { device, jobs: [...] } -> { accepted, rejected }   add/update anonymous jobs
 //   GET  /api/jobs?since=REV&limit=N         -> { jobs, next, more }     page through the pool
 //   POST /api/jobs/delete { device, ids }    -> { deleted, missing }     remove your own jobs
@@ -150,6 +151,36 @@ async function route(from, to, env) {
 }
 
 // Nearest address to a point (where the driver was when they tapped), for prefilling the pickup.
+// The planning area a point is in (OneMap), e.g. "Tampines", "Downtown Core". Falls back to the
+// nearest road name if the planning area lookup isn't available.
+const titleCase = (s) => String(s).toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
+async function area(at, env) {
+  let token;
+  try {
+    token = await getToken(env);
+  } catch {
+    return json({ error: 'Signing in to OneMap failed.' }, 503);
+  }
+  if (!token) return json({ error: 'OneMap isn’t set up on the server yet.' }, 503);
+  const cacheHeaders = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=86400' };
+  try {
+    const url = new URL(`${OM}/api/public/popapi/getPlanningarea`);
+    url.searchParams.set('latitude', String(at.lat));
+    url.searchParams.set('longitude', String(at.lng));
+    const res = await fetch(url, { headers: { Authorization: token } });
+    if (res.ok) {
+      const data = await res.json();
+      const name = (Array.isArray(data) ? data : [data]).map((d) => d && (d.pln_area_n || d.planning_area)).find(Boolean);
+      if (name) return new Response(JSON.stringify({ area: titleCase(name), source: 'planning-area' }), { headers: cacheHeaders });
+    }
+  } catch { /* fall back to the road */ }
+  const r = await near(at, env);
+  if (!r.ok) return r;
+  const n = await r.json();
+  const road = String(n.address || n.label || '').replace(/^\d+\w?\s+/, '').replace(/\s+\d{6}$/, '');
+  return new Response(JSON.stringify({ area: road ? titleCase(road) : null, source: 'road' }), { headers: cacheHeaders });
+}
+
 async function near(at, env) {
   let token;
   try {
@@ -693,6 +724,11 @@ export default {
         const to = parsePoint(url.searchParams.get('to'));
         if (!from || !to) return json({ error: 'from and to must be lat,lng points in Singapore.' }, 400);
         return await route(from, to, env);
+      }
+      if (url.pathname === '/api/area') {
+        const at = parsePoint(url.searchParams.get('at'));
+        if (!at) return json({ error: 'at must be a lat,lng point in Singapore.' }, 400);
+        return await area(at, env);
       }
       if (url.pathname === '/api/near') {
         const at = parsePoint(url.searchParams.get('at'));

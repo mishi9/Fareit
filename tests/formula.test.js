@@ -225,3 +225,25 @@ test('airport zone: Changi terminals and holding areas, not Changi Business Park
   assert.equal(atAirport(null), false);
   assert.deepEqual(rounded({ lat: 1.354321, lng: 103.987654 }), { lat: 1.35, lng: 103.99 });
 });
+
+test('Window bands use trips near you around this hour, else all areas', async () => {
+  const { bandOutlook } = await import('../public/beta/formula.js');
+  const at = (iso) => Date.parse(iso);
+  const TAMPINES = { lat: 1.353, lng: 103.945 };
+  const ORCHARD = { lat: 1.304, lng: 103.832 };
+  const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
+    .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
+  // Orchard at 02:30 ran 30% above normal; nothing near Tampines then.
+  const orchard = [[10, 20], [15, 25], [8, 18], [22, 30]].map(([km, min], i) => {
+    const t = make(km, min, { ts: at(`2026-11-${17 + i}T02:30:00+08:00`), ...ORCHARD });
+    return { ...t, actual: Math.round(t.actual * 1.3 * 100) / 100 };
+  });
+  const trips = [...normal, ...orchard];
+  const when = at('2026-11-22T02:30:00+08:00');
+  const inOrchard = bandOutlook(trips, when, ORCHARD);
+  assert.equal(inOrchard[0].scope, 'here');
+  assert.ok(inOrchard.every((b) => b.state === 'good'), JSON.stringify(inOrchard.map((b) => b.vs)));
+  const inTampines = bandOutlook(trips, when, TAMPINES);
+  assert.equal(inTampines[0].scope, 'all', 'nothing near Tampines: falls back to all areas');
+  assert.equal(inTampines[0].nearHour, 5, 'the 4 Orchard trips plus the built-in base trip (~01:30)');
+});

@@ -6,7 +6,7 @@
 // and everyone's trips are pulled in, so the formula learns from every tester.
 import * as db from './db.js';
 import { buildQueue, syncQueue } from './queue.js';
-import { watchLocation, here, rounded } from './where.js';
+import { watchLocation, here, rounded, onMove } from './where.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
@@ -119,6 +119,7 @@ export async function buildLab(root) {
   lab.shared = (await db.getKV('formulaShared')) || {};
   lab.device = await db.getKV('device');
   watchLocation();
+  onMove(() => renderBands());
   // Trips saved before trip time and card time were split held the job card's total time (which
   // includes the drive to the pickup) as their time. Keep it as card time; trip time unknown.
   let moved = false;
@@ -201,23 +202,45 @@ export async function buildLab(root) {
 }
 
 // ---- Beta Window: earnings by distance band ----
+// The planning area for where the phone is, looked up once per ~1 km and kept for the session.
+const areaCache = {};
+function areaName(p) {
+  if (!p) return null;
+  const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+  if (key in areaCache) return areaCache[key];
+  areaCache[key] = null;
+  fetch(`../api/area?at=${key}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+    if (d && d.area) { areaCache[key] = d.area; renderBands(); }
+  }).catch(() => {});
+  return null;
+}
+
 export function renderBands() {
   const box = document.querySelector('#band-cards');
   if (!box) return;
   const now = Date.now();
-  const bands = bandOutlook(dataset(), now);
+  const loc = here();
+  const bands = bandOutlook(dataset(), now, loc);
   const h = new Date(now);
   const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
+  const place = loc ? (areaName(loc) || 'your area') : null;
+  const scope = bands[0].scope;
+  const basis = !bands[0].nearHour
+    ? `No trips ${loc ? `near ${place} ` : ''}around this hour yet, so "now" equals normal.`
+    : scope === 'here'
+      ? `From ${bands[0].nearHour} trip${bands[0].nearHour === 1 ? '' : 's'} near ${place} (within ${3} km) around this hour.`
+      : `${loc ? `No trips near ${place} around this hour yet; using all areas: ` : 'From '}${bands[0].nearHour} trip${bands[0].nearHour === 1 ? '' : 's'} around this hour.`;
   const word = { good: 'Above normal', normal: 'Normal', bad: 'Below normal' };
   box.innerHTML = `
-    <div class="band-head">What you'd earn now · ${at}</div>
+    <div class="band-head">What you'd earn now · ${place ? `${place} · ` : ''}${at}</div>
+    <div class="band-basis">${loc ? '' : 'Location off: using all areas. '}${basis}</div>
     ${bands.map((b) => `
       <div class="band-card ${b.state}">
         <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
         <div class="band-now">${money(b.now)}</div>
         <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)} <span class="band-km">(about ${Math.round(b.km)} km)</span></div>
       </div>`).join('')}
-    <p class="note band-note">Grey: normal for now. Green: fares at this hour have been running 10% or more above normal. Red: 10% or more below. ${bands[0].nearHour ? `From ${bands[0].nearHour} trip${bands[0].nearHour === 1 ? '' : 's'} around this hour.` : 'No trips around this hour yet, so "now" equals normal.'} Learns from every trip saved in the Formula tab.</p>`;
+    <p class="note band-note">Grey: normal for now. Green: fares here at this hour have been running 10% or more above normal. Red: 10% or more below. Learns from every trip saved in the Formula tab.</p>`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
 
