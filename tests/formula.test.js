@@ -462,3 +462,17 @@ test('Radar shows only what is immediately next, within the hour', () => {
   // 23:30 at Newton: CW5 done for the day -> nothing
   assert.equal(jbSoonest(at(23, 30), N), null);
 });
+
+test('ferries into HarbourFront: crossing times and interlined sailings shown once', () => {
+  const now = new Date(2026, 10, 18, 7, 0); // Wednesday 07:00
+  const next = ferryArrivals('hfc', now);
+  // Batam Centre 06:00 WIB -> 07:00 SGT + 70 = 08:10, listed by Batam Fast, Majestic and Sindo: one row
+  const btc = next.filter((a) => a.from === 'Batam Centre' && a.arrive === '08:10' && a.at.getDate() === 18);
+  assert.equal(btc.length, 1);
+  assert.match(btc[0].op, /Batam Fast/);
+  assert.match(btc[0].op, /Majestic/);
+  // Sekupang 06:00 -> 07:50; Harbour Bay 06:00 -> 08:00
+  assert.ok(next.some((a) => a.from.startsWith('Sekupang') && a.arrive === '07:50'));
+  assert.ok(next.some((a) => a.from.startsWith('Harbour Bay') && a.arrive === '08:00'));
+  assert.equal(ferryTerminalAt({ lat: 1.2652, lng: 103.8207 }).id, 'hfc');
+});

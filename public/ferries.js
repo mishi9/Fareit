@@ -44,6 +44,43 @@ export const FERRY_ROUTES = [
   { to: 'tmft', op: 'Sindo', from: 'Tanjung Pinang', min: 120, est: true, src: 'sindoferry.com.sg', runs: [
     { days: ALL, times: ['06:45', '13:30'] },
   ] },
+
+  // ---- Into HarbourFront ----
+  // Crossing times from the terminal's own arrivals board (Singapore Cruise Centre): a 06:00 WIB
+  // Batam Centre sailing is due 08:10 Singapore time (70 min), Sekupang 06:00 -> 07:50 (50 min),
+  // Harbour Bay 06:00 -> 08:00 (60 min). Karimun: 100 min (Singapore Cruise Centre).
+  { to: 'hfc', op: 'Batam Fast', from: 'Batam Centre', min: 70, src: 'batamfast.com (1 Nov 2026)', runs: [
+    { days: ALL, times: ['06:00', '07:00', '08:20', '09:50', '11:10', '12:50', '14:10', '15:20', '16:30', '17:40', '19:00', '20:30'] },
+  ] },
+  { to: 'hfc', op: 'Majestic', from: 'Batam Centre', min: 70, src: 'majesticfastferry.com.sg (15 May 2026)', runs: [
+    { days: ALL, times: ['06:00', '07:10', '08:20', '09:30', '10:20', '11:30', '12:20', '13:30', '14:30', '15:15', '16:00', '17:30', '18:30', '20:35'] },
+  ] },
+  { to: 'hfc', op: 'Sindo', from: 'Batam Centre', min: 70, src: 'sindoferry.com.sg', runs: [
+    { days: ALL, times: ['06:00', '07:20', '08:40', '10:40', '12:40', '14:00', '15:10', '16:10', '17:20', '18:20', '19:30', '20:20'] },
+  ] },
+  { to: 'hfc', op: 'Majestic', from: 'Sekupang (Batam)', min: 50, src: 'majesticfastferry.com.sg (15 May 2026)', runs: [
+    { days: ALL, times: ['06:00', '09:00', '13:10', '16:20', '18:00'] },
+  ] },
+  { to: 'hfc', op: 'Sindo / Batam Fast', from: 'Sekupang (Batam)', min: 50, src: 'sindoferry.com.sg, batamfast.com (1 Nov 2026)', runs: [
+    { days: ALL, times: ['06:00', '07:00', '08:30', '11:20', '12:30', '15:20', '17:00', '17:40', '20:30'] },
+    { days: WEEKEND, times: ['13:50'] },
+    { days: [0, 5, 6], times: ['15:30'] },
+  ] },
+  { to: 'hfc', op: 'Horizon', from: 'Harbour Bay (Batam)', min: 60, src: 'horizonfastferry.com.sg', runs: [
+    { days: ALL, times: ['06:00', '07:15', '08:30', '09:45', '10:45', '11:45', '12:45', '14:00', '15:30', '16:30', '17:30', '19:15', '20:30'] },
+  ] },
+  { to: 'hfc', op: 'Sindo', from: 'Gold Coast (Batam)', min: 60, est: true, src: 'sindoferry.com.sg', runs: [
+    { days: ALL, times: ['08:10', '10:30', '14:00', '15:30', '19:00'] },
+  ] },
+  { to: 'hfc', op: 'Sindo', from: 'Waterfront City (Batam)', min: 60, est: true, src: 'sindoferry.com.sg', runs: [
+    { days: ALL, times: ['13:20', '14:50'] },
+  ] },
+  { to: 'hfc', op: 'Sindo', from: 'Tanjung Balai (Karimun)', min: 100, src: 'sindoferry.com.sg', runs: [
+    { days: ALL, times: ['07:30', '14:00'] },
+  ] },
+  { to: 'hfc', op: 'Horizon', from: 'Nirup Island', min: 60, est: true, src: 'horizonfastferry.com.sg', runs: [
+    { days: [1], times: ['13:15'] },
+  ] },
 ];
 
 const mins = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
@@ -70,7 +107,15 @@ export function ferryArrivals(terminal, now = new Date()) {
       }
     }
   }
-  return out.filter((a) => a.at.getTime() >= now.getTime() - 10 * 60000).sort((a, b) => a.at - b.at);
+  // The same sailing listed by two operators (interlined trips): show it once.
+  const merged = new Map();
+  for (const a of out) {
+    const k = `${a.from}|${a.at.getTime()}`;
+    const m = merged.get(k);
+    if (!m) merged.set(k, { ...a });
+    else if (!m.op.split(' / ').includes(a.op)) m.op = [...new Set([...m.op.split(' / '), ...a.op.split(' / ')])].join(' / ');
+  }
+  return [...merged.values()].filter((a) => a.at.getTime() >= now.getTime() - 10 * 60000).sort((a, b) => a.at - b.at);
 }
 
 const kmTo = (a, b) => {
