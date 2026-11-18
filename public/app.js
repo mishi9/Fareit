@@ -105,7 +105,7 @@ async function checkStatus() {
     const s = await api('/api/status');
     if (s.keyRequired && !s.authorized) { chip.textContent = chipText('Access key needed', 'Key needed'); chip.className = 'chip warn'; }
     else if (!s.map) { chip.textContent = chipText('Map not set up', 'No map'); chip.className = 'chip warn'; }
-    else { chip.textContent = chipText('OneMap ready', 'Map ✓'); chip.className = 'chip ok'; }
+    else { chip.innerHTML = '<span class="live-dot" aria-hidden="true"></span>OneMap'; chip.setAttribute('aria-label', 'OneMap ready'); chip.className = 'chip ok'; }
   } catch {
     chip.textContent = chipText('Server unreachable', 'No server');
     chip.className = 'chip warn';

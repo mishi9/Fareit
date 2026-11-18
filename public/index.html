@@ -15,6 +15,8 @@
 <script>
   // The beta is now the main app: forget the old "open the beta" setting.
   try { localStorage.removeItem('fareit-channel'); } catch (e) {}
+  // Opened from the Home Screen (iPhone sets navigator.standalone): the header sits a little lower.
+  if (navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)) document.documentElement.classList.add('standalone');
   // Opened from an invite link: Add to Home Screen should open the app with the invite, so the
   // Home Screen app (which has its own storage on an iPhone) can let itself in.
   (function () {
