@@ -17,19 +17,6 @@
   try { localStorage.removeItem('fareit-channel'); } catch (e) {}
   // Opened from the Home Screen (iPhone sets navigator.standalone): the header sits a little lower.
   if (navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)) document.documentElement.classList.add('standalone');
-  // iPhone Home Screen app: the app fills the whole screen, but the iPhone reports a viewport shorter
-  // by the top and bottom bars, so a bar pinned to the "bottom" floats. Size the app to the screen.
-  if (navigator.standalone) {
-    document.documentElement.classList.add('ios-app');
-    var setAppH = function () {
-      var land = window.matchMedia && matchMedia('(orientation: landscape)').matches;
-      var h = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
-      document.documentElement.style.setProperty('--app-h', h + 'px');
-    };
-    setAppH();
-    window.addEventListener('orientationchange', function () { setTimeout(setAppH, 300); });
-    window.addEventListener('resize', setAppH);
-  }
   // Opened from an invite link: Add to Home Screen should open the app with the invite, so the
   // Home Screen app (which has its own storage on an iPhone) can let itself in.
   (function () {
@@ -192,6 +179,7 @@
         <div class="st-row"><span>Access</span><b id="st-access">—</b></div>
         <div class="st-row"><span>Location</span><b id="st-loc">—</b></div>
         <div class="st-row"><span>Screen</span><b>Stays on while Radar is open</b></div>
+        <div class="st-row"><span>Screen size</span><b id="st-screen" class="mono-s">—</b></div>
         <div class="st-row st-ver-row"><span>Version</span><span class="st-ver-r"><b id="st-ver">—</b><button type="button" class="ghost small" id="st-update">Check for update</button></span></div>
       </div>
       <p class="note" id="st-loc-help" hidden></p>

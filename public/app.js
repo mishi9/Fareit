@@ -851,7 +851,22 @@ async function installUpdate(btn) {
 }
 
 // The parts that change: location, how many trips.
+// What the phone reports about its screen (to sort out the iPhone Home Screen layout).
+function screenReadout() {
+  const el = $('#st-screen');
+  if (!el) return;
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);visibility:hidden';
+  document.body.append(probe);
+  const cs = getComputedStyle(probe);
+  const tabs = document.querySelector('.tabs').getBoundingClientRect();
+  const vv = window.visualViewport;
+  el.textContent = `${screen.width}×${screen.height} · win ${innerHeight} · vv ${vv ? Math.round(vv.height) : '-'} · safe ${parseFloat(cs.paddingTop)}/${parseFloat(cs.paddingBottom)} · bar ${Math.round(tabs.top)}–${Math.round(tabs.bottom)}${navigator.standalone ? ' · app' : ''}`;
+  probe.remove();
+}
+
 function renderSettingsLive() {
+  screenReadout();
   const st = locationState();
   $('#st-loc').textContent = st === 'ok' ? 'On' : st === 'denied' ? 'Off' : 'Waiting…';
   const help = $('#st-loc-help');
@@ -1069,14 +1084,10 @@ async function boot() {
   const sizeWindow = () => {
     const top = $('.top').offsetHeight + parseFloat(getComputedStyle($('main')).paddingTop || '0');
     document.documentElement.style.setProperty('--top-h', `${top}px`);
-    const m = $('main'), cs = getComputedStyle(m);
-    const h = m.clientHeight - parseFloat(cs.paddingTop || '0') - parseFloat(cs.paddingBottom || '0');
-    if (h > 0) document.documentElement.style.setProperty('--view-h', `${h}px`);
   };
   sizeWindow();
   window.addEventListener('resize', sizeWindow);
   // The middle can change size after load (the iPhone settles its screen size late): keep Radar filling it.
-  if (window.ResizeObserver) new ResizeObserver(sizeWindow).observe($('main'));
   renderToday();
   setInterval(renderToday, 60 * 1000);
   buildWindow();
