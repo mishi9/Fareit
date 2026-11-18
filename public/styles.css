@@ -613,3 +613,7 @@ main { flex: 1 0 auto; width: 100%; padding-bottom: 36px; }
 .shot-big-in img { display: block; width: 100%; height: auto; border-radius: 14px; }
 .shot-big-in .log-n { position: absolute; transform: translate(-50%, -50%); margin: 0; width: 30px; height: 30px; font-size: 15px; box-shadow: 0 0 0 3px #000; }
 .shot-big .note { color: #ddd; text-align: center; max-width: 92vw; }
+.log-km-note { margin: 4px 0 8px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 14%, var(--surface)); border: 1px solid var(--warn); font-size: 14px; }
+/* thumbnails: small marks so they don't crowd; full size when the photo is opened */
+.log-shot-img .log-n, .log-shot-img .log-n.sm { width: 15px; height: 15px; font-size: 9px; box-shadow: 0 0 0 1.5px var(--bg); }
+.log-shot { align-content: start; } .log-shot-img { align-self: start; line-height: 0; }

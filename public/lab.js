@@ -187,6 +187,7 @@ export async function buildLab(root) {
       </div></div>
 
     <details class="log-guide" id="lab-guide"><summary>Where do I find these numbers?</summary>
+      <p class="log-km-note">Distances in <b>km</b>: if Grab shows metres, divide by 1000. <b>800 m = 0.8</b> · 1,250 m = 1.25</p>
       <div class="log-guide-key">
         <span><span class="log-n">1</span> Trip km</span>
         <span><span class="log-n">2</span> Passenger paid · You earned</span>
