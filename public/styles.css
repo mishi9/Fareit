@@ -475,7 +475,7 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 @media (max-width: 360px) { .top { gap: 6px; } .today-date { font-size: 12px; } .today-day { font-size: 11px; } .chip { padding: 4px 8px; font-size: 11px; } }
 
 /* Home Screen app: the header sits a little lower, clear of the iPhone status bar. */
-.standalone .top { padding-top: calc(env(safe-area-inset-top, 0px) + 10px + 3vh); }
+.standalone .top { padding-top: calc(env(safe-area-inset-top, 0px) + 10px + 1vh); }
 /* "● OneMap": a green dot that glows softly, like a recording light. */
 .chip.ok { display: inline-flex; align-items: center; gap: 6px; }
 /* Battery: the glow is drawn once on its own layer; only its opacity and size are animated, which
