@@ -305,10 +305,14 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
 .tabs button.on { color: var(--ink); }
 /* Log: the main tab, in the middle, baby blue (the reverse of the dark app) and raised above the bar. */
 .tabs .tab-main { color: var(--ink); font-weight: 800; font-size: 13px; overflow: visible; }
-.tabs .tab-disc { display: grid; place-items: center; width: 56px; height: 56px; margin-top: -26px; border-radius: 50%;
+.tabs .tab-disc { position: relative; display: grid; place-items: center; width: 56px; height: 56px; margin-top: -26px; border-radius: 50%;
   background: var(--log); color: var(--log-ink); border: 4px solid var(--bg); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
 .tabs .tab-main .ti { width: 27px; height: 27px; stroke-width: 2.2; }
-.tabs .tab-main.on .tab-disc { box-shadow: 0 0 0 2px var(--log), 0 4px 16px color-mix(in srgb, var(--log) 55%, transparent); }
+.tabs .tab-main.on .tab-disc { box-shadow: 0 0 0 2px var(--log), 0 4px 14px rgba(0, 0, 0, 0.35); }
+/* On the Log tab: a slow breathing glow, same cheap method as the OneMap dot. Off on other tabs. */
+.tabs .tab-main.on .tab-disc::after { content: ""; position: absolute; inset: -12px; border-radius: 50%; z-index: -1; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--log) 60%, transparent) 40%, transparent 70%);
+  animation: glow-breathe 3s ease-in-out infinite; will-change: opacity, transform; }
 .tabs .tab-main:active .tab-disc { transform: scale(0.95); }
 .badge { background: var(--warn); color: #1b1300; border-radius: 999px; font-size: 11px; padding: 1px 6px; font-weight: 800; }
 
@@ -474,13 +478,14 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .standalone .top { padding-top: calc(env(safe-area-inset-top, 0px) + 10px + 5vh); }
 /* "● OneMap": a green dot that glows softly, like a recording light. */
 .chip.ok { display: inline-flex; align-items: center; gap: 6px; }
-.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--go); box-shadow: 0 0 6px 1px color-mix(in srgb, var(--go) 70%, transparent);
-  animation: live-glow 2s ease-in-out infinite; }
-@keyframes live-glow {
-  0%, 100% { box-shadow: 0 0 4px 0 color-mix(in srgb, var(--go) 60%, transparent); opacity: 0.85; }
-  50% { box-shadow: 0 0 9px 3px color-mix(in srgb, var(--go) 75%, transparent); opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+/* Battery: the glow is drawn once on its own layer; only its opacity and size are animated, which
+   the phone's graphics chip does without repainting. */
+.live-dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--go); }
+.live-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--go) 75%, transparent) 0, transparent 70%);
+  animation: glow-breathe 2s ease-in-out infinite; will-change: opacity, transform; }
+@keyframes glow-breathe { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.25); } }
+@media (prefers-reduced-motion: reduce) { .live-dot::after, .tabs .tab-main.on .tab-disc::after { animation: none; } }
 
 /* Settings */
 .st-rows { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
@@ -522,3 +527,16 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 
 .st-ver-r { display: inline-flex; align-items: center; gap: 10px; }
 .st-ver-row { align-items: center; }
+
+/* Log: three numbers, big boxes, numbered steps */
+.log-head h2 { margin: 0; font-size: 24px; }
+.log-head .note { margin: 2px 0 0; }
+.log-step { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: end; }
+.log-n { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 9px; border-radius: 50%;
+  background: var(--log); color: var(--log-ink); font-weight: 800; font-size: 15px; }
+.log-big { font-size: 22px !important; font-weight: 700; min-height: 54px; font-variant-numeric: tabular-nums; }
+.log-save { min-height: 56px; font-size: 18px; }
+.log-more summary { color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px 0; }
+.log-more > .stack { margin-top: 8px; }
+.log-tip { margin: 0; }
+.lab-check .close { color: var(--go); } .lab-check .off { color: var(--warn); } .lab-check .far { color: var(--stop); }

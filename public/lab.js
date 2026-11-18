@@ -160,61 +160,70 @@ export async function buildLab(root) {
   root.innerHTML = `
     <div class="card lab-formula" id="lab-formula"></div>
 
-    <div id="lab-form-home"><div id="lab-form" class="stack">
-    <div class="row2">
-      <div class="field"><label for="lab-km">Trip km (pickup → drop-off)</label>
-        <input id="lab-km" type="number" inputmode="decimal" step="0.1" min="0"></div>
-      <div class="field"><label for="lab-min">Trip min from pickup</label>
-        <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="blank = estimate"></div>
+    <div id="lab-form-home"><div id="lab-form" class="stack log-form">
+    <div class="log-head"><h2>Log a job</h2><p class="note">Three numbers from Grab's trip summary.</p></div>
+
+    <div class="log-step"><span class="log-n">1</span>
+      <div class="field"><label for="lab-km">Trip km</label>
+        <input id="lab-km" class="log-big" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 8.4"></div></div>
+    <div id="lab-surge" class="seg g3">
+      <button type="button" data-v="normal">Normal</button>
+      <button type="button" data-v="surge">Surge ↑</button>
+      <button type="button" data-v="airport">Airport</button>
     </div>
-    <p class="hint">Trip only, from the pickup point: the passenger's price doesn't include your way there. The card's total time includes it, so put that below instead.</p>
-    <div class="row2">
-      <div class="field"><label for="lab-cardmin">Card total min (optional)</label>
-        <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0"></div>
-      <div class="field"><label for="lab-pickupkm">Km to pickup (optional)</label>
-        <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0"></div>
-    </div>
-    <div class="field"><span class="flabel">Pricing</span>
-      <div id="lab-surge" class="seg g3">
-        <button type="button" data-v="normal">Normal</button>
-        <button type="button" data-v="surge">Surge ↑</button>
-        <button type="button" data-v="airport">Airport</button>
-      </div></div>
 
     <div class="lab-predict" id="lab-predict" aria-live="polite">
       <div class="lab-two">
-        <div><div class="k">Paid by passenger</div><div class="v" id="lab-pred">—</div></div>
-        <div><div class="k">You earn</div><div class="v sm" id="lab-pred-earn">—</div></div>
+        <div><div class="k">Estimate</div><div class="v" id="lab-pred">—</div></div>
+        <div><div class="k">You get</div><div class="v sm" id="lab-pred-earn">—</div></div>
       </div>
-      <div class="s" id="lab-pred-sub">Type the distance and time.</div>
+      <div class="s" id="lab-pred-sub">Type the trip km.</div>
       <div class="s" id="lab-tod"></div>
       <div class="s surge-est" id="lab-surge-est"></div>
     </div>
 
-    <div class="row2">
-      <div class="field"><label for="lab-actual">Paid by passenger, actual (S$)</label>
-        <input id="lab-actual" type="number" inputmode="decimal" step="0.01" min="0"></div>
-      <div class="field"><label for="lab-earned">You earned, actual (S$)</label>
-        <input id="lab-earned" type="number" inputmode="decimal" step="0.01" min="0"></div>
-    </div>
+    <div class="log-step"><span class="log-n">2</span>
+      <div class="row2">
+        <div class="field"><label for="lab-actual">Passenger paid (S$)</label>
+          <input id="lab-actual" class="log-big" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div class="field"><label for="lab-earned">You earned (S$)</label>
+          <input id="lab-earned" class="log-big" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      </div></div>
     <div class="lab-check" id="lab-check"></div>
     <p class="msg" id="lab-msg" role="status"></p>
-    <div class="row2">
-      <button type="button" class="primary" id="lab-save">Save trip</button>
-      <button type="button" class="ghost" id="lab-clear">Clear</button>
-    </div>
+    <button type="button" class="primary wide log-save" id="lab-save">Save job</button>
+
+    <details class="log-more"><summary>More details (optional)</summary>
+      <div class="stack">
+        <div class="row2">
+          <div class="field"><label for="lab-min">Trip minutes</label>
+            <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="blank = estimate"></div>
+          <div class="field"><label for="lab-cardmin">Job card total min</label>
+            <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0"></div>
+        </div>
+        <div class="field"><label for="lab-pickupkm">Km to pickup</label>
+          <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <p class="hint">Trip only, from pickup to drop-off. The job card's total time includes your drive to the pickup.</p>
+        <button type="button" class="ghost small" id="lab-clear">Clear the form</button>
+      </div>
+    </details>
+    <p class="note log-tip">On the road? Tap <b>Got a job</b> on Radar at pickup: it keeps the time and place for you.</p>
     </div></div>
 
-
-    <h2>How close it's getting</h2>
-    <div id="lab-stats"></div>
-    <h2>By time of day</h2>
-    <div id="lab-tod-table"></div>
-    <h2 id="lab-cut-h">Grab's cut</h2>
-    <div id="lab-cut"></div>
-    <h2>Your trips</h2>
+    <h2>Your jobs</h2>
     <p class="note" id="lab-sync"></p>
     <div id="lab-list" class="stack"></div>
+
+    <details class="log-more" id="lab-how"><summary>How the estimates are doing</summary>
+      <div class="stack">
+        <h2>How close it's getting</h2>
+        <div id="lab-stats"></div>
+        <h2>By time of day</h2>
+        <div id="lab-tod-table"></div>
+        <h2 id="lab-cut-h">Grab's cut</h2>
+        <div id="lab-cut"></div>
+      </div>
+    </details>
     <button type="button" class="ghost wide" id="lab-export">Export CSV</button>`;
 
   for (const id of ['lab-km', 'lab-min', 'lab-cardmin', 'lab-pickupkm', 'lab-actual', 'lab-earned']) $(`#${id}`, root).addEventListener('input', update);
@@ -380,8 +389,9 @@ function readForm() {
 }
 
 // Live: the predicted fare and earnings appear as soon as distance and time are in.
-function update() {
+function update(ev) {
   const r = lab.root;
+  if (ev && ev.type === 'input') { const m = $('#lab-msg', r); if (m.classList.contains('err')) { m.textContent = ''; m.classList.remove('err'); } }
   for (const b of r.querySelectorAll('#lab-surge button')) b.classList.toggle('sel', b.dataset.v === lab.surge);
   const f = readForm();
   const pred = $('#lab-pred', r);
@@ -392,7 +402,7 @@ function update() {
   if (!(f.km > 0)) {
     pred.textContent = '—';
     predEarn.textContent = '—';
-    sub.textContent = 'Type the trip km (and trip minutes if you have them).';
+    sub.textContent = 'Type the trip km.';
     tod.textContent = '';
     check.innerHTML = '';
     $('#lab-predict', r).className = 'lab-predict';
@@ -409,12 +419,14 @@ function update() {
   pred.textContent = money(shown);
   predEarn.textContent = money(earn);
   const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
-  sub.textContent = `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}${isOwner() ? `Normal-price formula. ${cutLabel}.` : 'Normal price, no surge.'}`;
+  sub.textContent = isOwner()
+    ? `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.`
+    : `${p.atMinimum ? 'Minimum fare. ' : ''}Now type what Grab shows.`;
   const surgeEl = $('#lab-surge-est', r);
   const kindName = f.surge === 'airport' ? 'airport' : 'surge';
   const startText = f.surge === 'airport' ? 'No airport trips yet, so no difference is assumed: each airport trip you save shows whether they\'re priced differently.' : 'The +20% is a starting guess: each surge trip you save adjusts it.';
   surgeEl.innerHTML = sl && !isOwner()
-    ? `${f.surge === 'airport' ? 'Airport' : 'Surge'} estimate: <b>${money(shown)}</b> (normal ${money(p.fare)}). ${sl.guess ? 'A starting guess for now: it learns from every ' + kindName + ' trip saved.' : `Learned from ${sl.n} ${kindName} trip${sl.n === 1 ? '' : 's'}.`}`
+    ? `Includes ${f.surge === 'airport' ? 'airport' : 'surge'} ${signed(sl.lift)} (normal ${money(p.fare)}).`
     : sl
     ? `${f.surge === 'airport' ? 'Airport' : 'Surge'}: normal fare <b>${money(p.fare)}</b> ${signed(sl.lift)} = <b>${money(shown)}</b>. ${sl.guess ? startText : `Learned from ${sl.n} ${kindName} trip${sl.n === 1 ? '' : 's'}${sl.near ? `, ${sl.near} around this hour` : ''}; adjusts with every ${kindName} trip.`}`
     : '';
@@ -423,7 +435,9 @@ function update() {
   const t = timeOfDay(dataset(), f.ts);
   const h = new Date(f.ts);
   const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
-  if (t.near === 0) {
+  if (!isOwner()) {
+    tod.textContent = '';
+  } else if (t.near === 0) {
     tod.textContent = `Around ${at}: no trips near this hour yet.`;
   } else {
     const likely = Math.round(p.fare * (1 + t.lift) * 100) / 100;
@@ -447,6 +461,20 @@ function update() {
   if (f.actual > 0) row('Passenger paid', shown, f.actual);
   if (f.earned > 0) row('You earned', earn, f.earned);
   if (!rows.length) { check.innerHTML = ''; return; }
+  if (!isOwner()) {
+    const plain = (label, est, actual) => {
+      if (!(actual > 0)) return '';
+      const vs = actual / est - 1;
+      const cls = Math.abs(vs) <= 0.05 ? 'close' : Math.abs(vs) <= 0.15 ? 'off' : 'far';
+      return `<div class="kept">${label}: <b class="${cls}">${Math.abs(vs) < 0.005 ? 'spot on' : `${signed(vs)} vs estimate`}</b></div>`;
+    };
+    check.innerHTML = plain('Passenger paid', shown, f.actual) + plain('You earned', earn, f.earned);
+    if (f.actual > 0 && f.surge === 'normal' && (f.actual - p.fare) / p.fare >= SURGE_HINT) {
+      check.innerHTML += `<div class="surge-hint">Much higher than normal. Was it a surge job (green ↑)? <button type="button" class="ghost small" data-act="mark-surge">Yes, surge</button></div>`;
+      check.querySelector('[data-act="mark-surge"]').addEventListener('click', () => { lab.surge = 'surge'; update(); });
+    }
+    return;
+  }
   // Marked normal but well above the normal formula: maybe untagged surge.
   let hint = '';
   if (f.actual > 0 && f.surge === 'normal') {
@@ -474,8 +502,8 @@ function update() {
 async function save() {
   const f = readForm();
   const msg = $('#lab-msg', lab.root);
-  if (!(f.km > 0)) { msg.textContent = 'Add the trip km.'; msg.classList.add('err'); return; }
-  if (!(f.actual > 0)) { msg.textContent = 'Add what the passenger actually paid.'; msg.classList.add('err'); return; }
+  if (!(f.km > 0)) { msg.textContent = 'Step 1: add the trip km.'; msg.classList.add('err'); $('#lab-km', lab.root).focus(); return; }
+  if (!(f.actual > 0)) { msg.textContent = 'Step 2: add what the passenger paid.'; msg.classList.add('err'); $('#lab-actual', lab.root).focus(); return; }
   const sane = plausible({ km: f.km, min: f.min, paid: f.actual, earned: f.earned, erp: f.erp });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Predictions are recorded before this trip changes anything: an honest test each time.
@@ -500,7 +528,9 @@ async function save() {
   await db.setKV(KEY, lab.trips);
   syncLab();
   msg.classList.remove('err');
-  msg.textContent = `Saved. Paid: estimate ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Estimates updated.`;
+  msg.textContent = isOwner()
+    ? `Saved. Paid: estimate ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Estimates updated.`
+    : `Saved \u2713 ${f.km} km · paid ${money(f.actual)}${f.earned > 0 ? ` · earned ${money(f.earned)}` : ''}. Thanks: estimates updated.`;
   lab.pending = null;
   clearForm(true);
   renderAll();
@@ -776,15 +806,16 @@ function renderList() {
   renderCut();
   $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload so every driver\'s estimates learn from them.';
   const box = $('#lab-list', lab.root);
-  box.innerHTML = lab.trips.length ? '' : '<p class="empty">No trips of yours yet.</p>';
+  box.innerHTML = lab.trips.length ? '' : '<p class="empty">No jobs logged yet. Your first one takes 10 seconds.</p>';
   for (const t of [...lab.trips].reverse()) {
     const cut = cutOf(t);
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
-      <div class="meta">${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}</div>
-      <div class="meta">${t.quick ? `Quick entry from Got a job: earned ${money(t.earned)}${t.predictedEarned ? ` (normal about ${money(t.predictedEarned)})` : ''}. Add the passenger fare in a full entry to sharpen the estimates.` : ''}${t.quick ? '' : `Paid: estimate said ${money(t.predicted)} (${offText(t.predicted, t.actual)})`}${!t.quick && t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
+      ${isOwner() ? '' : `<div class="meta">${t.km} km${t.dropLabel ? ` to ${t.dropLabel.replace(/[<>&"]/g, '')}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}${t.earned > 0 ? ` · earned ${money(t.earned)}` : ''}</div>`}
+      <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}</div>
+      <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.quick ? `Quick entry from Got a job: earned ${money(t.earned)}${t.predictedEarned ? ` (normal about ${money(t.predictedEarned)})` : ''}. Add the passenger fare in a full entry to sharpen the estimates.` : ''}${t.quick ? '' : `Paid: estimate said ${money(t.predicted)} (${offText(t.predicted, t.actual)})`}${!t.quick && t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';
     let armed = false;
