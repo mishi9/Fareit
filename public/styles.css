@@ -182,7 +182,7 @@ main {
    the screen between the header and the tabs, and the thumb area is pushed to the bottom. */
 #view-window:not([hidden]) {
   display: flex; flex-direction: column; gap: 12px;
-  min-height: calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px));
+  min-height: var(--view-h, calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px)));
 }
 #view-window .thumb { margin-top: auto; display: grid; gap: 12px; }
 #view-window .group { gap: 6px; }
@@ -475,7 +475,7 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 @media (max-width: 360px) { .top { gap: 6px; } .today-date { font-size: 12px; } .today-day { font-size: 11px; } .chip { padding: 4px 8px; font-size: 11px; } }
 
 /* Home Screen app: the header sits a little lower, clear of the iPhone status bar. */
-.standalone .top { padding-top: calc(env(safe-area-inset-top, 0px) + 10px + 5vh); }
+.standalone .top { padding-top: calc(env(safe-area-inset-top, 0px) + 10px + 2vh); }
 /* "● OneMap": a green dot that glows softly, like a recording light. */
 .chip.ok { display: inline-flex; align-items: center; gap: 6px; }
 /* Battery: the glow is drawn once on its own layer; only its opacity and size are animated, which
@@ -573,3 +573,16 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .log-shot-img .log-n, .log-shot-img .log-n.sm { width: 26px; height: 26px; font-size: 13px; }
 .log-guide-key > span:not(.adv-h) { display: grid; grid-template-columns: 26px 1fr; flex-wrap: nowrap; }
 .log-guide-key .adv-h { color: var(--warn); font-weight: 800; }
+
+/* App shell: the screen itself never scrolls, so the header and the tab bar stay put on every tab
+   (iPhone Home Screen apps moved a fixed bar with the page). Only the middle (main) scrolls. */
+html, body { overflow: hidden; }
+body { position: fixed; inset: 0; display: flex; flex-direction: column; }
+.top { position: relative; flex: none; }
+main { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  width: 100%; max-width: none; margin: 0;
+  padding-bottom: 36px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px), calc((100% - 528px) / 2));
+  padding-right: max(16px, env(safe-area-inset-right, 0px), calc((100% - 528px) / 2)); }
+.tabs { position: relative; flex: none; }
+body.sheet-open main { overflow: hidden; }

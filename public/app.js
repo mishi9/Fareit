@@ -1069,6 +1069,9 @@ async function boot() {
   const sizeWindow = () => {
     const top = $('.top').offsetHeight + parseFloat(getComputedStyle($('main')).paddingTop || '0');
     document.documentElement.style.setProperty('--top-h', `${top}px`);
+    const m = $('main'), cs = getComputedStyle(m);
+    const h = m.clientHeight - parseFloat(cs.paddingTop || '0') - parseFloat(cs.paddingBottom || '0');
+    if (h > 0) document.documentElement.style.setProperty('--view-h', `${h}px`);
   };
   sizeWindow();
   window.addEventListener('resize', sizeWindow);
