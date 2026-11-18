@@ -49,6 +49,7 @@
 //                                  for an open, collective app.
 
 import { inAirportZone } from '../public/airport-zone.js';
+import { rainAt } from '../public/rain.js';
 import { plausible } from '../public/sanity.js';
 
 const OM = 'https://www.onemap.gov.sg';
@@ -559,7 +560,8 @@ const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
     min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
     predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0,
-    card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng, rain = excluded.rain
+    card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng,
+    rain = COALESCE(excluded.rain, formula_trips.rain)
   WHERE formula_trips.device = excluded.device`;
 
 async function readJson(request) {
@@ -972,7 +974,52 @@ export function cleanRain(rainfall, forecast, now = Date.now()) {
   return out;
 }
 
-async function getRain(env) {
+// Trips saved without a rain tag (before rain was added, or with no rain data on the phone) are
+// checked against NEA's own past readings for their time and place: the same rule as on the phone
+// (a gauge within 3 km with rain in that 5-10 minutes, or the town's 2-hour forecast wet).
+// A few at a time (RAIN_BACKFILL_PER_RUN), from the last RAIN_BACKFILL_DAYS days.
+export const RAIN_BACKFILL_PER_RUN = 10;
+export const RAIN_BACKFILL_DAYS = 3;
+const sgIso = (ms) => new Date(ms + 8 * 3600000).toISOString().slice(0, 19); // NEA takes Singapore time
+async function neaAt(env, path, ms) {
+  const key = `nea:${path}:${sgIso(ms)}`;
+  const row = await env.DB.prepare('SELECT value FROM cache WHERE key = ?1').bind(key).first();
+  if (row) return JSON.parse(row.value);
+  const res = await fetch(`${NEA}/${path}?date=${sgIso(ms)}`, { headers: { accept: 'application/json' } });
+  if (!res.ok) throw new Error(`NEA ${res.status}`);
+  const body = await res.json();
+  await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES (?1, ?2, ?3)
+    ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(key, Date.now(), JSON.stringify(body)).run();
+  return body;
+}
+// What the phone would have seen at ts: the two 5-minute readings up to then, and the forecast.
+export async function rainThen(env, ts) {
+  const slot = Math.floor(ts / 300000) * 300000;
+  const [a, b, f] = await Promise.all([neaAt(env, 'rainfall', slot), neaAt(env, 'rainfall', slot - 300000), neaAt(env, 'two-hr-forecast', ts)]);
+  const one = cleanRain(a, f, ts);
+  const two = cleanRain(b, null, ts);
+  return { ...one, readAt: ts, wet: [...one.wet, ...two.wet] };
+}
+export async function backfillRain(env, now = Date.now()) {
+  await ensureSchema(env.DB);
+  const { results } = await env.DB.prepare(`SELECT id, ts, lat, lng FROM formula_trips WHERE rain IS NULL AND deleted IS NOT 1
+      AND lat IS NOT NULL AND lng IS NOT NULL AND ts > ?1 AND ts < ?2 ORDER BY ts DESC LIMIT ?3`)
+    .bind(now - RAIN_BACKFILL_DAYS * 86400000, now - 10 * 60000, RAIN_BACKFILL_PER_RUN).all();
+  let tagged = 0;
+  for (const t of results) {
+    let data;
+    try { data = await rainThen(env, t.ts); } catch { break; } // NEA unreachable: try again next time
+    const rain = rainAt({ lat: t.lat, lng: t.lng }, data, t.ts) ? 1 : 0;
+    await env.DB.prepare(`UPDATE formula_trips SET rain = ?1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips)
+      WHERE id = ?3 AND rain IS NULL`).bind(rain, now, t.id).run();
+    tagged++;
+  }
+  // past readings kept a day, then dropped
+  await env.DB.prepare("DELETE FROM cache WHERE key LIKE 'nea:%' AND at < ?1").bind(now - 86400000).run();
+  return tagged;
+}
+
+async function getRain(env, ctx) {
   await ensureSchema(env.DB);
   const now = Date.now();
   const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'rain'").first();
@@ -993,6 +1040,9 @@ async function getRain(env) {
       await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('rain', ?1, ?2)
         ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(now, JSON.stringify(rain)).run();
     }
+    // With each refresh, tag a few untagged trips from the past days (in the background).
+    const job = backfillRain(env, now).catch(() => 0);
+    if (ctx && ctx.waitUntil) ctx.waitUntil(job); else await job;
   }
   return json(rain || { at: null, wet: [], stations: 0, areas: [] });
 }
@@ -1276,7 +1326,7 @@ function inviteManifest(url) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
@@ -1329,7 +1379,7 @@ export default {
     }
     if (url.pathname === '/api/rain') {
       if (!env.DB) return json({ at: null, wet: [], stations: 0, areas: [] });
-      try { return await getRain(env); } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
+      try { return await getRain(env, ctx); } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
     }
     if (url.pathname === '/api/surge') {
       if (!env.DB) return json({ points: [] });

@@ -115,13 +115,19 @@ export function syncLab() {
       if (todo.length) await db.setKV(KEY, lab.trips);
       // everyone's trips since last time
       let cursor = (await db.getKV('formulaCursor')) || 0;
+      let ownTagged = false;
       for (let page = 0; page < 20; page++) {
         const res = await fetch(`/api/formula?since=${cursor}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         for (const r of data.trips || []) {
           if (r.deleted) delete lab.shared[r.id];
-          else lab.shared[r.id] = fromRow(r);
+          else {
+            lab.shared[r.id] = fromRow(r);
+            // The server tagged one of your trips with rain from NEA's past readings: keep it.
+            const own = (r.rain === 0 || r.rain === 1) && lab.trips.find((t) => t.id === r.id && t.rain == null);
+            if (own) { own.rain = r.rain; ownTagged = true; }
+          }
           changed();
         }
         cursor = data.next ?? cursor;
@@ -129,6 +135,7 @@ export function syncLab() {
       }
       await db.setKV('formulaShared', lab.shared);
       await db.setKV('formulaCursor', cursor);
+      if (ownTagged) await db.setKV(KEY, lab.trips);
       const waiting = lab.trips.filter((t) => t.uploaded !== printOf(t)).length;
       lab.syncNote = waiting ? `${waiting} trip${waiting === 1 ? '' : 's'} waiting to upload.` : `Synced at ${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: false })}.`;
     } catch {
