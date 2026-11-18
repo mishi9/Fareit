@@ -153,9 +153,9 @@ export function syncLab() {
 // photo (x, y in % of the photo): 1 and 2 for the form's steps, A B C for Advanced.
 // Grab screenshots with personal details blacked out and the maps blurred.
 const GUIDE = [
-  { src: 'guide/log-1.jpg', title: 'Job card', note: '1 trip km · B total min · C km to pickup', marks: [{ k: 'B', x: 62, y: 75.2 }, { k: 'C', x: 77.5, y: 79 }, { k: '1', x: 76, y: 82.9 }] },
-  { src: 'guide/log-2.jpg', title: 'On the way to pickup', note: 'A = B − this time (32 − 3 = 29 min)', marks: [{ k: 'A', x: 32.5, y: 85.2 }] },
-  { src: 'guide/log-3.jpg', title: 'Route details', note: '2 you earn · passenger paid', marks: [{ k: '2', x: 50, y: 14.3 }, { k: '2', x: 76.5, y: 71.8 }] },
+  { src: 'guide/log-1.jpg', title: 'Job card', note: '1 trip km · B total min · C km to pickup', marks: [{ k: 'B', x: 62, y: 73.9 }, { k: 'C', x: 77.5, y: 77.9 }, { k: '1', x: 76, y: 82 }] },
+  { src: 'guide/log-2.jpg', title: 'On the way to pickup', note: 'A = B − this time (32 − 3 = 29 min)', marks: [{ k: 'A', x: 32.5, y: 84.4 }] },
+  { src: 'guide/log-3.jpg', title: 'Route details', note: '2 you earn · passenger paid', marks: [{ k: '2', x: 50, y: 9.8 }, { k: '2', x: 76.5, y: 70.3 }] },
 ];
 
 export async function buildLab(root) {
