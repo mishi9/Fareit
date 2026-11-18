@@ -450,3 +450,6 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .band-card.event .band-tag { background: var(--accent); color: var(--sel-ink); padding: 2px 10px; border-radius: 999px; }
 
 .kept .close { color: var(--go); } .kept .off { color: var(--warn); } .kept .far { color: var(--stop); }
+
+.invite-row .reliab.warn { color: var(--stop); font-weight: 600; }
+.invite-row { flex-wrap: wrap; }

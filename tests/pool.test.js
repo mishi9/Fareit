@@ -249,7 +249,7 @@ test('formula dataset: separate table, own-device edits and deletes, numbers onl
   assert.deepEqual(up.body, { accepted: ['lab-trip-0001'], rejected: ['lab-trip-0002', 'lab-trip-0003'] });
   const all = await call('/api/formula?since=0');
   assert.equal(all.body.trips.length, 1);
-  assert.deepEqual(Object.keys(all.body.trips[0]).sort(), ['card_min', 'earned', 'erp', 'id', 'km', 'lat', 'lng', 'min', 'paid', 'pickup_km', 'predicted', 'predicted_earned', 'rev', 'surge', 'ts']);
+  assert.deepEqual(Object.keys(all.body.trips[0]).sort(), ['card_min', 'd', 'earned', 'erp', 'id', 'km', 'lat', 'lng', 'min', 'paid', 'pickup_km', 'predicted', 'predicted_earned', 'rev', 'surge', 'ts']);
   // Location on Save: rounded to about 1 km, and only inside Singapore.
   const placed = await call('/api/formula', { device: 'device-aaaaaaaa', trips: [trip({ id: 'lab-trip-0010', lat: 1.354321, lng: 103.987654 }), trip({ id: 'lab-trip-0011', lat: 40.7, lng: -74 })] });
   assert.deepEqual([placed.body.accepted, placed.body.rejected], [['lab-trip-0010'], ['lab-trip-0011']]);

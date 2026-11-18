@@ -544,3 +544,39 @@ test('event mode on the cards: Event pill, event prices; normal prices unchanged
   assert.equal(eventNear([stadium], { lat: 1.3100, lng: 103.8600 }, ends - 2 * 3600000), null, 'too early');
   assert.equal(eventNear([stadium], { lat: 1.3526, lng: 103.9447 }, ends), null, 'too far');
 });
+
+// ---- safeguards against wrong or made-up data ----
+import { plausible, isOutlier } from '../public/sanity.js';
+import { timeOfDay as tod3, fitWeights as fw3 } from '../public/formula.js';
+test('layer 1: impossible trips are refused, real ones (surge, low cut) are not', () => {
+  assert.equal(plausible({ km: 10, paid: 99, earned: 72 }).ok, false, '10 km at S$99');
+  assert.equal(plausible({ km: 10, paid: 14, earned: 10.2 }).ok, true);
+  assert.equal(plausible({ km: 10, paid: 28, earned: 20.4 }).ok, true, '2x surge');
+  assert.equal(plausible({ km: 10, paid: 23.9, earned: 23.8 }).ok, true, 'low-cut job');
+  assert.equal(plausible({ km: 10, paid: 14, earned: 15 }).ok, false, 'earned more than paid');
+  assert.equal(plausible({ km: 10, paid: 20, earned: 4 }).ok, false, 'below the driver minimum');
+  assert.equal(plausible({ km: 30, min: 5, paid: 35, earned: 25 }).ok, false, '30 km in 5 min');
+  assert.equal(plausible({ km: 1.2, paid: 8.1, earned: 6.2 }).ok, true, 'minimum fares');
+  assert.equal(isOutlier(25, 15), true);
+  assert.equal(isOutlier(17, 15), false);
+});
+
+test('layers 3 and 4: a troll in one area cannot take over "now", and wrong fares cannot bend the rates', () => {
+  const day = (d, h) => new Date(`2026-11-${d}T${String(h).padStart(2, '0')}:10:00+08:00`).getTime();
+  const at = { lat: 1.30, lng: 103.83 };
+  const honest = [11, 12, 13, 14, 15, 16].map((d, i) => ({ ...make(8 + i, 15 + i, { ts: day(d, 20), ...at }), shared: true, d: `driver${i % 3}` }));
+  const base = tod3(honest, day(18, 20), at).lift;
+  // one phone sends 20 jobs at +55% (inside the limits)
+  const troll = Array.from({ length: 20 }, (_, i) => { const t = make(9, 16, { ts: day(17, 20) + i * 60000, ...at }); return { ...t, id: `t${i}`, actual: Math.round(t.actual * 1.55 * 100) / 100, earned: Math.round(t.earned * 1.55 * 100) / 100, shared: true, d: 'troll' }; });
+  const withTroll = tod3([...honest, ...troll], day(18, 20), at).lift;
+  assert.ok(withTroll - base < 0.25, `one phone moved "now" by ${(withTroll - base).toFixed(2)}`);
+  // without the cap the same 20 jobs would push it much further
+  const uncapped = tod3([...honest, ...troll.map((t, i) => ({ ...t, d: `fake${i}` }))], day(18, 20), at).lift;
+  assert.ok(uncapped > withTroll + 0.05);
+  // a handful of very wrong fares among good ones barely moves the fitted rates
+  const good = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14], [18, 35], [25, 30], [40, 50], [3, 9], [16, 22], [22, 31]].map(([k, mm]) => make(k, mm));
+  const bad = [[10, 15], [15, 20], [8, 12]].map(([k, mm]) => { const t = make(k, mm); return { ...t, actual: t.actual * 2.2 }; });
+  const clean = passengerFare(fw3(good, { includeBase: false }), 15, 22).fare;
+  const dirty = passengerFare(fw3([...good, ...bad], { includeBase: false }), 15, 22).fare;
+  assert.ok(Math.abs(dirty / clean - 1) < 0.06, `rates bent by ${((dirty / clean - 1) * 100).toFixed(1)}%`);
+});

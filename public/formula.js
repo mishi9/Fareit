@@ -126,8 +126,23 @@ function fitWeightsOf(trips, includeBase) {
     X.push(row);
     y.push(SEED[term] / PRIOR[term]);
   });
-  const w = lsq(X, y);
+  let w = lsq(X, y);
   if (!w) return { ...SEED, n: rows.length };
+  // Safeguard: trips far from the fit count much less, refitted a few times (each pass finds the
+  // wrong ones more clearly), so a few wrong entries can't bend the rates. Over 25% off: 1/20th;
+  // 15-25%: a half; real trips sit well inside that.
+  if (rows.length >= 5) {
+    for (let pass = 0; pass < 4; pass++) {
+      const k = rows.map((t, i) => {
+        const off = Math.abs(y[i] / (w[0] + w[1] * X[i][1] + w[2] * X[i][2]) - 1);
+        return off > 0.25 ? 0.05 : off > 0.15 ? 0.5 : 1;
+      });
+      if (k.every((v) => v === 1)) break;
+      const Xw = X.map((row, i) => (i < rows.length ? row.map((v) => v * Math.sqrt(k[i])) : row));
+      const yw = y.map((v, i) => (i < rows.length ? v * Math.sqrt(k[i]) : v));
+      w = lsq(Xw, yw) || w;
+    }
+  }
   return { base: w[0], perKm: w[1], perMin: w[2], n: rows.length };
 }
 
@@ -174,7 +189,8 @@ function fitCommissionOf(trips) {
   // Trips paid at the driver's S$6.20 floor follow the floor, not the usual rule: leave them out.
   const all = withBase(trips).filter((t) => cutOf(t) && !(Math.abs(t.earned - (t.erp || 0) - MIN_DRIVER) < 0.005));
   const low = all.filter(isLowCut);
-  const cuts = all.filter((t) => !isLowCut(t)).map(cutOf);
+  // Safeguard: cuts over 50% aren't Grab's usual either (a typo or a troll): left out like low cuts.
+  const cuts = all.filter((t) => !isLowCut(t) && cutOf(t).rate <= 0.5).map(cutOf);
   if (!cuts.length) return { kind: 'average', keep: 1 - SEED_CUT_FALLBACK, fixed: 0, n: 0, avgRate: SEED_CUT_FALLBACK, spread: 0, lo: SEED_CUT_FALLBACK, hi: SEED_CUT_FALLBACK, low };
   const rates = cuts.map((c) => c.rate);
   const avgRate = rates.reduce((s, r) => s + r, 0) / rates.length;
@@ -222,14 +238,23 @@ const hourGap = (a, b) => { const g = Math.abs(a - b) % 24; return Math.min(g, 2
 
 // How a trip paid against normal, as a log ratio: the passenger fare against the formula, or, for
 // a quick entry with only what the driver earned, the earnings against normal earnings.
+// Safeguard: no single trip counts as more than +60% or -40% (a typo or a troll can't swing it).
+export const PULL_HIGH = Math.log(1.6);
+export const PULL_LOW = Math.log(0.6);
 function ratioToFormula(t, w, est, c) {
   if (!(t.km > 0)) return null;
   const p = passengerFare(w, t.km, tripTime(t, est)).fare; // without ERP: compare like with like
   let r = null;
   if (t.actual > 0) r = Math.log((t.actual - (t.erp || 0)) / p);
   else if (t.earned > 0 && c) r = Math.log((t.earned - (t.erp || 0)) / driverEarns(c, p));
-  return Number.isFinite(r) ? r : null;
+  return Number.isFinite(r) ? Math.min(PULL_HIGH, Math.max(PULL_LOW, r)) : null;
 }
+
+// Safeguard: in "now", another driver's trips can't outweigh everyone else's combined (at least this
+// many trips' worth always counts), so 20 jobs from one phone can't take over an area. d is an
+// opaque tag per phone from the server; your own trips are 'me'.
+export const DRIVER_CAP = 3;
+const driverOf = (t) => t.d || (t.shared ? 'other' : 'me');
 
 // With `loc`, only trips saved near there count, more the closer they are (1 km 80%, 3 km 14%,
 // 5 km 0.4%): Tampines at 2am isn't Orchard at 2am. Trips saved without a location don't count.
@@ -278,6 +303,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
   let surgeNear = 0;
   let recent = 0;
   let closest = null;
+  const items = [];
   for (const t of all) {
     if (!Number.isFinite(t.ts) || t.event) continue; // event trips are learned on their own
     // Every trip counts, by how close it is: in time of day, in place, and in recency.
@@ -292,6 +318,22 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     const g = hourGap(hourOf(t.ts), h);
     const ageMin = (ts - t.ts) / 60000;
     const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin) * bandWeight(t.km, band);
+    items.push({ t, d, r, g, ageMin, x });
+  }
+  // No other single driver outweighs everyone else combined (at least DRIVER_CAP trips' worth is
+  // always allowed). Your own trips and the base trip aren't capped on your phone.
+  const per = new Map();
+  let total = 0;
+  for (const it of items) {
+    if (it.t.base) continue;
+    total += it.x;
+    per.set(driverOf(it.t), (per.get(driverOf(it.t)) || 0) + it.x);
+  }
+  const factor = new Map();
+  for (const [d, w] of per) factor.set(d, d === 'me' ? 1 : Math.min(1, Math.max(DRIVER_CAP, total - w) / w));
+  for (const it of items) {
+    const x = it.t.base ? it.x : it.x * factor.get(driverOf(it.t));
+    const { t, d, r, g, ageMin } = it;
     if (band && t.km >= band.lo && t.km < band.hi && g <= 1.5 && d <= NEAR_KM) inBandNear++;
     sw += x;
     swr += x * r;

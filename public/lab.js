@@ -9,6 +9,7 @@ import { buildQueue, syncQueue, closeOpenReading } from './queue.js';
 import { renderFlights } from './flights.js';
 import { eventsList, onEventsChange, loadEvents } from './events.js';
 import { jbPlace, jbRowsHtml } from './jb.js';
+import { plausible, isOutlier } from './sanity.js';
 import { ferryTerminalAt, ferryRowsHtml } from './ferries.js';
 import { loadSurge, surgeNow, surgeBanner } from './surge.js';
 import { loadAlerts, alertsHtml } from './alerts.js';
@@ -69,7 +70,7 @@ const toRow = (t) => ({
 });
 const fromRow = (r) => ({
   id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
-  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, shared: true,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, shared: true, d: r.d || null,
 });
 // Surge or airport: the learned % on top of the normal fare (null for normal trips).
 const liftFor = (kind, ts) => (kind === 'surge' ? surgeLift(dataset(), ts) : kind === 'airport' ? airportLift(dataset(), ts) : null);
@@ -475,6 +476,8 @@ async function save() {
   const msg = $('#lab-msg', lab.root);
   if (!(f.km > 0)) { msg.textContent = 'Add the trip km.'; msg.classList.add('err'); return; }
   if (!(f.actual > 0)) { msg.textContent = 'Add what the passenger actually paid.'; msg.classList.add('err'); return; }
+  const sane = plausible({ km: f.km, min: f.min, paid: f.actual, earned: f.earned, erp: f.erp });
+  if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Predictions are recorded before this trip changes anything: an honest test each time.
   const w = weights();
   const normalFare = passengerFare(w, f.km, f.min > 0 ? f.min : estimate()(f.km), f.erp).fare;
@@ -484,6 +487,7 @@ async function save() {
   const predicted = sl ? Math.round(normalFare * (1 + sl.lift) * 100) / 100 : normalFare;
   const c = commission();
   const predictedEarned = driverEarns(c, predicted, f.erp);
+  if (!confirmOutlier(msg, $('#lab-save', lab.root), f.actual, predicted)) return;
   const t = timeOfDay(dataset(), f.ts);
   changed();
   lab.trips.push({
@@ -592,6 +596,19 @@ function quickRead() {
   return { km, drop: typed === null && r && r.km > 0 ? r.label : null, paid: n('#qj-paid'), earned: n('#qj-earned'), surge: quick.surge };
 }
 
+// Safeguard: a fare far from the estimate (60%+ above, 40%+ below) needs a second tap on Save,
+// so a typo (S$150 for S$15.00) is caught; once confirmed it's saved (and still can't swing "now").
+function confirmOutlier(msg, btn, actual, estimate) {
+  if (!isOutlier(actual, estimate)) { if (btn) btn.removeAttribute('data-confirm'); return true; }
+  const key = `${actual}|${Math.round(estimate * 100)}`;
+  if (btn && btn.getAttribute('data-confirm') === key) { btn.removeAttribute('data-confirm'); return true; }
+  if (btn) btn.setAttribute('data-confirm', key);
+  const vs = actual / estimate - 1;
+  msg.classList.add('err');
+  msg.innerHTML = `S$${actual.toFixed(2)} is <b>${Math.abs(Math.round(vs * 100))}% ${vs > 0 ? 'above' : 'below'}</b> the estimate (S$${estimate.toFixed(2)}). Typo? If it's right, tap <b>Save</b> again.`;
+  return false;
+}
+
 // What the estimate says for this job (normal, plus the surge / airport % when tagged), before it's saved.
 function quickEstimate(f) {
   const w = weights();
@@ -625,8 +642,11 @@ async function quickSave() {
   const missing = !(f.km > 0) ? (quick.route && quick.route.pending ? 'Still finding the drop-off…' : 'Add the drop-off.')
     : !(f.paid > 0) ? 'Add what the passenger paid.' : !(f.earned > 0) ? 'Add what you earned.' : '';
   if (missing) { msg.textContent = missing; msg.classList.add('err'); return; }
+  const sane = plausible({ km: f.km, paid: f.paid, earned: f.earned });
+  if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Recorded before the trip changes anything (an honest test), at the job's own time and place.
   const e = quickEstimate(f);
+  if (!confirmOutlier(msg, document.querySelector('#qj-save'), f.paid, e.predicted)) return;
   const t = timeOfDay(dataset(), e.ts);
   changed();
   lab.trips.push({

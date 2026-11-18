@@ -65,6 +65,19 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
+## Safeguards against wrong or made-up data
+
+The data is shared by every driver, so a typo or a troll mustn't skew everyone's estimates.
+
+1. **Impossible trips are refused** (`public/sanity.js`, checked by the app and the server): far more than any trip of that distance pays (over 3× a rough normal fare), too little, earning more than the passenger paid, Grab keeping most of the fare, or faster than the roads allow. "10 km at S$99" never gets in.
+2. **Far from the estimate? Tap Save again:** 60%+ above or 40%+ below the estimate asks once (catches S$150 typed for S$15.00).
+3. **One trip can't swing it:** each trip's pull on "now" is capped at +60% / −40%, and the fare formula re-weights trips far from the rest (over 25% off counts 1/20th), so a few wrong entries can't bend the rates. Grab's cut ignores cuts over 50%, as it ignores low cuts.
+4. **One driver can't take over an area:** in "now", another driver's trips never outweigh everyone else's combined. The server tags each phone's trips with an opaque code (never the device id).
+5. **Owner: far-off rate per code name** in the invite list ("3 of 12 fares far off the estimate"), flagged red at 25%+ over 5+ trips.
+6. **Owner: Remove trips** next to Turn off deletes everything that phone sent (trips, jobs, queue readings) for everyone.
+
+Plus: invite-only, code names, Turn off, and surge alerts need 2+ drivers.
+
 ## Info tab
 
 Replaces Reconcile (older jobs still waiting for a fare are linked from the top of Info). In order: road incidents and expressway travel times, events (what's ending soon and the next one; the rest folded away), From JB, the airport. Display only: nothing here changes the estimates, except the event rule below.

@@ -34,6 +34,7 @@
 //   POST /api/invites/create { label }        -> { token }       owner only
 //   GET  /api/invites                         -> { invites }     owner only
 //   POST /api/invites/revoke { token }        -> { revoked }     owner only: the invite and its phone
+//   POST /api/invites/purge { token }         -> { removed }     owner only: delete everything that phone sent
 //
 // No accounts. Each phone sends a random device id so it can correct its own rows and nobody
 // else's. The pool holds no addresses, names or exact places: pickup and drop are rounded to
@@ -47,6 +48,7 @@
 //                                  for an open, collective app.
 
 import { inAirportZone } from '../public/airport-zone.js';
+import { plausible } from '../public/sanity.js';
 
 const OM = 'https://www.onemap.gov.sg';
 const SG = { latMin: 1.15, latMax: 1.48, lngMin: 103.55, lngMax: 104.1 };
@@ -538,6 +540,8 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   if (!inRange(cardMin, 1, 300) || !inRange(pickupKm, 0, 50)) return null;
   if (!inRange(erp, 0, 50) || !inRange(earned, 0.5, 400) || !inRange(predicted, 0, 1000) || !inRange(predictedEarned, 0, 1000)) return null;
   if (!['normal', 'surge', 'airport'].includes(t.surge)) return null;
+  // Safeguard: what no real trip looks like (e.g. 10 km at S$99) is refused (public/sanity.js).
+  if (!plausible({ km, min, paid, earned, erp }).ok) return null;
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
@@ -606,15 +610,19 @@ async function getFormula(url, env) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, deleted
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, deleted, device
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
-  const trips = results.slice(0, limit).map((r) => {
-    if (r.deleted === 1) return { rev: r.rev, id: r.id, deleted: 1 };
-    const { deleted, ...rest } = r;
-    return rest;
-  });
+  // d: an opaque tag per phone, so one phone's trips can be capped together; never the device id.
+  const tags = new Map();
+  const tag = async (dev) => { if (!tags.has(dev)) tags.set(dev, (await sha256(`trip:${env.HASH_SALT || ''}:${dev}`)).slice(0, 10)); return tags.get(dev); };
+  const trips = [];
+  for (const r of results.slice(0, limit)) {
+    if (r.deleted === 1) { trips.push({ rev: r.rev, id: r.id, deleted: 1 }); continue; }
+    const { deleted, device, ...rest } = r;
+    trips.push({ ...rest, d: await tag(device) });
+  }
   return json({ trips, next: trips.length ? trips[trips.length - 1].rev : since, more });
 }
 
@@ -1123,10 +1131,38 @@ async function listInvites(env) {
   const { results } = await env.DB.prepare(
     `SELECT token, label, animal, created_at, opened_at, used_at, revoked,
        ${count('jobs')} AS jobs, ${count('formula_trips')} AS trips, ${count('airport_queue')} AS queue,
+       (SELECT COUNT(*) FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0
+          AND device IN (SELECT device FROM phones WHERE who = invites.token)) AS checked,
+       (SELECT COUNT(*) FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0 AND ABS(paid / predicted - 1) > 0.4
+          AND device IN (SELECT device FROM phones WHERE who = invites.token)) AS far_off,
        (SELECT MAX(last_at) FROM phones WHERE who = invites.token) AS last_at
      FROM invites ORDER BY created_at DESC LIMIT 200`,
   ).all();
   return json({ invites: results.map((r) => ({ ...r, revoked: r.revoked === 1, expires_at: r.opened_at ? r.opened_at + INVITE_WINDOW_MS : null })) });
+}
+
+// Remove everything an invite's phone(s) sent: trips, jobs and queue readings, as tombstones so
+// every other phone drops them on its next sync. One statement per row keeps each rev unique.
+const PURGE_MAX = 2000;
+async function purgeInvite(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const token = String(body.token || '').toUpperCase().trim();
+  if (!TOKEN_RE.test(token)) return json({ error: 'Not an invite.' }, 400);
+  const now = Date.now();
+  const of = (table) => env.DB.prepare(`SELECT id, device FROM ${table} WHERE deleted IS NOT 1
+    AND device IN (SELECT device FROM phones WHERE who = ?1) LIMIT ${PURGE_MAX}`).bind(token).all();
+  const [ft, jb, qu] = await Promise.all([of('formula_trips'), of('jobs'), of('airport_queue')]);
+  const writes = [
+    ...ft.results.map((r) => env.DB.prepare(`UPDATE formula_trips SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips),
+        km = NULL, min = NULL, erp = NULL, paid = NULL, earned = NULL, surge = NULL, predicted = NULL, predicted_earned = NULL,
+        card_min = NULL, pickup_km = NULL, lat = NULL, lng = NULL WHERE id = ?1`).bind(r.id, now)),
+    ...jb.results.map((r) => env.DB.prepare(TOMBSTONE).bind(r.id, r.device, now)),
+    ...qu.results.map((r) => env.DB.prepare(`UPDATE airport_queue SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM airport_queue),
+        cars_ahead = NULL, est_wait_min = NULL, actual_wait_min = NULL WHERE id = ?1`).bind(r.id, now)),
+  ];
+  await writeAll(env.DB, writes);
+  return json({ removed: { trips: ft.results.length, jobs: jb.results.length, queue: qu.results.length } });
 }
 
 async function revokeInvite(request, env) {
@@ -1165,7 +1201,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -1196,6 +1232,7 @@ export default {
         if (!who || who.kind !== 'owner') return json({ error: 'Owner only.' }, 403);
         if (url.pathname === '/api/invites/create') return await createInvite(request, env);
         if (url.pathname === '/api/invites/revoke') return await revokeInvite(request, env);
+        if (url.pathname === '/api/invites/purge') return await purgeInvite(request, env);
         if (url.pathname === '/api/invites') return await listInvites(env);
       } catch {
         return json({ error: 'The database couldn’t be reached.' }, 502);

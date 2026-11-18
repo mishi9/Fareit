@@ -917,6 +917,15 @@ function buildOwner() {
         row.querySelector('.note').textContent = `${inv.token} · ${status}`;
         row.querySelector('.sent').textContent = sent;
         row.querySelector('.sent').hidden = !sent;
+        // How often this driver's fares are far (40%+) from the estimate: a troll stands out.
+        if (inv.checked > 0) {
+          const share = inv.far_off / inv.checked;
+          const flag = inv.checked >= 5 && share >= 0.25;
+          const rel = document.createElement('div');
+          rel.className = `note reliab${flag ? ' warn' : ''}`;
+          rel.textContent = `${inv.far_off} of ${inv.checked} fares far off the estimate (${Math.round(share * 100)}%)${flag ? ' · check this driver' : ''}`;
+          row.querySelector('div').append(rel);
+        }
         if (!inv.revoked) {
           const off = document.createElement('button');
           off.type = 'button';
@@ -928,6 +937,23 @@ function buildOwner() {
             try { await ownerApi('/api/invites/revoke', { token: inv.token }); list(); } catch (e) { settingsMsg(e.message, true); }
           });
           row.append(off);
+        }
+        if (inv.used_at && (inv.trips || inv.jobs || inv.queue)) {
+          // Remove everything this phone sent, for everyone. Tap twice.
+          const purge = document.createElement('button');
+          purge.type = 'button';
+          purge.className = 'ghost small danger';
+          purge.textContent = 'Remove trips';
+          let armedP = false;
+          purge.addEventListener('click', async () => {
+            if (!armedP) { armedP = true; purge.textContent = 'Tap again'; setTimeout(() => { armedP = false; purge.textContent = 'Remove trips'; }, 4000); return; }
+            try {
+              const { removed } = await ownerApi('/api/invites/purge', { token: inv.token });
+              settingsMsg(`Removed ${removed.trips} trip${removed.trips === 1 ? '' : 's'}, ${removed.jobs} job${removed.jobs === 1 ? '' : 's'} and ${removed.queue} queue reading${removed.queue === 1 ? '' : 's'} from ${inv.animal || inv.token}. Other phones drop them on their next sync.`);
+              list();
+            } catch (e) { settingsMsg(e.message, true); }
+          });
+          row.append(purge);
         }
         return row;
       }));

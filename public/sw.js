@@ -1,5 +1,5 @@
 // Offline shell: the app opens and predicts with no signal. /api calls always go to the network.
-const CACHE = 'agaration-v27';
+const CACHE = 'agaration-v28';
 const SHELL = [
   './',
   'index.html',
@@ -23,6 +23,7 @@ const SHELL = [
   'surge.js',
   'alerts.js',
   'glance.js',
+  'sanity.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

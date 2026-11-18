@@ -312,3 +312,27 @@ test('LTA DataMall: incidents, travel times, MRT and floods, key sent as Account
   assert.equal(b.lta.floods, undefined);
   assert.equal(b.lta.errors.length, 1);
 });
+
+test('layers 1, 6 and 7: impossible trips refused; far-off rate per code name; remove a driver\'s trips', async () => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const { token, animal } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  const key = (await req('/api/access/redeem', { body: { token, device: 'troll-phone' } })).body.key;
+  const mk = (id, over = {}) => ({ id, ts: Date.now() - 60000, km: 10, min: 18, erp: 0, paid: 15, earned: 11, surge: 'normal', predicted: 15.2, predicted_earned: 11.1, lat: 1.3, lng: 103.83, ...over });
+  const up = (await req('/api/formula', { body: { device: 'troll-app-0001', trips: [mk('trip-ok-0001'), mk('trip-bad-0001', { paid: 99, earned: 72 }), mk('trip-far-0001', { paid: 24, earned: 17.5 }), mk('trip-far-0002', { paid: 23.5, earned: 17 })] }, key })).body;
+  assert.deepEqual(up.rejected, ['trip-bad-0001']);
+  const row = (await req('/api/invites', { key: okey })).body.invites.find((i) => i.token === token);
+  assert.equal(row.animal, animal);
+  assert.equal(row.checked, 3);
+  assert.equal(row.far_off, 2);
+  // shared trips carry an opaque per-phone tag, never the device id
+  const pulled = (await req('/api/formula?since=0', { key: okey })).body.trips;
+  assert.ok(pulled.every((t) => t.d && !String(t.d).includes('troll')));
+  assert.equal(new Set(pulled.map((t) => t.d)).size, 1);
+  // remove everything they sent
+  assert.equal((await req('/api/invites/purge', { body: { token }, key })).status, 403, 'drivers cannot');
+  const gone = (await req('/api/invites/purge', { body: { token }, key: okey })).body.removed;
+  assert.equal(gone.trips, 3);
+  const after = (await req('/api/formula?since=0', { key: okey })).body.trips;
+  assert.ok(after.every((t) => t.deleted === 1));
+});
