@@ -96,6 +96,8 @@ A private notebook for drivers on several platforms (Grab, TADA, Gojek, Zig, Ryd
 
 The old Trips view (reconciled jobs from the slider era, the old shared pool) is under **Settings → Older jobs**.
 
+**Fees** (+ Fee): money from a platform that isn't a fare: cancellation fee, late / waiting fee, tip, other. They count in today's total, the week and month and S$/hour, and per platform, but not as a job, not in per-job or per-km figures, and never in the fare estimates (Earnings stays on the phone).
+
 ## Settings
 
 - **Owner** (owner's phone only, at the top): tiles for testers in, invites waiting, trips from testers and drivers to check; **+ Add event**; **Export all trips (CSV)**; show / hide the workings; invites.

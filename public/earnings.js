@@ -17,6 +17,12 @@ export const PLATFORMS = [
 export const COSTS = [
   { id: 'fuel', name: 'Fuel / charging' }, { id: 'rental', name: 'Car rental' }, { id: 'parking', name: 'Parking' }, { id: 'other', name: 'Other' },
 ];
+// Fees: money from a platform that isn't a fare (a cancellation fee, a late / waiting fee, a tip).
+// They count in your totals and S$/hour, but not as a job, not in per-job or per-km figures, and
+// never in the fare estimates (Earnings stays on this phone and doesn't feed the formula).
+export const FEES = [
+  { id: 'cancel', name: 'Cancellation fee' }, { id: 'late', name: 'Late / waiting fee' }, { id: 'tip', name: 'Tip' }, { id: 'other', name: 'Other' },
+];
 const KEY = 'earnings';
 const e = { root: null, data: { entries: [], shifts: [], goal: null, last: 'grab' }, mode: 'job', timer: null };
 const pad = (n) => String(n).padStart(2, '0');
@@ -38,6 +44,8 @@ export function allJobs() {
   return [...typed, ...grab].sort((a, b) => b.ts - a.ts);
 }
 const costs = () => e.data.entries.filter((x) => x.kind === 'cost');
+const fees = () => e.data.entries.filter((x) => x.kind === 'fee');
+const feeName = (id) => (FEES.find((f) => f.id === id) || FEES[FEES.length - 1]).name;
 
 // Hours on shift between two moments (a running shift counts up to now).
 function shiftHours(from, to, now = Date.now()) {
@@ -55,15 +63,19 @@ const running = () => e.data.shifts.find((s) => !s.end) || null;
 export function summary(fromTs, toTs, now = Date.now()) {
   const jobs = allJobs().filter((j) => j.ts >= fromTs && j.ts < toTs);
   const spent = costs().filter((c) => c.ts >= fromTs && c.ts < toTs).reduce((s, c) => s + c.amount, 0);
-  const gross = jobs.reduce((s, j) => s + j.amount, 0);
+  const feeList = fees().filter((f) => f.ts >= fromTs && f.ts < toTs);
+  const feeSum = feeList.reduce((s, f) => s + f.amount, 0);
+  const gross = jobs.reduce((s, j) => s + j.amount, 0) + feeSum;
   const hours = shiftHours(fromTs, toTs, now);
   const by = PLATFORMS.map((p) => {
     const js = jobs.filter((j) => j.platform === p.id);
-    const sum = js.reduce((s, j) => s + j.amount, 0);
+    const fare = js.reduce((s, j) => s + j.amount, 0);
+    const fee = feeList.filter((f) => f.platform === p.id).reduce((s, f) => s + f.amount, 0);
+    const sum = fare + fee;
     const withKm = js.filter((j) => j.km > 0);
-    return { ...p, jobs: js.length, sum, perJob: js.length ? sum / js.length : null, perKm: withKm.length ? withKm.reduce((s, j) => s + j.amount, 0) / withKm.reduce((s, j) => s + j.km, 0) : null };
-  }).filter((p) => p.jobs);
-  return { jobs, gross, spent, net: gross - spent, hours, perHour: hours >= 1 ? (gross - spent) / hours : null, by };
+    return { ...p, jobs: js.length, fee, sum, perJob: js.length ? fare / js.length : null, perKm: withKm.length ? withKm.reduce((s, j) => s + j.amount, 0) / withKm.reduce((s, j) => s + j.km, 0) : null };
+  }).filter((p) => p.jobs || p.fee);
+  return { jobs, fees: feeList, feeSum, gross, spent, net: gross - spent, hours, perHour: hours >= 1 ? (gross - spent) / hours : null, by };
 }
 
 // The current driving day's span (06:00 to 06:00).
@@ -143,28 +155,33 @@ export function renderEarnings() {
   const week = summary(w0, now + 1, now);
   const m0 = (() => { const d = new Date(d0); d.setDate(1); d.setHours(6, 0, 0, 0); return d.getTime(); })();
   const month = summary(m0, now + 1, now);
-  const todayList = [...t.jobs.map((j) => ({ ...j, kind: 'job' })), ...costs().filter((c) => c.ts >= d0 && c.ts < d1)].sort((a, b) => b.ts - a.ts);
+  const todayList = [...t.jobs.map((j) => ({ ...j, kind: 'job' })), ...t.fees, ...costs().filter((c) => c.ts >= d0 && c.ts < d1)].sort((a, b) => b.ts - a.ts);
   const tips = suggestions(now);
   r.innerHTML = `
     <div class="ea-head">
       <div class="band-head">Today · <b>${day}</b></div>
       <div class="ea-total">${money(t.net)}</div>
-      <div class="ea-sub">${t.jobs.length} job${t.jobs.length === 1 ? '' : 's'} · ${t.hours ? `${t.hours.toFixed(1)} h on shift` : 'no shift timed'} · <b>${t.perHour != null ? `${money(t.perHour)}/h` : t.hours ? 'S$/h after 1 h' : '—/h'}</b>${t.spent ? ` · costs ${money(t.spent)}` : ''}</div>
+      <div class="ea-sub">${t.jobs.length} job${t.jobs.length === 1 ? '' : 's'} · ${t.hours ? `${t.hours.toFixed(1)} h on shift` : 'no shift timed'} · <b>${t.perHour != null ? `${money(t.perHour)}/h` : t.hours ? 'S$/h after 1 h' : '—/h'}</b>${t.feeSum ? ` · fees ${money(t.feeSum)}` : ''}${t.spent ? ` · costs ${money(t.spent)}` : ''}</div>
       ${goal ? `<div class="ea-goal"><div class="ea-bar"><span style="width:${Math.min(100, (t.net / goal) * 100).toFixed(1)}%"></span></div>
         <div class="note">${t.net >= goal ? `<b>Goal reached</b> (${money(goal)})` : `<b>${money(toGo)}</b> to your ${money(goal)} goal${t.perHour ? ` · about <b>${(toGo / t.perHour).toFixed(1)} h</b> at today's pace` : ''}`}</div></div>` : ''}
       <button type="button" class="${sh ? 'ghost' : 'primary'} wide" data-act="shift">${sh ? `End shift · on since ${hm(sh.start)} (${((now - sh.start) / 3600000).toFixed(1)} h)` : 'Start shift'}</button>
     </div>
-    ${t.by.length ? `<div class="ea-plats">${t.by.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">${p.jobs} job${p.jobs === 1 ? '' : 's'}</span><span class="ea-amt">${money(p.sum)}</span></div>`).join('')}</div>` : ''}
+    ${t.by.length ? `<div class="ea-plats">${t.by.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">${p.jobs} job${p.jobs === 1 ? '' : 's'}${p.fee ? ` · fees ${money(p.fee)}` : ''}</span><span class="ea-amt">${money(p.sum)}</span></div>`).join('')}</div>` : ''}
 
     <div class="ea-add stack">
-      <div class="seg g2" data-group="mode"><button type="button" data-mode="job" class="${e.mode === 'job' ? 'sel' : ''}">+ Earning</button><button type="button" data-mode="cost" class="${e.mode === 'cost' ? 'sel' : ''}">+ Cost</button></div>
-      ${e.mode === 'job'
+      <div class="seg g3" data-group="mode"><button type="button" data-mode="job" class="${e.mode === 'job' ? 'sel' : ''}">+ Earning</button><button type="button" data-mode="fee" class="${e.mode === 'fee' ? 'sel' : ''}">+ Fee</button><button type="button" data-mode="cost" class="${e.mode === 'cost' ? 'sel' : ''}">+ Cost</button></div>
+      ${e.mode === 'fee'
+        ? `<div class="ea-chips">${PLATFORMS.map((p) => `<button type="button" data-plat="${p.id}" class="${e.data.last === p.id ? 'sel' : ''}"><span class="ea-dot" style="background:${p.color}"></span>${p.name}</button>`).join('')}</div>
+           <div class="ea-chips">${FEES.map((f) => `<button type="button" data-fee="${f.id}" class="${(e.feeCat || 'cancel') === f.id ? 'sel' : ''}">${f.name}</button>`).join('')}</div>
+           <div class="field"><label for="ea-amt">Fee (S$)</label><input id="ea-amt" type="number" inputmode="decimal" step="0.01" min="0"></div>
+           <p class="note">Counts in your totals only: not a job, and never in the fare estimates.</p>`
+        : e.mode === 'job'
         ? `<div class="ea-chips">${PLATFORMS.map((p) => `<button type="button" data-plat="${p.id}" class="${e.data.last === p.id ? 'sel' : ''}"><span class="ea-dot" style="background:${p.color}"></span>${p.name}</button>`).join('')}</div>
            <div class="row2"><div class="field"><label for="ea-amt">Earned (S$)</label><input id="ea-amt" type="number" inputmode="decimal" step="0.01" min="0"></div>
            <div class="field"><label for="ea-km">Km (optional)</label><input id="ea-km" type="number" inputmode="decimal" step="0.1" min="0"></div></div>`
         : `<div class="ea-chips">${COSTS.map((c) => `<button type="button" data-cost="${c.id}" class="${(e.costCat || 'fuel') === c.id ? 'sel' : ''}">${c.name}</button>`).join('')}</div>
            <div class="field"><label for="ea-amt">Cost (S$)</label><input id="ea-amt" type="number" inputmode="decimal" step="0.01" min="0"></div>`}
-      <button type="button" class="primary wide" data-act="add">${e.mode === 'job' ? `Add ${platform(e.data.last).name} earning` : 'Add cost'}</button>
+      <button type="button" class="primary wide" data-act="add">${addLabel()}</button>
       <p class="msg" id="ea-msg" role="status"></p>
     </div>
 
@@ -173,6 +190,8 @@ export function renderEarnings() {
     <h2>Today</h2>
     ${todayList.length ? todayList.map((x) => x.kind === 'cost'
       ? `<div class="ea-row"><span class="ea-time">${hm(x.ts)}</span><span class="ea-what">${esc((COSTS.find((c) => c.id === x.cat) || COSTS[3]).name)}</span><span class="ea-amt cost">−${money(x.amount)}</span>${del(x)}</div>`
+      : x.kind === 'fee'
+      ? `<div class="ea-row"><span class="ea-time">${hm(x.ts)}</span><span class="ea-what"><span class="ea-dot" style="background:${platform(x.platform).color}"></span>${platform(x.platform).name} · ${esc(feeName(x.cat))}</span><span class="ea-amt">${money(x.amount)}</span>${del(x)}</div>`
       : `<div class="ea-row"><span class="ea-time">${hm(x.ts)}</span><span class="ea-what"><span class="ea-dot" style="background:${platform(x.platform).color}"></span>${platform(x.platform).name}${x.km ? ` · ${x.km} km` : ''}${x.auto ? ' <span class="note">· Got a job</span>' : ''}</span><span class="ea-amt">${money(x.amount)}</span>${x.auto ? '<span></span>' : del(x)}</div>`).join('')
       : '<p class="note">Nothing yet today. Add earnings as you go; Grab jobs from Got a job appear here on their own.</p>'}
 
@@ -181,7 +200,7 @@ export function renderEarnings() {
       <div class="tile"><span class="v">${money(week.net)}</span><span class="k">this week · ${week.hours.toFixed(1)} h · ${week.perHour != null ? `${money(week.perHour)}/h` : '—/h'}</span></div>
       <div class="tile"><span class="v">${money(month.net)}</span><span class="k">this month · ${month.jobs.length} jobs${month.spent ? ` · costs ${money(month.spent)}` : ''}</span></div>
     </div>
-    ${month.by.length ? `<div class="ea-plats">${month.by.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">${money(p.perJob)}/job${p.perKm ? ` · ${money(p.perKm)}/km` : ''}</span><span class="ea-amt">${money(p.sum)}</span></div>`).join('')}</div>` : ''}
+    ${month.by.length ? `<div class="ea-plats">${month.by.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">${p.perJob != null ? `${money(p.perJob)}/job` : 'fees only'}${p.perKm ? ` · ${money(p.perKm)}/km` : ''}${p.fee ? ` · fees ${money(p.fee)}` : ''}</span><span class="ea-amt">${money(p.sum)}</span></div>`).join('')}</div>` : ''}
 
     <div class="row2">
       <div class="field"><label for="ea-goal">Daily goal (S$)</label><input id="ea-goal" type="number" inputmode="decimal" step="1" min="0" value="${goal || ''}" placeholder="e.g. 200"></div>
@@ -195,6 +214,7 @@ export function renderEarnings() {
   clearInterval(e.timer);
   if (sh) e.timer = setInterval(() => { if (!r.closest('[hidden]')) renderEarnings(); }, 60000);
 }
+const addLabel = () => (e.mode === 'job' ? `Add ${platform(e.data.last).name} earning` : e.mode === 'fee' ? `Add ${platform(e.data.last).name} ${feeName(e.feeCat || 'cancel').toLowerCase()}` : 'Add cost');
 const del = (x) => `<button type="button" class="ghost small" data-del="${esc(x.id)}">✕</button>`;
 
 async function onClick(ev) {
@@ -202,11 +222,11 @@ async function onClick(ev) {
   if (!b || !e.root.contains(b)) return;
   if (b.dataset.mode) { e.mode = b.dataset.mode; renderEarnings(); return; }
   // Picking a platform or cost type: just switch the highlight (no redraw, so nothing typed is lost).
-  if (b.dataset.plat || b.dataset.cost) {
-    const attr = b.dataset.plat ? 'plat' : 'cost';
-    if (b.dataset.plat) e.data.last = b.dataset.plat; else e.costCat = b.dataset.cost;
+  if (b.dataset.plat || b.dataset.cost || b.dataset.fee) {
+    const attr = b.dataset.plat ? 'plat' : b.dataset.cost ? 'cost' : 'fee';
+    if (b.dataset.plat) e.data.last = b.dataset.plat; else if (b.dataset.cost) e.costCat = b.dataset.cost; else e.feeCat = b.dataset.fee;
     for (const x of e.root.querySelectorAll(`[data-${attr}]`)) x.classList.toggle('sel', x === b);
-    if (b.dataset.plat) e.root.querySelector('[data-act="add"]').textContent = `Add ${platform(e.data.last).name} earning`;
+    e.root.querySelector('[data-act="add"]').textContent = addLabel();
     e.root.querySelector('#ea-amt')?.focus();
     if (b.dataset.plat) save();
     return;
@@ -231,13 +251,15 @@ async function onClick(ev) {
     if (e.mode === 'job') {
       const km = parseFloat(e.root.querySelector('#ea-km').value);
       e.data.entries.push({ id, kind: 'job', ts: Date.now(), platform: e.data.last, amount: Math.round(amt * 100) / 100, km: km > 0 ? km : null });
+    } else if (e.mode === 'fee') {
+      e.data.entries.push({ id, kind: 'fee', ts: Date.now(), platform: e.data.last, cat: e.feeCat || 'cancel', amount: Math.round(amt * 100) / 100 });
     } else {
       e.data.entries.push({ id, kind: 'cost', ts: Date.now(), cat: e.costCat || 'fuel', amount: Math.round(amt * 100) / 100 });
     }
     // Clear the boxes for the next one (the redraw keeps whatever is still in them).
     for (const id of ['#ea-amt', '#ea-km']) { const el = e.root.querySelector(id); if (el) el.value = ''; }
     // Starting work without pressing Start shift: start it now, so S$/hour has something to go on.
-    if (e.mode === 'job' && !running() && !e.data.shifts.some((s) => s.end && Date.now() - s.end < 3600000)) e.data.shifts.push({ start: Date.now() - 15 * 60000, end: null });
+    if (e.mode !== 'cost' && !running() && !e.data.shifts.some((s) => s.end && Date.now() - s.end < 3600000)) e.data.shifts.push({ start: Date.now() - 15 * 60000, end: null });
     await save(); renderEarnings(); return;
   }
   if (act === 'csv') downloadCsv();
@@ -245,11 +267,11 @@ async function onClick(ev) {
 
 function downloadCsv() {
   const rows = [['date', 'time', 'type', 'platform_or_cost', 'amount', 'km', 'note']];
-  const all = [...allJobs().map((j) => ({ ...j, kind: 'job' })), ...costs()].sort((a, b) => a.ts - b.ts);
+  const all = [...allJobs().map((j) => ({ ...j, kind: 'job' })), ...fees(), ...costs()].sort((a, b) => a.ts - b.ts);
   for (const x of all) {
     const d = new Date(x.ts);
-    rows.push([d.toLocaleDateString('en-CA'), d.toTimeString().slice(0, 5), x.kind === 'cost' ? 'cost' : 'earning',
-      x.kind === 'cost' ? (COSTS.find((c) => c.id === x.cat) || COSTS[3]).name : platform(x.platform).name, x.amount.toFixed(2), x.km ?? '', x.note || '']);
+    rows.push([d.toLocaleDateString('en-CA'), d.toTimeString().slice(0, 5), x.kind === 'cost' ? 'cost' : x.kind === 'fee' ? 'fee' : 'earning',
+      x.kind === 'cost' ? (COSTS.find((c) => c.id === x.cat) || COSTS[3]).name : platform(x.platform).name, x.amount.toFixed(2), x.km ?? '', x.kind === 'fee' ? feeName(x.cat) : x.note || '']);
   }
   const q = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
   const name = `agaration-earnings-${new Date().toISOString().slice(0, 10)}.csv`;
