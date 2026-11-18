@@ -540,3 +540,5 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .log-more > .stack { margin-top: 8px; }
 .log-tip { margin: 0; }
 .lab-check .close { color: var(--go); } .lab-check .off { color: var(--warn); } .lab-check .far { color: var(--stop); }
+.log-label b { color: var(--ink); font-weight: 800; font-size: 15px; }
+.log-from { color: var(--warn); font-weight: 700; font-size: 13px; }

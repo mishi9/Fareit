@@ -164,7 +164,7 @@ export async function buildLab(root) {
     <div class="log-head"><h2>Log a job</h2><p class="note">Three numbers from Grab's trip summary.</p></div>
 
     <div class="log-step"><span class="log-n">1</span>
-      <div class="field"><label for="lab-km">Trip km</label>
+      <div class="field"><label for="lab-km" class="log-label"><b>Trip km</b> <span class="log-from">from PICK UP only</span></label>
         <input id="lab-km" class="log-big" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 8.4"></div></div>
     <div id="lab-surge" class="seg g3">
       <button type="button" data-v="normal">Normal</button>
