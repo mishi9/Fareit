@@ -23,6 +23,13 @@ export function nightOf(ts) {
   return d;
 }
 const isPH = (d) => PUBLIC_HOLIDAYS.has(dayKey(d));
+// For the header: 'PH' on a public holiday, 'PH Eve' the day before one (calendar days), else ''.
+export function holidayTag(ts = Date.now()) {
+  const d = new Date(ts);
+  if (isPH(d)) return 'PH';
+  const n = new Date(d); n.setDate(n.getDate() + 1);
+  return isPH(n) ? 'PH Eve' : '';
+}
 const isPHEve = (d) => { const n = new Date(d); n.setDate(n.getDate() + 1); return isPH(n); };
 
 // Kinds of night. Fri, Sat and the eve of a public holiday behave alike; Mon-Tue are the slow

@@ -643,3 +643,14 @@ test('a busy Friday night counts fully for Saturday night, only partly for Tuesd
   const tueLift = tod4(fri, Date.parse('2026-11-17T23:30:00+08:00'), at).lift;
   assert.ok(satLift > tueLift + 0.05, `Saturday ${satLift.toFixed(3)} vs Tuesday ${tueLift.toFixed(3)}`);
 });
+
+import { holidayTag } from '../public/daypattern.js';
+test('header tag: PH on a public holiday, PH Eve the day before, by calendar day', () => {
+  const t = (iso) => Date.parse(`${iso}+08:00`);
+  assert.equal(holidayTag(t('2026-12-25T10:00:00')), 'PH');
+  assert.equal(holidayTag(t('2026-12-24T23:59:00')), 'PH Eve');
+  assert.equal(holidayTag(t('2026-11-18T12:00:00')), '');
+  assert.equal(holidayTag(t('2026-11-08T12:00:00')), 'PH', 'Deepavali (Sunday)');
+  assert.equal(holidayTag(t('2026-11-09T12:00:00')), 'PH', 'Deepavali observed Monday');
+  assert.equal(holidayTag(t('2026-11-07T12:00:00')), 'PH Eve');
+});

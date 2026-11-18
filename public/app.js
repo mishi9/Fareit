@@ -7,6 +7,7 @@ import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
 import { buildLab, syncLab } from './lab.js';
 import { buildInfo, showInfo, renderOldJobs } from './info.js';
+import { holidayTag } from './daypattern.js';
 import { ready, isOwner, isOwnerPhone, hideWorkings, claimOwner, ownerApi, inviteLink } from './access.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -96,17 +97,17 @@ async function api(path, body) {
 async function checkStatus() {
   const chip = $('#status');
   if (!navigator.onLine) {
-    chip.textContent = 'Offline · saving on phone';
+    chip.textContent = chipText('Offline · saving on phone', 'Offline');
     chip.className = 'chip warn';
     return;
   }
   try {
     const s = await api('/api/status');
-    if (s.keyRequired && !s.authorized) { chip.textContent = 'Access key needed'; chip.className = 'chip warn'; }
-    else if (!s.map) { chip.textContent = 'Map not set up'; chip.className = 'chip warn'; }
-    else { chip.textContent = 'OneMap ready'; chip.className = 'chip ok'; }
+    if (s.keyRequired && !s.authorized) { chip.textContent = chipText('Access key needed', 'Key needed'); chip.className = 'chip warn'; }
+    else if (!s.map) { chip.textContent = chipText('Map not set up', 'No map'); chip.className = 'chip warn'; }
+    else { chip.textContent = chipText('OneMap ready', 'Map ✓'); chip.className = 'chip ok'; }
   } catch {
-    chip.textContent = 'Server unreachable';
+    chip.textContent = chipText('Server unreachable', 'No server');
     chip.className = 'chip warn';
   }
 }
@@ -994,6 +995,21 @@ function buildOwner() {
   list();
 }
 
+// Short status words on narrow phones, so the date fits beside them.
+const chipText = (long, short) => (window.innerWidth <= 360 ? short : long);
+
+// ---------- header: today's date, weekday, and PH / PH Eve ----------
+function renderToday() {
+  const el = $('#today');
+  if (!el) return;
+  const d = new Date();
+  const tag = holidayTag(d.getTime());
+  const date = d.toLocaleDateString('en-SG', { day: 'numeric', month: 'short' });
+  const day = d.toLocaleDateString('en-SG', { weekday: 'long' });
+  // The year hides on narrow phones so the PH tag stays beside the date.
+  el.innerHTML = `<div class="today-date">${date}<span class="yr"> ${d.getFullYear()}</span>${tag ? ` <b class="ph">(${tag})</b>` : ''}</div><div class="today-day">${day}</div>`;
+}
+
 // ---------- boot ----------
 async function boot() {
   await ready(); // invite-only: wait until this phone is let in
@@ -1021,6 +1037,8 @@ async function boot() {
   };
   sizeWindow();
   window.addEventListener('resize', sizeWindow);
+  renderToday();
+  setInterval(renderToday, 60 * 1000);
   buildWindow();
   buildLab($('#view-lab'));
   buildInfo($('#view-info'));

@@ -67,6 +67,8 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 
 ## Days and nights
 
+The header shows the date and weekday, with **(PH)** or **(PH Eve)** on public holidays and the day before.
+
 Nights cross midnight: 00:00–05:59 belongs to the night before (Wednesday 1 am is Wednesday night). In "now", trips from the same kind of night count fully and others 40%: Mon–Tue, Wed, Thu, Sun, **Fri / Sat / eve of a public holiday**, and public holidays (official MOM dates for 2026–2027 in `public/daypattern.js`; add each new year).
 
 The owner's experience is the starting point ("busy +10%, the rest normal"), counting like 2 trips until real trips take over:
