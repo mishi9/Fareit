@@ -96,11 +96,11 @@ test('a wet evening counts fully while it rains, and only half on a dry one', ()
   assert.ok(Math.abs(timeOfDay(plain, now, novena).lift - timeOfDay(plain, now, novena, { raining: true }).lift) < 0.03);
 });
 
-test('Radar cards say Raining while it rains (events still come first)', () => {
+test('Radar cards: rain is its own flag; the price state stays Normal / Surge / Bad (events still come first)', () => {
   const b = bandOutlook(trips(), now, novena, { raining: true });
-  assert.ok(b.every((x) => x.state === 'rain'));
+  assert.ok(b.every((x) => x.raining && ['good', 'normal', 'bad'].includes(x.state)));
   assert.ok(b[0].rainTrips === 6);
-  assert.ok(bandOutlook(trips(), now, novena).every((x) => x.state !== 'rain'));
+  assert.ok(bandOutlook(trips(), now, novena).every((x) => !x.raining));
   const ev = bandOutlook(trips(), now, novena, { raining: true, event: { id: 'e1' } });
   assert.ok(ev.every((x) => x.state === 'event'));
 });

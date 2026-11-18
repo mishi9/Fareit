@@ -393,7 +393,9 @@ export function renderBands() {
     : b0.scope === 'here'
       ? `From all trips, closest counting most: ${b0.nearHour} within 3 km and 1½ h of now; ${clText}.`
       : `Nothing within 3 km and 1½ h yet, so leaning on the closest available: ${clText}.`;
-  const word = { good: 'Above', normal: 'Normal', bad: 'Below', event: 'Event', rain: 'Raining' };
+  const word = { good: 'Surge', normal: 'Normal', bad: 'Bad', event: 'Event' };
+  // Rain is its own small pill beside the price state (the card keeps Normal / Surge / Bad colours).
+  const rainPill = wet ? `<span class="band-rain">${isThunder(wet.forecast) ? '⛈' : '☔'} Rain</span>` : '';
   // At a glance: where, the three prices, and the latest job. How it's worked out is on Log.
   void basis;
   box.innerHTML = `
@@ -401,9 +403,9 @@ export function renderBands() {
     ${latestLine(now)}
     ${bands.map((b) => `
       <div class="band-card ${b.state}">
-        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${b.state === 'rain' ? `${wet && isThunder(wet.forecast) ? '⛈' : '☔'} ` : ''}${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : b.state === 'rain' ? (b.rainTrips ? ` ${signed(b.vs)}` : '') : b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
+        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-pills">${rainPill}<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></span></div>
         <div class="band-now">${money(b.now)}</div>
-        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}${b.state === 'rain' && !b.rainTrips ? ' · rain: still learning' : ''}</div>
+        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}</div>
       </div>`).join('')}`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);

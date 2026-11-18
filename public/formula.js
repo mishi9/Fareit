@@ -510,8 +510,8 @@ export function bandOutlook(trips, ts, loc = null, opts = {}) {
     const surgeLo = surge.range ? driverEarns(c, normalPaid * (1 + surge.range.lo)) : withSurge;
     const surgeHi = surge.range ? driverEarns(c, normalPaid * (1 + surge.range.hi)) : withSurge;
     const vs = now / normal - 1;
-    const state = ev ? 'event' : wet ? 'rain' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, surgeLo, surgeHi, vs, state, eventTrips: ev ? ev.n : null, rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
+    const state = ev ? 'event' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
+    return { ...b, km, normal, now, surge: withSurge, surgeLo, surgeHi, vs, state, eventTrips: ev ? ev.n : null, raining: Boolean(wet), rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
   });
 }
 

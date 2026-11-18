@@ -158,7 +158,7 @@ Grab's green arrow shows on most jobs, even S$6.20 ones, so it doesn't say a job
 
 From NEA (data.gov.sg, free): rain gauges every 5 minutes and the 2-hour forecast per town, fetched by the server at most every 5 minutes. **Rain** covers everything wet: light to heavy rain, showers, thundery showers.
 
-- **Radar:** "☔ **Raining** near you · **Novena**" when a gauge within 3 km reads rain (or "⛈ **Thundery Showers** expected" from your town's forecast). The cards' pill says **Raining** instead of Normal / Above / Below (an event still comes first).
+- **Radar:** "☔ **Raining** near you · **Novena**" when a gauge within 3 km reads rain (or "⛈ **Thundery Showers** expected" from your town's forecast). The cards keep their price state (**Normal / Surge / Bad**, in their colours) with a small **☔ Rain** pill beside it.
 - **Trips are tagged automatically** when saved in the rain (Log or Got a job; no extra tap): "☔ Rain" on the job.
 - **It's observed, not assumed.** No fare says rain moved it, so there's no fixed rain %. Rain trips stay in the data: for "now" they count fully while it's raining and at half weight on a dry day (and dry trips at half while it rains), so a wet evening doesn't make the next dry one look busy. The owner's stats show how rain trips have run vs normal.
 - **Past trips are tagged too.** A trip saved without a rain tag (before rain was added, or with no rain data on the phone) is checked by the server against NEA's own readings for its time and place, the same rule as on the phone; about 10 every 5 minutes, from the last 3 days. Phones pick the tag up on their next sync.
