@@ -65,6 +65,17 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
+## Days and nights
+
+Nights cross midnight: 00:00–05:59 belongs to the night before (Wednesday 1 am is Wednesday night). In "now", trips from the same kind of night count fully and others 40%: Mon–Tue, Wed, Thu, Sun, **Fri / Sat / eve of a public holiday**, and public holidays (official MOM dates for 2026–2027 in `public/daypattern.js`; add each new year).
+
+The owner's experience is the starting point ("busy +10%, the rest normal"), counting like 2 trips until real trips take over:
+- Fri / Sat nights and public-holiday eves, 18:00–06:00: +10%
+- Wednesday ladies' night, 00:00–04:00, near MBS, Cecil St / CBD, Bugis, Clarke Quay: +10%
+- Club closing near Orchard, Dhoby Ghaut, Jalan Besar, Kallang, Clarke Quay: Sun–Fri nights 02:45–03:15, Saturday nights and public-holiday eves 03:45–04:15, public-holiday nights 02:45–03:45: +10%
+- Weekday after-work 18:00–20:00: +10%
+- Everything else (Mon–Tue nights, Thu and Sun nights, public holidays, lunch): normal
+
 ## Safeguards against wrong or made-up data
 
 The data is shared by every driver, so a typo or a troll mustn't skew everyone's estimates.

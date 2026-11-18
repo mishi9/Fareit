@@ -259,7 +259,7 @@ test('quick Got a job entries (km + earnings only) move "now" for the area, not 
   const TAMPINES = { lat: 1.353, lng: 103.945 };
   const normal = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
     .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
-  const now = at('2026-11-22T02:40:00+08:00');
+  const now = at('2026-11-24T02:40:00+08:00');
   const before = bandOutlook(normal, now, TAMPINES);
   // Two quick entries in the last 20 minutes near Tampines, both paying well above normal earnings.
   const quickJobs = [[21, 20], [12, 15]].map(([km, earned], i) => ({
@@ -594,4 +594,52 @@ test('earned trust: a reliable driver on a shift (many jobs in one zone) counts 
   assert.ok(full > 0.1, `the busy evening shows: ${full.toFixed(3)}`);
   assert.ok(trusted > 0.95 * full, `trusted shift driver counts fully: ${trusted.toFixed(3)} of ${full.toFixed(3)}`);
   assert.ok(fresh < 0.8 * full, `a new driver with the same jobs stays capped: ${fresh.toFixed(3)}`);
+});
+
+// ---- day patterns: kinds of night, and the owner's experience as the starting point ----
+import { dayType, experienceLift } from '../public/daypattern.js';
+import { timeOfDay as tod4 } from '../public/formula.js';
+test('kinds of night: after midnight belongs to the night before; Fri = Sat = eve of a public holiday', () => {
+  const t = (iso) => Date.parse(`${iso}+08:00`);
+  assert.equal(dayType(t('2026-11-19T01:30:00')), 'wed', 'Thursday 1:30 am is Wednesday night');
+  assert.equal(dayType(t('2026-11-20T23:00:00')), 'weekend', 'Friday night');
+  assert.equal(dayType(t('2026-11-22T02:00:00')), 'weekend', 'Sunday 2 am is Saturday night');
+  assert.equal(dayType(t('2026-11-22T22:00:00')), 'sun');
+  assert.equal(dayType(t('2026-11-17T22:00:00')), 'early', 'Tuesday');
+  assert.equal(dayType(t('2026-11-19T22:00:00')), 'thu');
+  assert.equal(dayType(t('2026-12-24T22:00:00')), 'weekend', 'Christmas Eve (a Thursday) is like a weekend');
+  assert.equal(dayType(t('2026-12-25T15:00:00')), 'ph', 'Christmas Day');
+  assert.equal(dayType(t('2027-02-08T15:00:00')), 'ph', 'CNY observed Monday');
+});
+
+test('starting guesses: busy times +10%, the rest normal', () => {
+  const t = (iso) => Date.parse(`${iso}+08:00`);
+  const ORCHARD = { lat: 1.3048, lng: 103.8318 };
+  const CQ = { lat: 1.2888, lng: 103.8467 };
+  const TAMPINES = { lat: 1.3526, lng: 103.9447 };
+  assert.equal(experienceLift(t('2026-11-18T03:00:00'), ORCHARD), 0.1, 'Tue night club closing, Orchard 3 am');
+  assert.equal(experienceLift(t('2026-11-18T03:00:00'), TAMPINES), 0, 'not a club area');
+  assert.equal(experienceLift(t('2026-11-18T03:30:00'), ORCHARD), 0, 'after the weekday closing window');
+  assert.equal(experienceLift(t('2026-11-21T02:55:00'), ORCHARD), 0.1, 'Friday night: weekday closing time (and a weekend night anyway)');
+  assert.equal(experienceLift(t('2026-11-22T04:00:00'), ORCHARD), 0.1, 'Saturday night closing, 4 am');
+  assert.equal(experienceLift(t('2026-11-19T01:00:00'), CQ), 0.1, 'Wednesday ladies\' night, Clarke Quay');
+  assert.equal(experienceLift(t('2026-11-19T01:00:00'), TAMPINES), 0, 'ladies\' night is in the bar areas');
+  assert.equal(experienceLift(t('2026-11-20T23:00:00'), TAMPINES), 0.1, 'Friday night anywhere');
+  assert.equal(experienceLift(t('2026-11-17T22:00:00'), TAMPINES), 0, 'Monday/Tuesday night: normal, not lower');
+  assert.equal(experienceLift(t('2026-11-17T18:30:00'), TAMPINES), 0.1, 'weekday after work');
+  assert.equal(experienceLift(t('2026-11-17T12:30:00'), TAMPINES), 0, 'weekday lunch: normal');
+  assert.equal(experienceLift(t('2026-12-25T18:30:00'), TAMPINES), 0, 'public holiday: not after-work');
+  assert.equal(experienceLift(t('2026-11-22T22:00:00'), TAMPINES), 0, 'Sunday night: data decides');
+  assert.equal(experienceLift(t('2026-11-23T03:00:00'), ORCHARD), 0.1, 'Sunday night (Monday 3 am) closing, ~3 am');
+  assert.equal(experienceLift(t('2026-12-25T04:00:00'), ORCHARD), 0.1, 'Christmas Eve night (eve of PH): ~4 am');
+  assert.equal(experienceLift(t('2026-12-26T03:30:00'), ORCHARD), 0.1, 'Christmas night (PH): 02:45-03:45');
+  assert.equal(experienceLift(t('2026-12-26T04:00:00'), ORCHARD), 0, 'PH night: over by 03:45');
+});
+
+test('a busy Friday night counts fully for Saturday night, only partly for Tuesday night', () => {
+  const at = { lat: 1.30, lng: 103.83 };
+  const fri = [0, 1, 2].map((i) => ({ ...make(10, 18, { ts: Date.parse(`2026-11-13T23:${10 + i * 10}:00+08:00`), ...at }), actual: null, earned: 14 + i * 0.2, id: `f${i}` }));
+  const satLift = tod4(fri, Date.parse('2026-11-21T23:30:00+08:00'), at).lift;
+  const tueLift = tod4(fri, Date.parse('2026-11-17T23:30:00+08:00'), at).lift;
+  assert.ok(satLift > tueLift + 0.05, `Saturday ${satLift.toFixed(3)} vs Tuesday ${tueLift.toFixed(3)}`);
 });

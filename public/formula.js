@@ -11,6 +11,7 @@
 // Non-surged trips only (Grab's demand multiplier is 1). S$8.10 is the minimum a passenger pays
 // (tested as a passenger).
 
+import { dayType, OTHER_DAY_WEIGHT, experienceLift, EXPERIENCE_WEIGHT } from './daypattern.js';
 export const MIN_PASSENGER = 8.10;
 // The least a driver earns on a trip (a minimum-fare guarantee), whatever the passenger paid.
 export const MIN_DRIVER = 6.20;
@@ -291,7 +292,12 @@ const bandWeight = (km, band) => {
 // has little of its own (counts as one trip).
 export function timeOfDay(trips, ts, loc = null, opts = {}) {
   const band = opts.band || null;
-  const priorLog = Math.log(1 + (opts.prior || 0));
+  // The starting point: the owner's experience for this kind of night, hour and area (counts like
+  // EXPERIENCE_WEIGHT trips), unless a caller passes its own (each card leans on the overall lift).
+  const exp = opts.prior == null;
+  const priorLog = Math.log(1 + (exp ? experienceLift(ts, loc) : opts.prior));
+  const priorW = exp ? EXPERIENCE_WEIGHT : 1;
+  const kind = dayType(ts);
   let inBandNear = 0;
   const all = withBase(trips);
   const w = fitWeights(trips);
@@ -318,7 +324,9 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     if (r === null) continue;
     const g = hourGap(hourOf(t.ts), h);
     const ageMin = (ts - t.ts) / 60000;
-    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin) * bandWeight(t.km, band);
+    // Same kind of night (e.g. Friday and Saturday nights) counts fully; another kind less.
+    const sameDay = t.base || dayType(t.ts) === kind ? 1 : OTHER_DAY_WEIGHT;
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin) * bandWeight(t.km, band) * sameDay;
     items.push({ t, d, r, g, ageMin, x });
   }
   // No other single driver outweighs everyone else combined (at least DRIVER_CAP trips' worth is
@@ -349,7 +357,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     if (g <= 1.5 && d <= NEAR_KM) { near++; if (t.surge === 'surge') surgeNear++; }
     if (ageMin >= 0 && ageMin <= 90 && d <= NEAR_KM) recent++;
   }
-  const m = (swr + priorLog) / (sw + 1);
+  const m = (swr + priorW * priorLog) / (sw + priorW);
   return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw, closest, inBandNear };
 }
 
