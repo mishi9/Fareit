@@ -182,7 +182,7 @@ main {
    the screen between the header and the tabs, and the thumb area is pushed to the bottom. */
 #view-window:not([hidden]) {
   display: flex; flex-direction: column; gap: 12px;
-  min-height: calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px));
+  min-height: var(--view-h, calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px)));
 }
 #view-window .thumb { margin-top: auto; display: grid; gap: 12px; }
 #view-window .group { gap: 6px; }
@@ -574,3 +574,20 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .log-guide-key > span:not(.adv-h) { display: grid; grid-template-columns: 26px 1fr; flex-wrap: nowrap; }
 .log-guide-key .adv-h { color: var(--warn); font-weight: 800; }
 
+
+/* App shell: the page itself never scrolls, so the header and the tab bar stay put on every tab.
+   Only the middle (main) scrolls. On the iPhone Home Screen app the height is the screen's own
+   (--app-h, set in index.html), because the height the iPhone reports there is too short. */
+html, body { overflow: hidden; }
+body { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
+.ios-app body { bottom: auto; height: var(--app-h, 100%); }
+.top { position: relative; flex: none; }
+main { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  width: 100%; max-width: none; margin: 0;
+  padding-bottom: 36px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px), calc((100% - 528px) / 2));
+  padding-right: max(16px, env(safe-area-inset-right, 0px), calc((100% - 528px) / 2)); }
+.tabs { position: relative; flex: none; }
+body.sheet-open main { overflow: hidden; }
+/* Got a job sticks to the bottom of the scrolling middle (the tab bar is no longer on top of it). */
+.got-job { bottom: 8px; }

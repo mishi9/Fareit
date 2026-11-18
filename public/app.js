@@ -1075,6 +1075,8 @@ async function boot() {
   };
   sizeWindow();
   window.addEventListener('resize', sizeWindow);
+  // The middle can change size after load (the iPhone settles its screen size late): keep Radar filling it.
+  if (window.ResizeObserver) new ResizeObserver(sizeWindow).observe($('main'));
   renderToday();
   setInterval(renderToday, 60 * 1000);
   buildWindow();
