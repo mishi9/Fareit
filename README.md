@@ -142,6 +142,15 @@ A full trip, at the job's own time and pickup area: **drop-off** (area, postal c
 
 No extra taps: it comes from trips saved as **Surge** (green ↑ on the job card). When at least 2 different drivers have saved a Surge trip within about 1.5 km of each other in the last 30 minutes, drivers within 3 km (about 5 to 10 minutes away) see a green banner at the top of Radar: "Orchard likely surging · 2.1 km away", or "Likely surging around you" within 1.5 km. One phone's trips count once. Ranges are in `public/surge.js`.
 
+## Rain
+
+From NEA (data.gov.sg, free): rain gauges every 5 minutes and the 2-hour forecast per town, fetched by the server at most every 5 minutes. **Rain** covers everything wet: light to heavy rain, showers, thundery showers.
+
+- **Radar:** "☔ **Raining** near you · **Novena**" when a gauge within 3 km reads rain (or "⛈ **Thundery Showers** expected" from your town's forecast). The cards' pill says **Raining** instead of Normal / Above / Below (an event still comes first).
+- **Trips are tagged automatically** when saved in the rain (Log or Got a job; no extra tap): "☔ Rain" on the job.
+- **It's observed, not assumed.** No fare says rain moved it, so there's no fixed rain %. Rain trips stay in the data: for "now" they count fully while it's raining and at half weight on a dry day (and dry trips at half while it rains), so a wet evening doesn't make the next dry one look busy. The owner's stats show how rain trips have run vs normal.
+- **Info → Rain:** the towns with rain forecast, grouped by kind, and how many gauges read rain.
+
 ## Radar at the airport
 
 The airport zone (`public/airport-zone.js`) is the official Changi Airport boundary (URA Master Plan 2019 subzone, from data.gov.sg) **and** within 1.5 km of a terminal, so nearby Changi (Changi Village, Changi Prison, the business park, Simei, Tanah Merah Ferry Terminal, the exhibition centre) doesn't count as the airport. The taxi count on Info uses the same zone.

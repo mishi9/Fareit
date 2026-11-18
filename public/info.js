@@ -10,6 +10,7 @@ import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
 import { FERRY_TERMINALS, ferryRowsHtml } from './ferries.js';
+import { loadRain, rainData, rainInfoHtml } from './rain.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
 const LIVE_REFRESH = 2 * 60 * 1000;
@@ -36,6 +37,7 @@ export function buildInfo(root) {
     <section class="stack"><h2>Road incidents</h2><div id="info-incidents" class="stack"></div></section>
     <section class="stack"><h2>Expressway travel times</h2><div id="info-travel" class="stack"></div></section>
     <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
+    <section class="stack"><h2>Rain</h2><div id="info-rain" class="stack"></div></section>
     <section class="stack"><h2>From JB</h2><div id="info-jb" class="stack"></div></section>
     <section class="stack"><h2>Ferries</h2><div id="info-ferries" class="stack"></div></section>
     <section class="stack"><h2>Airport</h2><div id="info-airport" class="stack"></div></section>`;
@@ -49,8 +51,11 @@ export function showInfo() {
   renderEvents();
   renderLive();
   loadLive();
+  const rain = () => { const box = info.root.querySelector('#info-rain'); if (box) box.innerHTML = rainInfoHtml(rainData(), here()); };
+  rain();
+  loadRain(rain);
   clearInterval(info.timer);
-  info.timer = setInterval(() => { if (!info.root.closest('[hidden]')) { loadLive(); renderEvents(); } }, 60 * 1000);
+  info.timer = setInterval(() => { if (!info.root.closest('[hidden]')) { loadLive(); renderEvents(); loadRain(rain); } }, 60 * 1000);
 }
 
 // ---------- events ----------

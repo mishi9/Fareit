@@ -12,12 +12,13 @@ import { jbPlace, jbRowsHtml } from './jb.js';
 import { plausible, isOutlier } from './sanity.js';
 import { ferryTerminalAt, ferryRowsHtml } from './ferries.js';
 import { loadSurge, surgeNow, surgeBanner } from './surge.js';
+import { loadRain, rainNow, rainBanner, rainTagNow, isThunder } from './rain.js';
 import { loadAlerts, alertsHtml } from './alerts.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob,
-  markEvents, eventLift, eventFor, eventNear,
+  markEvents, eventLift, eventFor, eventNear, rainLift,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -67,10 +68,11 @@ const toRow = (t) => ({
   id: t.id, ts: t.ts, km: t.km, min: t.min ?? null, erp: t.erp || 0, paid: t.actual, earned: t.earned ?? null,
   surge: t.surge, predicted: t.predicted ?? null, predicted_earned: t.predictedEarned ?? null,
   card_min: t.cardMin ?? null, pickup_km: t.pickupKm ?? null, lat: t.lat ?? null, lng: t.lng ?? null,
+  ...(t.rain === 0 || t.rain === 1 ? { rain: t.rain } : {}),
 });
 const fromRow = (r) => ({
   id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
-  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, shared: true, d: r.d || null, trusted: r.tr === 1,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, rain: r.rain === 1 ? 1 : r.rain === 0 ? 0 : null, shared: true, d: r.d || null, trusted: r.tr === 1,
 });
 // Surge or airport: the learned % on top of the normal fare (null for normal trips).
 const liftFor = (kind, ts) => (kind === 'surge' ? surgeLift(dataset(), ts) : kind === 'airport' ? airportLift(dataset(), ts) : null);
@@ -229,6 +231,7 @@ export async function buildLab(root) {
           <input id="lab-earned" class="log-big" type="number" inputmode="decimal" step="0.01" min="0"></div>
       </div></div>
     <div class="lab-check" id="lab-check"></div>
+    <p class="note rain-note" id="lab-rain" hidden></p>
     <p class="msg" id="lab-msg" role="status"></p>
     <button type="button" class="primary wide log-save" id="lab-save">Save job</button>
 
@@ -324,6 +327,11 @@ export function renderBands() {
     surgeBox.hidden = !s;
     if (s) surgeBox.innerHTML = surgeBanner(s, areaName({ lat: Math.round(s.lat * 100) / 100, lng: Math.round(s.lng * 100) / 100 }), now);
   }
+  // Raining near you (a rain gauge within 3 km), or rain forecast for your town: like surge.
+  loadRain(renderBands);
+  const wet = rainNow(loc);
+  const rainBox = document.querySelector('#radar-rain');
+  if (rainBox) { rainBox.hidden = !wet; rainBox.innerHTML = rainBanner(wet); }
   // An event letting out within 3 km (from an hour before it ends to 90 min after): like surge.
   const evBox = document.querySelector('#radar-event');
   const near = eventNear(eventsList(), loc, now);
@@ -360,7 +368,7 @@ export function renderBands() {
   if (airport) return;
   // At a venue as it lets out: the cards show event prices (learned only from event trips).
   const atEvent = loc ? eventFor({ lat: loc.lat, lng: loc.lng, ts: now }, eventsList()) : null;
-  const bands = bandOutlook(dataset(), now, loc, { event: atEvent });
+  const bands = bandOutlook(dataset(), now, loc, { event: atEvent, raining: Boolean(wet) });
   const h = new Date(now);
   const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
   const place = loc ? (areaName(loc) || 'your area') : null;
@@ -375,7 +383,7 @@ export function renderBands() {
     : b0.scope === 'here'
       ? `From all trips, closest counting most: ${b0.nearHour} within 3 km and 1½ h of now; ${clText}.`
       : `Nothing within 3 km and 1½ h yet, so leaning on the closest available: ${clText}.`;
-  const word = { good: 'Above', normal: 'Normal', bad: 'Below', event: 'Event' };
+  const word = { good: 'Above', normal: 'Normal', bad: 'Below', event: 'Event', rain: 'Raining' };
   // At a glance: where, the three prices, and the latest job. How it's worked out is on Log.
   void basis;
   box.innerHTML = `
@@ -383,9 +391,9 @@ export function renderBands() {
     ${latestLine(now)}
     ${bands.map((b) => `
       <div class="band-card ${b.state}">
-        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
+        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${b.state === 'rain' ? `${wet && isThunder(wet.forecast) ? '⛈' : '☔'} ` : ''}${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : b.state === 'rain' ? (b.rainTrips ? ` ${signed(b.vs)}` : '') : b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
         <div class="band-now">${money(b.now)}</div>
-        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)}</div>
+        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)}${b.state === 'rain' && !b.rainTrips ? ' · rain: still learning' : ''}</div>
       </div>`).join('')}`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
@@ -427,8 +435,11 @@ function readForm() {
 }
 
 // Live: the predicted fare and earnings appear as soon as distance and time are in.
+const rainNoteText = () => { const w = rainNow((lab.pending && lab.pending.precise) || here()); return w ? `${isThunder(w.forecast) ? '⛈' : '☔'} ${w.kind === 'now' ? 'Raining' : 'Rain forecast'} near you: saved as a rain job.` : ''; };
 function update(ev) {
   const r = lab.root;
+  const rn = $('#lab-rain', r);
+  if (rn) { const t = rainNoteText(); rn.hidden = !t; rn.textContent = t; }
   if (ev && ev.type === 'input') { const m = $('#lab-msg', r); if (m.classList.contains('err')) { m.textContent = ''; m.classList.remove('err'); } }
   for (const b of r.querySelectorAll('#lab-surge button')) b.classList.toggle('sel', b.dataset.v === lab.surge);
   const f = readForm();
@@ -562,6 +573,7 @@ async function save() {
     ...((lab.pending && lab.pending.loc) || rounded(here()) || {}),
     predicted, predictedEarned, predictedNormal: normalFare, surgeLiftUsed: sl ? sl.lift : null, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
+    rain: rainTagNow((lab.pending && lab.pending.precise) || here(), f.ts),
   });
   await db.setKV(KEY, lab.trips);
   syncLab();
@@ -603,6 +615,7 @@ function buildQuick() {
       <button type="button" data-v="airport">Airport</button>
     </div>
     <div class="lab-check" id="qj-check"></div>
+    <p class="note rain-note" id="qj-rain" hidden></p>
     <p class="msg" id="qj-msg" role="status"></p>
     <button type="button" class="primary wide" id="qj-save">Save job</button>
     <p class="note">Saved as a full trip: sharpens the estimates and Radar for every driver.</p>`;
@@ -687,6 +700,8 @@ function quickEstimate(f) {
   return { w, ts, sl, normalFare, predicted, predictedEarned: driverEarns(commission(), predicted) };
 }
 function quickUpdate() {
+  const rn = document.querySelector('#qj-rain');
+  if (rn) { const t = rainNoteText(); rn.hidden = !t; rn.textContent = t; }
   for (const b of document.querySelectorAll('#qj-surge button')) b.classList.toggle('sel', b.dataset.v === quick.surge);
   const f = quickRead();
   const box = document.querySelector('#qj-check');
@@ -724,6 +739,7 @@ async function quickSave() {
     predicted: e.predicted, predictedEarned: e.predictedEarned, predictedNormal: e.normalFare, surgeLiftUsed: e.sl ? e.sl.lift : null,
     todLift: t.near ? t.lift : null, weightsBefore: { base: e.w.base, perKm: e.w.perKm, perMin: e.w.perMin }, timeSplit: true,
     ...(f.drop ? { dropLabel: f.drop, kmSource: 'map' } : {}), // drop-off name stays on this phone
+    rain: rainTagNow((lab.pending && lab.pending.precise) || here(), e.ts),
   });
   await db.setKV(KEY, lab.trips);
   const saved = new Date(e.ts);
@@ -806,6 +822,7 @@ function renderStats() {
     <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they sharpen the estimates)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on Radar)` : ''}.`; })()}</p>
     <p class="note">"Off with today's estimate" estimates each trip from all the others: the honest test of the estimates as they stand. Normal trips from every driver.</p>
     <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>
+    <p class="note"><b>Rain:</b> ${(() => { const r = rainLift(dataset()); return r.guess ? 'no trips saved in the rain yet.' : `trips saved in the rain ran ${signed(r.lift)} vs normal, from ${r.n} trip${r.n === 1 ? '' : 's'} (observed, not a rule).`; })()}</p>
     <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs normal, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;
 }
 
@@ -851,8 +868,8 @@ function renderList() {
     card.className = 'card';
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
-      ${isOwner() ? '' : `<div class="meta">${t.km} km${t.dropLabel ? ` to ${t.dropLabel.replace(/[<>&"]/g, '')}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}${t.earned > 0 ? ` · earned ${money(t.earned)}` : ''}</div>`}
-      <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}</div>
+      ${isOwner() ? '' : `<div class="meta">${t.km} km${t.dropLabel ? ` to ${t.dropLabel.replace(/[<>&"]/g, '')}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}${t.rain === 1 ? ' · ☔ Rain' : ''}${t.earned > 0 ? ` · earned ${money(t.earned)}` : ''}</div>`}
+      <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}${t.rain === 1 ? ' · ☔ Rain' : ''}</div>
       <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.quick ? `Quick entry from Got a job: earned ${money(t.earned)}${t.predictedEarned ? ` (normal about ${money(t.predictedEarned)})` : ''}. Add the passenger fare in a full entry to sharpen the estimates.` : ''}${t.quick ? '' : `Paid: estimate said ${money(t.predicted)} (${offText(t.predicted, t.actual)})`}${!t.quick && t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';

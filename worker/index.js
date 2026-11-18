@@ -331,6 +331,7 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'pickup_km REAL', 'formula_trips'))
       .then(() => addColumn(db, 'lat REAL', 'formula_trips'))
       .then(() => addColumn(db, 'lng REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'rain INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'animal TEXT', 'invites'))
       .then(() => addColumn(db, 'opened_at INTEGER', 'invites'))
       .catch((e) => {
@@ -543,20 +544,22 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   if (!['normal', 'surge', 'airport'].includes(t.surge)) return null;
   // Safeguard: what no real trip looks like (e.g. 10 km at S$99) is refused (public/sanity.js).
   if (!plausible({ km, min, paid, earned, erp }).ok) return null;
+  // rain: 1 if it was raining (or forecast rain) near the pickup when saved, 0 if dry, null if unknown.
+  const rain = t.rain === 1 || t.rain === true ? 1 : t.rain === 0 || t.rain === false ? 0 : null;
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
-    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1],
+    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1], rain,
   };
 }
 
 const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received_at, updated_at, rev, ts, km, min, erp, paid,
-    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17)
+    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng, rain)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17, ?18)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
     min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
     predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0,
-    card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng
+    card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng, rain = excluded.rain
   WHERE formula_trips.device = excluded.device`;
 
 async function readJson(request) {
@@ -598,7 +601,7 @@ async function postFormula(request, env) {
     }
     writes.push(env.DB.prepare(FORMULA_UPSERT).bind(
       t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
-      t.card_min, t.pickup_km, t.lat, t.lng,
+      t.card_min, t.pickup_km, t.lat, t.lng, t.rain,
     ));
     accepted.push(t.id);
   }
@@ -613,7 +616,7 @@ async function getFormula(url, env) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, deleted, device
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, rain, deleted, device
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
@@ -931,6 +934,67 @@ async function getInfo(env) {
   }
   const lta = live && live.lta ? live.lta : {};
   return json({ ...(live || {}), lta: { ...lta, ready: Boolean(env.LTA_KEY) } });
+}
+
+// ---------- Rain (NEA via data.gov.sg, free, no key) ----------
+// Rain gauges (about 60-90 stations, 5-minute totals in mm) and the 2-hour forecast per town
+// (47 areas). Fetched at most every RAIN_REFRESH_MIN minutes and shared by every phone.
+const RAIN_REFRESH_MIN = 5;
+const NEA = 'https://api-open.data.gov.sg/v2/real-time/api';
+// Pure, for the tests: the two NEA answers -> what the phones need.
+export function cleanRain(rainfall, forecast, now = Date.now()) {
+  const out = { at: now, wet: [], stations: 0, areas: [], valid: null, readAt: null };
+  const rd = rainfall && rainfall.data;
+  if (rd && Array.isArray(rd.stations) && Array.isArray(rd.readings) && rd.readings.length) {
+    const where = new Map(rd.stations.map((s) => [s.id, s.location || {}]));
+    const latest = rd.readings[rd.readings.length - 1];
+    out.readAt = Date.parse(latest.timestamp) || null;
+    for (const r of latest.data || []) {
+      const loc = where.get(r.stationId);
+      const mm = Number(r.value);
+      if (!loc || !Number.isFinite(loc.latitude) || !Number.isFinite(loc.longitude) || !Number.isFinite(mm)) continue;
+      out.stations++;
+      if (mm > 0) out.wet.push({ lat: loc.latitude, lng: loc.longitude, mm: Math.round(mm * 10) / 10 });
+    }
+  }
+  const fd = forecast && forecast.data;
+  if (fd && Array.isArray(fd.area_metadata) && Array.isArray(fd.items) && fd.items.length) {
+    const item = fd.items[fd.items.length - 1];
+    const f = new Map((item.forecasts || []).map((x) => [x.area, String(x.forecast || '')]));
+    for (const a of fd.area_metadata) {
+      const l = a.label_location || {};
+      if (!Number.isFinite(l.latitude) || !Number.isFinite(l.longitude) || !f.has(a.name)) continue;
+      out.areas.push({ name: String(a.name), lat: l.latitude, lng: l.longitude, f: f.get(a.name) });
+    }
+    const vp = item.valid_period || {};
+    out.valid = { text: String(vp.text || ''), end: Date.parse(vp.end) || null };
+  }
+  return out;
+}
+
+async function getRain(env) {
+  await ensureSchema(env.DB);
+  const now = Date.now();
+  const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'rain'").first();
+  let rain = row ? JSON.parse(row.value) : null;
+  if (!row || now - row.at >= RAIN_REFRESH_MIN * 60000) {
+    const get = async (path) => {
+      const res = await fetch(`${NEA}/${path}`, { headers: { accept: 'application/json' } });
+      if (!res.ok) throw new Error(`NEA ${res.status}`);
+      return res.json();
+    };
+    const [gauges, fc] = await Promise.allSettled([get('rainfall'), get('two-hr-forecast')]);
+    if (gauges.status === 'fulfilled' || fc.status === 'fulfilled') {
+      const fresh = cleanRain(gauges.status === 'fulfilled' ? gauges.value : null, fc.status === 'fulfilled' ? fc.value : null, now);
+      // keep the last good half if one of the two failed
+      if (gauges.status !== 'fulfilled' && rain) Object.assign(fresh, { wet: rain.wet, stations: rain.stations, readAt: rain.readAt });
+      if (fc.status !== 'fulfilled' && rain) Object.assign(fresh, { areas: rain.areas, valid: rain.valid });
+      rain = fresh;
+      await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('rain', ?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(now, JSON.stringify(rain)).run();
+    }
+  }
+  return json(rain || { at: null, wet: [], stations: 0, areas: [] });
 }
 
 // ---------- Surge reports ----------
@@ -1262,6 +1326,10 @@ export default {
         return json({ error: 'The database couldn’t be reached.' }, 502);
       }
       return json({ error: 'Not found' }, 404);
+    }
+    if (url.pathname === '/api/rain') {
+      if (!env.DB) return json({ at: null, wet: [], stations: 0, areas: [] });
+      try { return await getRain(env); } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
     }
     if (url.pathname === '/api/surge') {
       if (!env.DB) return json({ points: [] });

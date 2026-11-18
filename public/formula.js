@@ -222,7 +222,7 @@ export function toCsv(trips) {
     const d = new Date(t.ts);
     const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    const notes = [`formula said ${t.predicted ?? ''}`, t.cardMin ? `card total ${t.cardMin} min` : '', t.pickupKm ? `pickup ${t.pickupKm} km` : ''].filter(Boolean).join('; ');
+    const notes = [`formula said ${t.predicted ?? ''}`, t.cardMin ? `card total ${t.cardMin} min` : '', t.pickupKm ? `pickup ${t.pickupKm} km` : '', t.rain === 1 ? 'rain' : ''].filter(Boolean).join('; ');
     return [i + 1, date, time, 'Standard', t.km, t.min ?? '', '', t.actual ?? '', t.earned ?? '', t.erp || '', '', '', '', t.surge, '', '', '', '', '', notes].join(',');
   });
   return [head, ...lines].join('\n') + '\n';
@@ -288,8 +288,16 @@ const bandWeight = (km, band) => {
   return BAND_FLOOR + (1 - BAND_FLOOR) * Math.exp(-(out * out) / (2 * BAND_SD_KM * BAND_SD_KM));
 };
 
+// Rain: trips saved while it was raining near the pickup (t.rain === 1) may pay a little above
+// normal, or may not: there's no sign on a fare that rain moved it, so it's only observed. They
+// stay in the data, but count fully only for "now" while it's raining, and at RAIN_OTHER_WEIGHT
+// on a dry day (and dry trips the same on a wet one), so a wet evening doesn't make the next dry
+// one look busy.
+export const RAIN_OTHER_WEIGHT = 0.5;
+const sameWeather = (t, raining) => (t.rain === 1) === Boolean(raining) ? 1 : RAIN_OTHER_WEIGHT;
+
 // opts.band: lean on trips of that distance; opts.prior: the lift to fall back on when the band
-// has little of its own (counts as one trip).
+// has little of its own (counts as one trip). opts.raining: it's raining where you are now.
 export function timeOfDay(trips, ts, loc = null, opts = {}) {
   const band = opts.band || null;
   // The starting point: the owner's experience for this kind of night, hour and area (counts like
@@ -326,7 +334,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     const ageMin = (ts - t.ts) / 60000;
     // Same kind of night (e.g. Friday and Saturday nights) counts fully; another kind less.
     const sameDay = t.base || dayType(t.ts) === kind ? 1 : OTHER_DAY_WEIGHT;
-    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin) * bandWeight(t.km, band) * sameDay;
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin) * bandWeight(t.km, band) * sameDay * sameWeather(t, opts.raining);
     items.push({ t, d, r, g, ageMin, x });
   }
   // No other single driver outweighs everyone else combined (at least DRIVER_CAP trips' worth is
@@ -443,23 +451,25 @@ export function bandOutlook(trips, ts, loc = null, opts = {}) {
   const est = timeEstimator(all);
   const c = fitCommission(trips);
   // Always the closest available data, blended: no switch between "near you" and "all areas".
-  const tod = timeOfDay(trips, ts, loc);
+  const raining = Boolean(opts.raining);
+  const tod = timeOfDay(trips, ts, loc, { raining });
   const scope = !loc ? 'all' : tod.near ? 'here' : 'nearest';
   const surge = surgeLift(trips, ts);
   const ev = opts.event ? eventLift(trips) : null;
+  const wet = raining && !ev ? rainLift(trips) : null;
   return EARN_BANDS.map((b) => {
     const inBand = all.filter((t) => t.km >= b.lo && t.km < b.hi);
     const km = inBand.length >= 3 ? median(inBand.map((t) => t.km)) : b.km;
     const normalPaid = passengerFare(w, km, est(km)).fare;
     const normal = driverEarns(c, normalPaid);
     // Each band leans on trips of its own distance, falling back on the overall picture.
-    const own = timeOfDay(trips, ts, loc, { band: b, prior: tod.lift });
+    const own = timeOfDay(trips, ts, loc, { band: b, prior: tod.lift, raining });
     const nowLift = ev ? ev.lift : own.lift;
     const now = driverEarns(c, normalPaid * (1 + nowLift));
     const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
     const vs = now / normal - 1;
-    const state = ev ? 'event' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, vs, state, eventTrips: ev ? ev.n : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
+    const state = ev ? 'event' : wet ? 'rain' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
+    return { ...b, km, normal, now, surge: withSurge, vs, state, eventTrips: ev ? ev.n : null, rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
   });
 }
 
@@ -512,6 +522,22 @@ export function eventLift(trips) {
   const rs = [];
   for (const t of all) {
     if (!t.event) continue;
+    const r = ratioToFormula(t, w, est, c);
+    if (r !== null) rs.push(r);
+  }
+  if (!rs.length) return { lift: 0, n: 0, guess: true };
+  return { lift: Math.exp(rs.reduce((a, b) => a + b, 0) / (rs.length + 1)) - 1, n: rs.length, guess: false };
+}
+
+// How rain trips have paid against normal (observation only). A start of +0% counts as one trip.
+export function rainLift(trips) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const est = timeEstimator(all);
+  const c = fitCommission(trips);
+  const rs = [];
+  for (const t of all) {
+    if (t.rain !== 1 || t.event) continue;
     const r = ratioToFormula(t, w, est, c);
     if (r !== null) rs.push(r);
   }
