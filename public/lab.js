@@ -17,7 +17,7 @@ import { loadAlerts, alertsHtml } from './alerts.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN, arrowCompare,
   markEvents, eventLift, eventFor, eventNear, rainLift,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
@@ -26,7 +26,7 @@ const KEY = 'formulaLab';
 
 // The owner sees how the estimate is worked out (the formula, Grab's cut rule, the base trip,
 // the raw surge %); testers see the estimates. A code in Settings, not real security.
-import { isOwner } from './access.js';
+import { isOwner, isOwnerPhone } from './access.js';
 export { isOwner };
 // The form can sit in the Formula tab or in the Got a job card, so look it up anywhere.
 const $ = (s, root = document) => root.querySelector(s) || document.querySelector(s);
@@ -43,7 +43,7 @@ const offText = (pred, actual) => {
   return Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`;
 };
 
-const lab = { trips: [], shared: {}, surge: 'normal', root: null, device: null, syncNote: '', version: 0, cache: null };
+const lab = { trips: [], shared: {}, surge: 'normal', arrow: false, root: null, device: null, syncNote: '', version: 0, cache: null };
 
 // Everyone's trips: yours (on this phone) plus other testers' (from the server). The same array is
 // handed out until the trips change (changed()), so the formula, cut and time estimate built from
@@ -69,10 +69,11 @@ const toRow = (t) => ({
   surge: t.surge, predicted: t.predicted ?? null, predicted_earned: t.predictedEarned ?? null,
   card_min: t.cardMin ?? null, pickup_km: t.pickupKm ?? null, lat: t.lat ?? null, lng: t.lng ?? null,
   ...(t.rain === 0 || t.rain === 1 ? { rain: t.rain } : {}),
+  ...(t.arrow === 0 || t.arrow === 1 ? { arrow: t.arrow } : {}),
 });
 const fromRow = (r) => ({
   id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
-  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, rain: r.rain === 1 ? 1 : r.rain === 0 ? 0 : null, shared: true, d: r.d || null, trusted: r.tr === 1,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, rain: r.rain === 1 ? 1 : r.rain === 0 ? 0 : null, arrow: r.arrow === 1 ? 1 : r.arrow === 0 ? 0 : null, shared: true, d: r.d || null, trusted: r.tr === 1,
 });
 // Surge or airport: the learned % on top of the normal fare (null for normal trips).
 const liftFor = (kind, ts) => (kind === 'surge' ? surgeLift(dataset(), ts) : kind === 'airport' ? airportLift(dataset(), ts) : null);
@@ -218,6 +219,7 @@ export async function buildLab(root) {
       <button type="button" data-v="normal">Normal</button>
       <button type="button" data-v="airport">Airport</button>
     </div>
+    <button type="button" class="arrow-tog" id="lab-arrow" aria-pressed="false" hidden><span class="arrow-box"></span> Green <b>↑</b> on the job</button>
 
     <div class="lab-predict" id="lab-predict" aria-live="polite">
       <div class="lab-two">
@@ -242,6 +244,7 @@ export async function buildLab(root) {
     <button type="button" class="primary wide log-save" id="lab-save">Save job</button>
 
     <button type="button" class="ghost small log-clear" id="lab-clear">Clear the form</button>
+    <div class="card arrow-test" id="lab-arrow-test" hidden></div>
     <p class="note log-tip">On the road? Tap <b>Got a job</b> on Radar at pickup: it keeps the time and place for you.</p>
     </div></div>
 
@@ -266,6 +269,7 @@ export async function buildLab(root) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
   $('#lab-save', root).addEventListener('click', save);
+  $('#lab-arrow', root).addEventListener('click', () => { lab.arrow = !lab.arrow; update(); });
   // Simple or Advanced: remembered on this phone. Advanced shows the extra (optional) boxes inline.
   const MODE = 'agaration-log-mode';
   const setMode = (m) => {
@@ -404,7 +408,26 @@ export function renderBands() {
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
 
+// Green-arrow test (owner's phone): do jobs with the arrow pay more than jobs without?
+function renderArrowTest() {
+  const box = lab.root && $('#lab-arrow-test', lab.root);
+  if (!box) return;
+  box.hidden = !isOwnerPhone();
+  if (box.hidden) return;
+  const a = arrowCompare(dataset());
+  const line = (label, b) => (b.n ? `<div class="r"><span>${label}</span><b>${signed(b.lift)}</b><span class="note">${b.n} job${b.n === 1 ? '' : 's'} · ${signed(b.lo)} to ${signed(b.hi)} · ${b.over15} paid 15%+ more</span></div>` : `<div class="r"><span>${label}</span><b>—</b><span class="note">none yet</span></div>`);
+  const L = a.logged;
+  const verdict = L.arrow.n >= 5 && L.none.n >= 5
+    ? (Math.abs(L.arrow.lift - L.none.lift) < 0.05 ? 'So far the arrow makes <b>no real difference</b> to the pay.' : L.arrow.lift > L.none.lift ? `So far jobs with the arrow pay <b>${signed(L.arrow.lift - L.none.lift)}</b> more.` : 'So far jobs with the arrow pay <b>less</b>.')
+    : 'Log 5+ jobs with the arrow and 5+ without to compare.';
+  box.innerHTML = `<div class="k">Green arrow test · vs the normal price</div>
+    ${line('With ↑', L.arrow)}${line('No ↑', L.none)}
+    <p class="note">${verdict}</p>
+    ${a.older.arrow.n || a.older.none.n ? `<p class="note">Before this (old Surge / Normal tags): Surge-tagged ${a.older.arrow.n ? signed(a.older.arrow.lift) : '—'} (${a.older.arrow.n}), Normal-tagged ${a.older.none.n ? signed(a.older.none.lift) : '—'} (${a.older.none.n}).</p>` : ''}`;
+}
+
 function renderAll() {
+  renderArrowTest();
   renderBands();
   renderFormula();
   update();
@@ -442,8 +465,10 @@ function readForm() {
 
 // Live: the predicted fare and earnings appear as soon as distance and time are in.
 const rainNoteText = () => { const w = rainNow((lab.pending && lab.pending.precise) || here()); return w ? `${isThunder(w.forecast) ? '⛈' : '☔'} ${w.kind === 'now' ? 'Raining' : 'Rain forecast'} near you: saved as a rain job.` : ''; };
+const showArrow = (btn, on) => { if (!btn) return; btn.hidden = !isOwnerPhone(); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); btn.classList.toggle('on', on); };
 function update(ev) {
   const r = lab.root;
+  showArrow($('#lab-arrow', r), lab.arrow);
   const rn = $('#lab-rain', r);
   if (rn) { const t = rainNoteText(); rn.hidden = !t; rn.textContent = t; }
   if (ev && ev.type === 'input') { const m = $('#lab-msg', r); if (m.classList.contains('err')) { m.textContent = ''; m.classList.remove('err'); } }
@@ -576,7 +601,9 @@ async function save() {
     predicted, predictedEarned, predictedNormal: normalFare, surgeLiftUsed: sl ? sl.lift : null, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
     rain: rainTagNow((lab.pending && lab.pending.precise) || here(), f.ts),
+    ...(isOwnerPhone() ? { arrow: lab.arrow ? 1 : 0 } : {}),
   });
+  lab.arrow = false;
   await db.setKV(KEY, lab.trips);
   syncLab();
   msg.classList.remove('err');
@@ -594,7 +621,7 @@ async function save() {
 // away: the latest job, and "now" on the cards. Quick entries have no passenger fare, so they
 // don't touch the formula or Grab's cut; full trips still go in the Formula tab.
 const jobOpen = () => { const s = document.querySelector('#job-sheet'); return Boolean(s && !s.hidden); };
-const quick = { surge: 'normal', route: null, seq: 0, timer: null };
+const quick = { surge: 'normal', arrow: false, route: null, seq: 0, timer: null };
 
 function buildQuick() {
   const body = document.querySelector('#job-body');
@@ -615,6 +642,7 @@ function buildQuick() {
       <button type="button" data-v="normal">Normal</button>
       <button type="button" data-v="airport">Airport</button>
     </div>
+    <button type="button" class="arrow-tog" id="qj-arrow" aria-pressed="false" hidden><span class="arrow-box"></span> Green <b>↑</b> on the job</button>
     <div class="lab-check" id="qj-check"></div>
     <p class="note rain-note" id="qj-rain" hidden></p>
     <p class="msg" id="qj-msg" role="status"></p>
@@ -625,6 +653,7 @@ function buildQuick() {
   body.querySelector('#qj-paid').addEventListener('input', quickUpdate);
   for (const b of body.querySelectorAll('#qj-surge button')) b.addEventListener('click', () => { quick.surge = b.dataset.v; quickUpdate(); });
   body.querySelector('#qj-save').addEventListener('click', quickSave);
+  body.querySelector('#qj-arrow').addEventListener('click', () => { quick.arrow = !quick.arrow; quickUpdate(); });
 }
 
 // The trip box takes a km figure, or a drop-off (area, postal code or address): the road
@@ -701,6 +730,7 @@ function quickEstimate(f) {
   return { w, ts, sl, normalFare, predicted, predictedEarned: driverEarns(commission(), predicted) };
 }
 function quickUpdate() {
+  showArrow(document.querySelector('#qj-arrow'), quick.arrow);
   const rn = document.querySelector('#qj-rain');
   if (rn) { const t = rainNoteText(); rn.hidden = !t; rn.textContent = t; }
   for (const b of document.querySelectorAll('#qj-surge button')) b.classList.toggle('sel', b.dataset.v === quick.surge);
@@ -741,7 +771,9 @@ async function quickSave() {
     todLift: t.near ? t.lift : null, weightsBefore: { base: e.w.base, perKm: e.w.perKm, perMin: e.w.perMin }, timeSplit: true,
     ...(f.drop ? { dropLabel: f.drop, kmSource: 'map' } : {}), // drop-off name stays on this phone
     rain: rainTagNow((lab.pending && lab.pending.precise) || here(), e.ts),
+    ...(isOwnerPhone() ? { arrow: quick.arrow ? 1 : 0 } : {}),
   });
+  quick.arrow = false;
   await db.setKV(KEY, lab.trips);
   const saved = new Date(e.ts);
   lab.pending = null;
@@ -860,7 +892,7 @@ function renderCut() {
   box.innerHTML = `<p class="note">${verdict}${range}</p>${low}`;
 }
 
-const surgeLabel = (t) => (t.surge === 'airport' ? ' · Airport' : isSurgeTrip(t, weights(), estimate(), commission()) ? ' · Surge ↑' : '');
+const surgeLabel = (t) => (t.surge === 'airport' ? ' · Airport' : isSurgeTrip(t, weights(), estimate(), commission()) ? ' · Surge (paid 15%+ more)' : '') + (t.arrow === 1 ? ' · green ↑ seen' : t.arrow === 0 ? ' · no ↑' : '');
 function renderList() {
   renderCut();
   $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload so every driver\'s estimates learn from them.';

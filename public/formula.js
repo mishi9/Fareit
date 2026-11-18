@@ -571,6 +571,33 @@ export function eventLift(trips) {
   return { lift: Math.exp(rs.reduce((a, b) => a + b, 0) / (rs.length + 1)) - 1, n: rs.length, guess: false };
 }
 
+// The green-arrow test: did Grab's green arrow mean the job paid more? Jobs logged with the arrow
+// seen (t.arrow 1) against jobs without it (0), each as the average vs the normal price. Before
+// the arrow was recorded, a Surge tag meant "arrow seen" and Normal "no arrow": those are counted
+// apart (older), so the new, careful observations can be read on their own.
+export function arrowCompare(trips) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const est = timeEstimator(all);
+  const c = fitCommission(trips);
+  const g = () => ({ n: 0, sum: 0, rs: [] });
+  const out = { logged: { arrow: g(), none: g() }, older: { arrow: g(), none: g() } };
+  for (const t of all) {
+    if (t.base || t.event || t.surge === 'airport' || !(t.actual > 0)) continue;
+    const r = ratioToFormula(t, w, est, c);
+    if (r === null) continue;
+    const set = t.arrow === 1 || t.arrow === 0 ? out.logged : out.older;
+    const seen = t.arrow === 1 || t.arrow === 0 ? t.arrow === 1 : t.surge === 'surge';
+    const b = seen ? set.arrow : set.none;
+    b.n++; b.sum += r; b.rs.push(Math.exp(r) - 1);
+  }
+  const fin = (b) => {
+    const xs = b.rs.sort((x, y) => x - y);
+    return { n: b.n, lift: b.n ? Math.exp(b.sum / b.n) - 1 : null, lo: xs[0] ?? null, hi: xs[xs.length - 1] ?? null, over15: xs.filter((x) => x >= SURGE_PRICE_MIN).length };
+  };
+  return { logged: { arrow: fin(out.logged.arrow), none: fin(out.logged.none) }, older: { arrow: fin(out.older.arrow), none: fin(out.older.none) } };
+}
+
 // How rain trips have paid against normal (observation only). A start of +0% counts as one trip.
 export function rainLift(trips) {
   const all = withBase(trips);

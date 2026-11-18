@@ -151,6 +151,7 @@ Grab's green arrow shows on most jobs, even S$6.20 ones, so it doesn't say a job
 - **The normal price** is set first by the trips tagged Normal (once there are 5+), then every job within 15% of it is used.
 - **Cards** show surge as the **range** surge jobs have paid (middle 80% once there are 5, starting at +15% to +40%).
 - **Likely surging** (2+ drivers within 1.5 km in 30 min) counts jobs that paid 15%+ above the estimate, not the tag.
+- **Green arrow test** (owner's phone): a "Green ↑ on the job" switch in Log and Got a job records whether the arrow was seen (saved with the trip; it doesn't change any price). Log shows jobs **with ↑** vs **no ↑**, each as the average vs the normal price, the range, and how many paid 15%+ more; older Surge / Normal tags are shown apart.
 - **Far off** (layer 6 and trust) is now over +60% or under −40% of the estimate, so a real surge job doesn't count against a driver.
 
 ## Rain

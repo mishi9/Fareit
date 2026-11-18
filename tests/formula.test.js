@@ -684,3 +684,17 @@ test('test: surge is told by the price, not the green arrow', async () => {
   // None yet: a starting range of +15% to +40%.
   assert.deepEqual(surgeLift(plain, Date.now()).range, { lo: 0.15, hi: 0.4, guess: true });
 });
+
+test('green arrow test: jobs logged with and without the arrow, each vs the normal price', async () => {
+  const { arrowCompare } = await import('../public/formula.js');
+  const plain = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20]].map(([km, min]) => make(km, min, { arrow: 0 }));
+  const withArrow = [[10, 20, 1.0], [15, 25, 1.02], [8, 18, 1.4]].map(([km, min, x]) => { const t = make(km, min, { arrow: 1 }); return { ...t, actual: Math.round(t.actual * x * 100) / 100 }; });
+  const old = [make(12, 22, { surge: 'surge' }), make(6, 14)];
+  const a = arrowCompare([...plain, ...withArrow, ...old]);
+  assert.equal(a.logged.arrow.n, 3);
+  assert.equal(a.logged.none.n, 6);
+  assert.equal(a.logged.arrow.over15, 1, 'one of the three arrow jobs really paid more');
+  assert.ok(a.logged.arrow.lift > 0.05 && a.logged.arrow.lift < 0.2);
+  assert.ok(Math.abs(a.logged.none.lift) < 0.03);
+  assert.deepEqual([a.older.arrow.n, a.older.none.n], [1, 1], 'old Surge / Normal tags counted apart');
+});

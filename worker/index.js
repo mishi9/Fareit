@@ -334,6 +334,7 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'lat REAL', 'formula_trips'))
       .then(() => addColumn(db, 'lng REAL', 'formula_trips'))
       .then(() => addColumn(db, 'rain INTEGER', 'formula_trips'))
+      .then(() => addColumn(db, 'arrow INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'animal TEXT', 'invites'))
       .then(() => addColumn(db, 'opened_at INTEGER', 'invites'))
       .catch((e) => {
@@ -548,21 +549,23 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   if (!plausible({ km, min, paid, earned, erp }).ok) return null;
   // rain: 1 if it was raining (or forecast rain) near the pickup when saved, 0 if dry, null if unknown.
   const rain = t.rain === 1 || t.rain === true ? 1 : t.rain === 0 || t.rain === false ? 0 : null;
+  // arrow: Grab's green arrow seen on the job (1) or not (0), for the arrow test; null if not recorded.
+  const arrow = t.arrow === 1 || t.arrow === true ? 1 : t.arrow === 0 || t.arrow === false ? 0 : null;
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
-    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1], rain,
+    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1], rain, arrow,
   };
 }
 
 const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received_at, updated_at, rev, ts, km, min, erp, paid,
-    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng, rain)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17, ?18)
+    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng, rain, arrow)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17, ?18, ?19)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
     min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
     predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0,
     card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng,
-    rain = COALESCE(excluded.rain, formula_trips.rain)
+    rain = COALESCE(excluded.rain, formula_trips.rain), arrow = COALESCE(excluded.arrow, formula_trips.arrow)
   WHERE formula_trips.device = excluded.device`;
 
 async function readJson(request) {
@@ -604,7 +607,7 @@ async function postFormula(request, env) {
     }
     writes.push(env.DB.prepare(FORMULA_UPSERT).bind(
       t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
-      t.card_min, t.pickup_km, t.lat, t.lng, t.rain,
+      t.card_min, t.pickup_km, t.lat, t.lng, t.rain, t.arrow,
     ));
     accepted.push(t.id);
   }
@@ -619,7 +622,7 @@ async function getFormula(url, env) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, rain, deleted, device
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, rain, arrow, deleted, device
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
