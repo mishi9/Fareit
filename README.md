@@ -82,6 +82,10 @@ On **Radar**, near Woodlands Checkpoint (every route passes through) or a drop-o
 
 Live data is fetched by the server at most every 2 minutes and shared by every phone.
 
+## Got a job (Radar)
+
+A full trip, at the job's own time and pickup area: **drop-off** (area, postal code or address, routed with OneMap for the distance; plain km also works), **paid by passenger** and **you earned**, plus Normal / Surge ↑ / Airport. Like an Est. trip, the estimate is recorded before saving (an honest test), then it teaches the fare, Grab's cut and "now" for every driver. The drop-off name stays on the phone; only the km is shared.
+
 ## Likely surging nearby
 
 No extra taps: it comes from trips saved as **Surge** (green ↑ on the job card). When at least 2 different drivers have saved a Surge trip within about 1.5 km of each other in the last 30 minutes, drivers within 3 km (about 5 to 10 minutes away) see a green banner at the top of Radar: "Orchard likely surging · 2.1 km away", or "Likely surging around you" within 1.5 km. One phone's trips count once. Ranges are in `public/surge.js`.

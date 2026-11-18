@@ -514,11 +514,15 @@ function buildQuick() {
   const body = document.querySelector('#job-body');
   if (!body || body.dataset.built) return;
   body.dataset.built = '1';
+  // A full trip: drop-off (for the distance), what the passenger paid and what you earned, so each
+  // job teaches the fare, Grab's cut and "now" for everyone.
   body.innerHTML = `
+    <div class="field"><label for="qj-km">Drop-off</label>
+      <input id="qj-km" type="text" autocomplete="off" autocapitalize="words" placeholder="Area, postal code or address (or km)"></div>
     <div class="row2">
-      <div class="field"><label for="qj-km">Trip km or drop-off</label>
-        <input id="qj-km" type="text" autocomplete="off" autocapitalize="words" placeholder="21, Tampines, 521111…"></div>
-      <div class="field"><label for="qj-earned">You'll earn (S$)</label>
+      <div class="field"><label for="qj-paid">Paid by passenger (S$)</label>
+        <input id="qj-paid" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div class="field"><label for="qj-earned">You earned (S$)</label>
         <input id="qj-earned" type="number" inputmode="decimal" step="0.01" min="0"></div>
     </div>
     <div id="qj-surge" class="seg g3">
@@ -529,9 +533,10 @@ function buildQuick() {
     <div class="lab-check" id="qj-check"></div>
     <p class="msg" id="qj-msg" role="status"></p>
     <button type="button" class="primary wide" id="qj-save">Save job</button>
-    <p class="note">Only km and earnings: this updates Radar now. To also sharpen the estimates, add the passenger fare in the Est. tab.</p>`;
+    <p class="note">Saved as a full trip: sharpens the estimates and Radar for every driver.</p>`;
   body.querySelector('#qj-km').addEventListener('input', onTripInput);
   body.querySelector('#qj-earned').addEventListener('input', quickUpdate);
+  body.querySelector('#qj-paid').addEventListener('input', quickUpdate);
   for (const b of body.querySelectorAll('#qj-surge button')) b.addEventListener('click', () => { quick.surge = b.dataset.v; quickUpdate(); });
   body.querySelector('#qj-save').addEventListener('click', quickSave);
 }
@@ -584,55 +589,64 @@ function quickRead() {
   const typed = kmTyped(text);
   const r = quick.route;
   const km = typed ?? (r && r.km > 0 ? r.km : null);
-  return { km, drop: typed === null && r && r.km > 0 ? r.label : null, earned: n('#qj-earned'), surge: quick.surge };
+  return { km, drop: typed === null && r && r.km > 0 ? r.label : null, paid: n('#qj-paid'), earned: n('#qj-earned'), surge: quick.surge };
 }
 
+// What the estimate says for this job (normal, plus the surge / airport % when tagged), before it's saved.
+function quickEstimate(f) {
+  const w = weights();
+  const normalFare = passengerFare(w, f.km, estimate()(f.km)).fare;
+  const ts = lab.pending ? lab.pending.ts : Date.now();
+  const sl = liftFor(f.surge, ts);
+  const predicted = sl ? Math.round(normalFare * (1 + sl.lift) * 100) / 100 : normalFare;
+  return { w, ts, sl, normalFare, predicted, predictedEarned: driverEarns(commission(), predicted) };
+}
 function quickUpdate() {
   for (const b of document.querySelectorAll('#qj-surge button')) b.classList.toggle('sel', b.dataset.v === quick.surge);
   const f = quickRead();
   const box = document.querySelector('#qj-check');
   const r = quick.route;
   const routeLine = r
-    ? `<div class="kept">${r.pending ? `Finding “${r.text}” on the map…` : r.error ? r.error : `→ ${r.label} · <b>${r.km} km</b>, about ${Math.round(r.min)} min by road from where you got the job.`}</div>`
+    ? `<div class="kept">${r.pending ? `Finding “${r.text}” on the map…` : r.error ? r.error : `→ <b>${r.label}</b> · <b>${r.km} km</b> by road from where you got the job.`}</div>`
     : '';
   if (!(f.km > 0)) { box.innerHTML = routeLine; return; }
-  const est = estimate();
-  const normalPaid = passengerFare(weights(), f.km, est(f.km)).fare;
-  const normal = driverEarns(commission(), normalPaid);
-  if (!(f.earned > 0)) { box.innerHTML = `${routeLine}<div class="kept">Normal for ${f.km} km: you'd earn about <b>${money(normal)}</b>.</div>`; return; }
-  const vs = f.earned / normal - 1;
-  const cls = vs >= 0.1 ? 'close' : vs <= -0.1 ? 'far' : '';
-  box.innerHTML = `${routeLine}<div class="kept">Normal for ${f.km} km: about <b>${money(normal)}</b>. This job: <b class="${cls}">${money(f.earned)} (${signed(vs)})</b>.</div>`;
+  const e = quickEstimate(f);
+  const line = (label, est, actual) => {
+    if (!(actual > 0)) return `<div class="kept">${label}: estimate <b>${money(est)}</b></div>`;
+    const vs = actual / est - 1;
+    const cls = Math.abs(vs) <= 0.05 ? 'close' : Math.abs(vs) <= 0.15 ? 'off' : 'far';
+    return `<div class="kept">${label}: estimate ${money(est)} · actual <b class="${cls}">${money(actual)} (${signed(vs)})</b></div>`;
+  };
+  box.innerHTML = `${routeLine}${line('Passenger', e.predicted, f.paid)}${line('You', e.predictedEarned, f.earned)}`;
 }
-
 async function quickSave() {
   const f = quickRead();
   const msg = document.querySelector('#qj-msg');
-  if (!(f.km > 0) || !(f.earned > 0)) {
-    msg.textContent = quick.route && quick.route.pending ? 'Still working out the distance…' : 'Add the trip km (or drop-off) and what you\'ll earn.';
-    msg.classList.add('err');
-    return;
-  }
-  const est = estimate();
-  const normalPaid = passengerFare(weights(), f.km, est(f.km)).fare;
+  const missing = !(f.km > 0) ? (quick.route && quick.route.pending ? 'Still finding the drop-off…' : 'Add the drop-off.')
+    : !(f.paid > 0) ? 'Add what the passenger paid.' : !(f.earned > 0) ? 'Add what you earned.' : '';
+  if (missing) { msg.textContent = missing; msg.classList.add('err'); return; }
+  // Recorded before the trip changes anything (an honest test), at the job's own time and place.
+  const e = quickEstimate(f);
+  const t = timeOfDay(dataset(), e.ts);
   changed();
   lab.trips.push({
-    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, quick: true,
-    ts: lab.pending ? lab.pending.ts : Date.now(), km: f.km, min: null, erp: 0, actual: null, earned: f.earned, surge: f.surge,
+    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, from: 'radar',
+    ts: e.ts, km: f.km, min: null, erp: 0, actual: f.paid, earned: f.earned, surge: f.surge,
     ...((lab.pending && lab.pending.loc) || rounded(here()) || {}),
-    predicted: null, predictedEarned: driverEarns(commission(), normalPaid), timeSplit: true,
+    predicted: e.predicted, predictedEarned: e.predictedEarned, predictedNormal: e.normalFare, surgeLiftUsed: e.sl ? e.sl.lift : null,
+    todLift: t.near ? t.lift : null, weightsBefore: { base: e.w.base, perKm: e.w.perKm, perMin: e.w.perMin }, timeSplit: true,
     ...(f.drop ? { dropLabel: f.drop, kmSource: 'map' } : {}), // drop-off name stays on this phone
   });
   await db.setKV(KEY, lab.trips);
-  const saved = lab.pending ? new Date(lab.pending.ts) : new Date();
+  const saved = new Date(e.ts);
   lab.pending = null;
   msg.classList.remove('err');
-  for (const id of ['#qj-km', '#qj-earned']) document.querySelector(id).value = '';
+  for (const id of ['#qj-km', '#qj-paid', '#qj-earned']) document.querySelector(id).value = '';
   quick.surge = 'normal';
   quick.route = null;
   closeJob();
   const note = document.querySelector('#got-job-msg');
-  if (note) note.textContent = `Saved the ${pad(saved.getHours())}:${pad(saved.getMinutes())} job: ${f.km} km${f.drop ? ` to ${f.drop}` : ''}, ${money(f.earned)}.`;
+  if (note) note.innerHTML = `Saved ${pad(saved.getHours())}:${pad(saved.getMinutes())} · ${f.km} km${f.drop ? ` to <b>${f.drop.replace(/[<>&"]/g, '')}</b>` : ''} · paid ${money(f.paid)}, earned ${money(f.earned)}`;
   renderAll();
   syncLab();
 }
