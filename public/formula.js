@@ -102,9 +102,25 @@ function timeEstimatorOf(trips) {
 }
 export const tripTime = (t, est) => (t.min > 0 ? t.min : est(t.km));
 
+// TEST: surge is told by the price, not by Grab's green arrow (most jobs show the arrow, even
+// S$6.20 ones, so it doesn't mean a job pays more). A job that paid SURGE_PRICE_MIN or more above
+// the normal price for its distance and time is a surge job, whatever it was tagged; everything
+// else (arrow or not) teaches the normal price. Set SURGE_BY_PRICE = false to go back to the tags.
+export const SURGE_BY_PRICE = true;
+export const SURGE_PRICE_MIN = 0.15;
+const SURGE_R = Math.log(1 + SURGE_PRICE_MIN);
+// Surge (by price, or by tag when the test is off) for a trip, given the normal-price weights.
+export function isSurgeTrip(t, w, est, c) {
+  if (t.surge === 'airport' || t.event || t.base) return false;
+  if (!SURGE_BY_PRICE) return t.surge === 'surge';
+  const r = ratioToFormula(t, w, est, c);
+  return r !== null && r >= SURGE_R - 1e-9;
+}
+
 // A trip can teach the formula if it's normal-priced, complete, and not held up by the minimum.
 export function usable(t) {
-  if (t.event || t.surge !== 'normal' || !(t.km > 0) || !(t.actual > 0)) return false;
+  if (t.event || !(t.km > 0) || !(t.actual > 0)) return false;
+  if (SURGE_BY_PRICE ? t.surge === 'airport' : t.surge !== 'normal') return false;
   return t.actual - (t.erp || 0) > MIN_PASSENGER + 0.005;
 }
 
@@ -119,6 +135,21 @@ function fitWeightsOf(trips, includeBase) {
   const rows = pool.filter(usable);
   if (!rows.length) return { ...SEED, n: 0 };
   const est = timeEstimator(pool);
+  // Test: first the trips tagged Normal (no green arrow) set the level when there are 5 or more,
+  // else all; jobs that paid SURGE_PRICE_MIN+ above it are surge jobs; the rest are fitted again.
+  const plain = rows.filter((t) => t.base || t.surge === 'normal');
+  const w = fitRows(SURGE_BY_PRICE && plain.length >= 6 ? plain : rows, est);
+  if (!w) return { ...SEED, n: rows.length };
+  if (SURGE_BY_PRICE) {
+    const keep = rows.filter((t) => t.base || (t.actual - (t.erp || 0)) / passengerFare(w, t.km, tripTime(t, est)).fare - 1 < SURGE_PRICE_MIN);
+    if (keep.length < rows.length) {
+      const w2 = fitRows(keep, est);
+      if (w2) return { ...w2, n: keep.length };
+    }
+  }
+  return { ...w, n: rows.length };
+}
+function fitRows(rows, est) {
   const X = rows.map((t) => [1, t.km, tripTime(t, est)]);
   const y = rows.map((t) => t.actual - (t.erp || 0));
   TERMS.forEach((term, i) => {
@@ -128,7 +159,7 @@ function fitWeightsOf(trips, includeBase) {
     y.push(SEED[term] / PRIOR[term]);
   });
   let w = lsq(X, y);
-  if (!w) return { ...SEED, n: rows.length };
+  if (!w) return null;
   // Safeguard: trips far from the fit count much less, refitted a few times (each pass finds the
   // wrong ones more clearly), so a few wrong entries can't bend the rates. Over 25% off: 1/20th;
   // 15-25%: a half; real trips sit well inside that.
@@ -144,7 +175,7 @@ function fitWeightsOf(trips, includeBase) {
       w = lsq(Xw, yw) || w;
     }
   }
-  return { base: w[0], perKm: w[1], perMin: w[2], n: rows.length };
+  return { base: w[0], perKm: w[1], perMin: w[2] };
 }
 
 // How good the formula is on trips it hasn't seen: each of your trips predicted from all the
@@ -154,7 +185,7 @@ function fitWeightsOf(trips, includeBase) {
 export const LOO_MAX = 200;
 export const looError = memo(looErrorOf);
 function looErrorOf(trips) {
-  const all = trips.filter((t) => !t.base && usable(t));
+  const all = trips.filter((t) => !t.base && usable(t) && !(SURGE_BY_PRICE && isSurgeTrip(t, fitWeights(trips), timeEstimator(withBase(trips)))));
   const mine = all.length > LOO_MAX ? [...all].sort((a, b) => b.ts - a.ts).slice(0, LOO_MAX) : all;
   if (mine.length < 2) return null;
   let abs = 0;
@@ -362,7 +393,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     sw += x;
     swr += x * r;
     if (!closest || x > closest.x) closest = { x, ts: t.ts, km: Number.isFinite(d) ? d : null, gapH: g };
-    if (g <= 1.5 && d <= NEAR_KM) { near++; if (t.surge === 'surge') surgeNear++; }
+    if (g <= 1.5 && d <= NEAR_KM) { near++; if (isSurgeTrip(t, w, est, c)) surgeNear++; }
     if (ageMin >= 0 && ageMin <= 90 && d <= NEAR_KM) recent++;
   }
   const m = (swr + priorW * priorLog) / (sw + priorW);
@@ -383,7 +414,7 @@ export function byTimeBlock(trips) {
     const b = blocks[Math.floor(hourOf(t.ts) / 3) % 8];
     b.n++;
     b.sum += r;
-    if (t.surge === 'surge') b.surge++;
+    if (isSurgeTrip(t, w, est, c)) b.surge++;
   }
   return blocks.map((b) => ({ ...b, lift: b.n ? Math.exp(b.sum / b.n) - 1 : null }));
 }
@@ -406,12 +437,21 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
   const h = hourOf(ts);
   const rs = [];
   for (const t of all) {
-    if (t.surge !== kind || t.event || !Number.isFinite(t.ts)) continue;
+    if (t.event || !Number.isFinite(t.ts)) continue;
+    if (kind === 'surge' ? !isSurgeTrip(t, w, est, c) : t.surge !== kind) continue;
     const r = ratioToFormula(t, w, est, c);
     if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
   }
   const start = Math.log(1 + startLift);
-  if (!rs.length) return { lift: startLift, n: 0, near: 0, guess: true };
+  // The range surge jobs have paid (middle 80% once there are 5, else lowest to highest).
+  const range = (() => {
+    if (kind !== 'surge') return null;
+    if (!rs.length) return { lo: SURGE_PRICE_MIN, hi: 0.4, guess: true };
+    const xs = rs.map((x) => Math.exp(x.r) - 1).sort((a, b) => a - b);
+    const q = (p) => xs[Math.min(xs.length - 1, Math.max(0, Math.round(p * (xs.length - 1))))];
+    return xs.length >= 5 ? { lo: q(0.1), hi: q(0.9) } : { lo: xs[0], hi: xs[xs.length - 1] };
+  })();
+  if (!rs.length) return { lift: startLift, n: 0, near: 0, guess: true, range };
   const overall = rs.reduce((s, x) => s + x.r, 0) / rs.length;
   let sw = 0;
   let swr = 0;
@@ -422,7 +462,7 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
     swr += k * x.r;
     if (x.g <= 1.5) near++;
   }
-  return { lift: Math.exp((swr + overall + start) / (sw + 2)) - 1, n: rs.length, near, guess: false };
+  return { lift: Math.exp((swr + overall + start) / (sw + 2)) - 1, n: rs.length, near, guess: false, range };
 }
 
 // How far an actual fare sits above the normal-price formula (for spotting untagged surge).
@@ -467,9 +507,11 @@ export function bandOutlook(trips, ts, loc = null, opts = {}) {
     const nowLift = ev ? ev.lift : own.lift;
     const now = driverEarns(c, normalPaid * (1 + nowLift));
     const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
+    const surgeLo = surge.range ? driverEarns(c, normalPaid * (1 + surge.range.lo)) : withSurge;
+    const surgeHi = surge.range ? driverEarns(c, normalPaid * (1 + surge.range.hi)) : withSurge;
     const vs = now / normal - 1;
     const state = ev ? 'event' : wet ? 'rain' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, vs, state, eventTrips: ev ? ev.n : null, rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
+    return { ...b, km, normal, now, surge: withSurge, surgeLo, surgeHi, vs, state, eventTrips: ev ? ev.n : null, rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
   });
 }
 

@@ -40,7 +40,9 @@ test('with enough trips the weights reach the hidden formula', () => {
 });
 
 test('surge and minimum-fare trips are kept out of the formula', () => {
-  assert.equal(usable(make(10, 20, { surge: 'surge' })), false);
+  // Test: surge is told by the price, so a green-arrow (surge-tagged) trip can still teach normal.
+  assert.equal(usable(make(10, 20, { surge: 'surge' })), true);
+  assert.equal(usable(make(10, 20, { surge: 'airport' })), false);
   assert.equal(usable({ km: 1.5, min: 5, surge: 'normal', actual: 8.1 }), false);
   assert.equal(usable(make(10, 20)), true);
 });
@@ -653,4 +655,32 @@ test('header tag: PH on a public holiday, PH Eve the day before, by calendar day
   assert.equal(holidayTag(t('2026-11-08T12:00:00')), 'PH', 'Deepavali (Sunday)');
   assert.equal(holidayTag(t('2026-11-09T12:00:00')), 'PH', 'Deepavali observed Monday');
   assert.equal(holidayTag(t('2026-11-07T12:00:00')), 'PH Eve');
+});
+
+test('test: surge is told by the price, not the green arrow', async () => {
+  const { surgeLift, isSurgeTrip, SURGE_BY_PRICE, fitWeights: fw, timeEstimator: te, withBase: wb, fitCommission: fc } = await import('../public/formula.js');
+  assert.equal(SURGE_BY_PRICE, true);
+  const at = (iso) => Date.parse(iso);
+  const plain = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]]
+    .map(([km, min], i) => make(km, min, { ts: at(`2026-11-1${7 + (i % 3)}T12:${String(i).padStart(2, '0')}:00+08:00`) }));
+  // Most jobs show the arrow but paid normal: tagged Surge, priced normal -> they teach the normal price.
+  const arrowNormal = [[10, 20], [15, 25], [8, 18], [22, 30]].map(([km, min]) => make(km, min, { surge: 'surge' }));
+  // Two really paid more (+35%, +50%).
+  const high = [[11, 20, 1.35], [16, 28, 1.5]].map(([km, min, x]) => { const t = make(km, min, { surge: 'surge', ts: at('2026-11-19T18:10:00+08:00') }); return { ...t, actual: Math.round(t.actual * x * 100) / 100 }; });
+  const all = [...plain, ...arrowNormal, ...high];
+  const w = fw(all, { includeBase: false });
+  const w0 = fw(plain, { includeBase: false });
+  assert.ok(Math.abs(w.perKm - w0.perKm) < 0.02 && Math.abs(w.base - w0.base) < 0.3, 'the high ones don\'t move normal');
+  assert.ok(w.n === plain.length + arrowNormal.length, `arrow-but-normal trips are used: ${w.n}`);
+  const W = fw(all); const est = te(wb(all)); const c = fc(all);
+  assert.deepEqual(all.map((t) => isSurgeTrip(t, W, est, c)).filter(Boolean).length, 2);
+  // An untagged job that paid well above normal counts as surge too.
+  const untagged = { ...high[0], surge: 'normal' };
+  assert.equal(isSurgeTrip(untagged, W, est, c), true);
+  // Surge on the cards: the range surge jobs have paid.
+  const s = surgeLift(all, at('2026-11-20T18:00:00+08:00'));
+  assert.equal(s.n, 2);
+  assert.ok(s.range.lo > 0.3 && s.range.lo < 0.4 && s.range.hi > 0.45 && s.range.hi < 0.55, JSON.stringify(s.range));
+  // None yet: a starting range of +15% to +40%.
+  assert.deepEqual(surgeLift(plain, Date.now()).range, { lo: 0.15, hi: 0.4, guess: true });
 });

@@ -142,6 +142,17 @@ A full trip, at the job's own time and pickup area: **drop-off** (area, postal c
 
 No extra taps: it comes from trips saved as **Surge** (green ↑ on the job card). When at least 2 different drivers have saved a Surge trip within about 1.5 km of each other in the last 30 minutes, drivers within 3 km (about 5 to 10 minutes away) see a green banner at the top of Radar: "Orchard likely surging · 2.1 km away", or "Likely surging around you" within 1.5 km. One phone's trips count once. Ranges are in `public/surge.js`.
 
+## Surge by price (test)
+
+Grab's green arrow shows on most jobs, even S$6.20 ones, so it doesn't say a job paid more. As a test (`SURGE_BY_PRICE` in `public/formula.js`; set it to `false` to go back to the tags):
+
+- **No Surge button** in Log or Got a job: just Normal / Airport (Airport is picked by itself at Changi).
+- **A job that paid 15% or more above the normal price** for its distance and time is a **surge job**, automatically ("Surge ↑" in the list). Everything else, arrow or not, teaches the normal price. The trips tagged Surge before are sorted the same way; their tag is kept, so the test can be undone.
+- **The normal price** is set first by the trips tagged Normal (once there are 5+), then every job within 15% of it is used.
+- **Cards** show surge as the **range** surge jobs have paid (middle 80% once there are 5, starting at +15% to +40%).
+- **Likely surging** (2+ drivers within 1.5 km in 30 min) counts jobs that paid 15%+ above the estimate, not the tag.
+- **Far off** (layer 6 and trust) is now over +60% or under −40% of the estimate, so a real surge job doesn't count against a driver.
+
 ## Rain
 
 From NEA (data.gov.sg, free): rain gauges every 5 minutes and the 2-hour forecast per town, fetched by the server at most every 5 minutes. **Rain** covers everything wet: light to heavy rain, showers, thundery showers.

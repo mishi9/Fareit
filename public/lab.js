@@ -17,7 +17,7 @@ import { loadAlerts, alertsHtml } from './alerts.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
-  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob,
+  passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN,
   markEvents, eventLift, eventFor, eventNear, rainLift,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
@@ -214,9 +214,8 @@ export async function buildLab(root) {
       </div>
       <p class="hint">Fill in what you have. Trip Mins is from pickup; Est. Mins (job card total) includes your drive there.</p>
     </fieldset>
-    <div id="lab-surge" class="seg g3">
+    <div id="lab-surge" class="seg g2">
       <button type="button" data-v="normal">Normal</button>
-      <button type="button" data-v="surge">Surge ↑</button>
       <button type="button" data-v="airport">Airport</button>
     </div>
 
@@ -400,7 +399,7 @@ export function renderBands() {
       <div class="band-card ${b.state}">
         <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${b.state === 'rain' ? `${wet && isThunder(wet.forecast) ? '⛈' : '☔'} ` : ''}${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : b.state === 'rain' ? (b.rainTrips ? ` ${signed(b.vs)}` : '') : b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
         <div class="band-now">${money(b.now)}</div>
-        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)}${b.state === 'rain' && !b.rainTrips ? ' · rain: still learning' : ''}</div>
+        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}${b.state === 'rain' && !b.rainTrips ? ' · rain: still learning' : ''}</div>
       </div>`).join('')}`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
@@ -525,9 +524,8 @@ function update(ev) {
       return `<div class="kept">${label}: <b class="${cls}">${Math.abs(vs) < 0.005 ? 'spot on' : `${signed(vs)} vs estimate`}</b></div>`;
     };
     check.innerHTML = plain('Passenger paid', shown, f.actual) + plain('You earned', earn, f.earned);
-    if (f.actual > 0 && f.surge === 'normal' && (f.actual - p.fare) / p.fare >= SURGE_HINT) {
-      check.innerHTML += `<div class="surge-hint">Much higher than normal. Was it a surge job (green ↑)? <button type="button" class="ghost small" data-act="mark-surge">Yes, surge</button></div>`;
-      check.querySelector('[data-act="mark-surge"]').addEventListener('click', () => { lab.surge = 'surge'; update(); });
+    if (f.actual > 0 && f.surge === 'normal' && (f.actual - p.fare) / p.fare >= SURGE_PRICE_MIN) {
+      check.innerHTML += `<div class="kept">\u2191 Paid <b>${Math.round(((f.actual - p.fare) / p.fare) * 100)}% above</b> normal: counts as a <b>surge</b> job.</div>`;
     }
     return;
   }
@@ -535,10 +533,7 @@ function update(ev) {
   let hint = '';
   if (f.actual > 0 && f.surge === 'normal') {
     const above = (f.actual - p.fare) / p.fare;
-    if (above >= SURGE_HINT) {
-      hint = `<div class="surge-hint">This paid <b>${(above * 100).toFixed(0)}% above</b> the normal estimate. Did the job card show the green ↑? If not, keep it Normal: it'll count as a busy time or area instead.
-        <button type="button" class="ghost small" data-act="mark-surge">Mark as surge</button></div>`;
-    }
+    if (above >= SURGE_PRICE_MIN) hint = `<div class="kept">\u2191 Paid <b>${(above * 100).toFixed(0)}% above</b> the normal estimate: counts as a <b>surge</b> job (${SURGE_PRICE_MIN * 100}%+ above; the green arrow isn't used).</div>`;
   }
   let kept = '';
   if (f.actual > 0 && f.earned > 0) {
@@ -616,9 +611,8 @@ function buildQuick() {
       <div class="field"><label for="qj-earned">You earned (S$)</label>
         <input id="qj-earned" type="number" inputmode="decimal" step="0.01" min="0"></div>
     </div>
-    <div id="qj-surge" class="seg g3">
+    <div id="qj-surge" class="seg g2">
       <button type="button" data-v="normal">Normal</button>
-      <button type="button" data-v="surge">Surge ↑</button>
       <button type="button" data-v="airport">Airport</button>
     </div>
     <div class="lab-check" id="qj-check"></div>
@@ -813,9 +807,11 @@ function renderStats() {
   const earnOffs = normal.filter((t) => t.earned > 0 && t.predictedEarned > 0).map((t) => Math.abs(t.predictedEarned - t.earned));
   const earnLast5 = earnOffs.slice(-5);
   const loo = looError(dataset());
-  const surgeTrips = dataset().filter((t) => t.surge === 'surge' && t.actual > 0 && t.predicted > 0).sort((a, b) => a.ts - b.ts);
-  const surgeOffs = surgeTrips.slice(-5).map((t) => Math.abs(t.predicted - t.actual));
+  const sw = weights(); const sEst = estimate(); const sC = commission();
+  const surgeTrips = dataset().filter((t) => t.actual > 0 && t.predicted > 0 && isSurgeTrip(t, sw, sEst, sC)).sort((a, b) => a.ts - b.ts);
+  const surgeOffs = [];
   const surgeNow = surgeLift(dataset(), Date.now());
+  const arrowNormal = dataset().filter((t) => t.surge === 'surge' && t.actual > 0 && !isSurgeTrip(t, sw, sEst, sC)).length;
   const airportTrips = dataset().filter((t) => t.surge === 'airport' && t.actual > 0 && t.predicted > 0).sort((a, b) => a.ts - b.ts);
   const airportOffs = airportTrips.slice(-5).map((t) => Math.abs(t.predicted - t.actual));
   const airportNow = airportLift(dataset(), Date.now());
@@ -828,7 +824,7 @@ function renderStats() {
     </div>
     <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they sharpen the estimates)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on Radar)` : ''}.`; })()}</p>
     <p class="note">"Off with today's estimate" estimates each trip from all the others: the honest test of the estimates as they stand. Normal trips from every driver.</p>
-    <p class="note"><b>Surge:</b> ${surgeTrips.length ? `off by ${money(avg(surgeOffs))} on the last ${surgeOffs.length} surge trip${surgeOffs.length === 1 ? '' : 's'} (normal fare + surge %, predicted before saving). ` : ''}Surge % now ${signed(surgeNow.lift)}${surgeNow.guess ? ' (starting guess; no surge trips yet)' : `, learned from ${surgeNow.n} surge trip${surgeNow.n === 1 ? '' : 's'}`}.</p>
+    <p class="note"><b>Surge (test: by price, ${SURGE_PRICE_MIN * 100}%+ above normal):</b> ${surgeTrips.length} surge job${surgeTrips.length === 1 ? '' : 's'}${surgeNow.range && !surgeNow.range.guess ? `, paying ${signed(surgeNow.range.lo)} to ${signed(surgeNow.range.hi)} above normal` : ' (range is a starting guess)'}; average ${signed(surgeNow.lift)}.${arrowNormal ? ` ${arrowNormal} trip${arrowNormal === 1 ? '' : 's'} tagged Surge (green arrow) paid normal, so they teach the normal price.` : ''}</p>
     <p class="note"><b>Rain:</b> ${(() => { const r = rainLift(dataset()); return r.guess ? 'no trips saved in the rain yet.' : `trips saved in the rain ran ${signed(r.lift)} vs normal, from ${r.n} trip${r.n === 1 ? '' : 's'} (observed, not a rule).`; })()}</p>
     <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs normal, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;
 }
@@ -864,6 +860,7 @@ function renderCut() {
   box.innerHTML = `<p class="note">${verdict}${range}</p>${low}`;
 }
 
+const surgeLabel = (t) => (t.surge === 'airport' ? ' · Airport' : isSurgeTrip(t, weights(), estimate(), commission()) ? ' · Surge ↑' : '');
 function renderList() {
   renderCut();
   $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload so every driver\'s estimates learn from them.';
@@ -875,8 +872,8 @@ function renderList() {
     card.className = 'card';
     card.innerHTML = `
       <div class="line1"><span class="when">${new Date(t.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</span><span class="when">${money(t.actual)}</span></div>
-      ${isOwner() ? '' : `<div class="meta">${t.km} km${t.dropLabel ? ` to ${t.dropLabel.replace(/[<>&"]/g, '')}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}${t.rain === 1 ? ' · ☔ Rain' : ''}${t.earned > 0 ? ` · earned ${money(t.earned)}` : ''}</div>`}
-      <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${t.surge === 'surge' ? ' · Surge' : t.surge === 'airport' ? ' · Airport' : ''}${t.rain === 1 ? ' · ☔ Rain' : ''}</div>
+      ${isOwner() ? '' : `<div class="meta">${t.km} km${t.dropLabel ? ` to ${t.dropLabel.replace(/[<>&"]/g, '')}` : ''}${surgeLabel(t)}${t.rain === 1 ? ' · ☔ Rain' : ''}${t.earned > 0 ? ` · earned ${money(t.earned)}` : ''}</div>`}
+      <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.km} km · ${t.min > 0 ? `${t.min} min trip` : 'trip time not known'}${t.cardMin ? ` · card total ${t.cardMin} min` : ''}${t.pickupKm ? ` · ${t.pickupKm} km to pickup` : ''}${t.erp ? ` · ERP ${money(t.erp)}` : ''}${surgeLabel(t)}${t.rain === 1 ? ' · ☔ Rain' : ''}</div>
       <div class="meta" ${isOwner() ? '' : 'hidden'}>${t.quick ? `Quick entry from Got a job: earned ${money(t.earned)}${t.predictedEarned ? ` (normal about ${money(t.predictedEarned)})` : ''}. Add the passenger fare in a full entry to sharpen the estimates.` : ''}${t.quick ? '' : `Paid: estimate said ${money(t.predicted)} (${offText(t.predicted, t.actual)})`}${!t.quick && t.earned > 0 ? ` · Earned ${money(t.earned)}${t.predictedEarned ? `, predicted ${money(t.predictedEarned)} (${offText(t.predictedEarned, t.earned)})` : ''}` : ''}${cut ? ` · Grab kept ${pct(cut.rate)}${cut.rate < 0.15 ? ' (low-cut trip)' : ''}` : ''}</div>`;
     const acts = document.createElement('div');
     acts.className = 'acts';

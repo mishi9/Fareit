@@ -262,14 +262,14 @@ test('info: taxis at Changi, fetched once and shared', async (t) => {
   assert.equal(calls, 1, 'second request uses the shared copy');
 });
 
-test('surge points: Surge-tagged trips from the last 30 min, one tag per phone, ids never sent', async () => {
+test('surge points: trips that paid 15%+ above the estimate in the last 30 min (by price, not the tag), one tag per phone, ids never sent', async () => {
   const { req, owner } = setup();
   const key = await owner();
-  const mk = (id, mins, extra = {}) => ({ id, ts: Date.now() - mins * 60000, km: 8, min: 15, erp: 0, paid: 20, earned: 14, surge: 'surge', lat: 1.30, lng: 103.83, ...extra });
+  const mk = (id, mins, extra = {}) => ({ id, ts: Date.now() - mins * 60000, km: 8, min: 15, erp: 0, paid: 20, earned: 14, surge: 'normal', predicted: 15, lat: 1.30, lng: 103.83, ...extra });
   await req('/api/formula', { body: { device: 'phone-aaaa-1', trips: [mk('trip-s-0001', 5), mk('trip-s-0002', 3), mk('trip-s-0003', 50)] }, key });
-  await req('/api/formula', { body: { device: 'phone-bbbb-2', trips: [mk('trip-s-0004', 2), mk('trip-s-0005', 2, { surge: 'normal' })] }, key });
+  await req('/api/formula', { body: { device: 'phone-bbbb-2', trips: [mk('trip-s-0004', 2), mk('trip-s-0005', 2, { surge: 'surge', predicted: 19 })] }, key });
   const pts = (await req('/api/surge', { key })).body.points;
-  assert.equal(pts.length, 3, 'normal and older-than-30-min trips left out');
+  assert.equal(pts.length, 3, 'normal-priced (even tagged Surge) and older-than-30-min trips left out');
   assert.equal(new Set(pts.map((p) => p.d)).size, 2);
   assert.ok(pts.every((p) => !String(p.d).includes('phone')), 'device ids are never sent out');
   assert.equal((await req('/api/surge')).status, 401);
@@ -319,7 +319,7 @@ test('layers 1, 6 and 7: impossible trips refused; far-off rate per code name; r
   const { token, animal } = (await req('/api/invites/create', { body: {}, key: okey })).body;
   const key = (await req('/api/access/redeem', { body: { token, device: 'troll-phone' } })).body.key;
   const mk = (id, over = {}) => ({ id, ts: Date.now() - 60000, km: 10, min: 18, erp: 0, paid: 15, earned: 11, surge: 'normal', predicted: 15.2, predicted_earned: 11.1, lat: 1.3, lng: 103.83, ...over });
-  const up = (await req('/api/formula', { body: { device: 'troll-app-0001', trips: [mk('trip-ok-0001'), mk('trip-bad-0001', { paid: 99, earned: 72 }), mk('trip-far-0001', { paid: 24, earned: 17.5 }), mk('trip-far-0002', { paid: 23.5, earned: 17 })] }, key })).body;
+  const up = (await req('/api/formula', { body: { device: 'troll-app-0001', trips: [mk('trip-ok-0001'), mk('trip-bad-0001', { paid: 99, earned: 72 }), mk('trip-far-0001', { paid: 25, earned: 18.2 }), mk('trip-far-0002', { paid: 25.5, earned: 18.5 })] }, key })).body;
   assert.deepEqual(up.rejected, ['trip-bad-0001']);
   const row = (await req('/api/invites', { key: okey })).body.invites.find((i) => i.token === token);
   assert.equal(row.animal, animal);
@@ -348,7 +348,7 @@ test('earned trust: a phone is marked trusted after 10+ checked fares with under
   pulled = (await req('/api/formula?since=0', { key })).body.trips;
   assert.ok(pulled.every((t) => t.tr === 1), '10 accurate fares: trusted');
   // a phone with many far-off fares never is
-  await req('/api/formula', { body: { device: 'odd-phone-002', trips: Array.from({ length: 12 }, (_, i) => ({ ...mk(i + 20, i % 2 ? 15 : 24), id: `odd-trip-${String(i).padStart(4, '0')}` })) }, key });
+  await req('/api/formula', { body: { device: 'odd-phone-002', trips: Array.from({ length: 12 }, (_, i) => ({ ...mk(i + 20, i % 2 ? 15 : 25), id: `odd-trip-${String(i).padStart(4, '0')}` })) }, key });
   pulled = (await req('/api/formula?since=0', { key })).body.trips.filter((t) => t.id.startsWith('odd'));
   assert.ok(pulled.length === 12 && pulled.every((t) => !t.tr));
 });

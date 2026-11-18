@@ -50,6 +50,7 @@
 
 import { inAirportZone } from '../public/airport-zone.js';
 import { rainAt } from '../public/rain.js';
+import { SURGE_PRICE_MIN } from '../public/formula.js';
 import { plausible } from '../public/sanity.js';
 
 const OM = 'https://www.onemap.gov.sg';
@@ -630,7 +631,7 @@ async function getFormula(url, env) {
   for (let i = 0; i < devices.length; i += 50) {
     const chunk = devices.slice(i, i + 50);
     const { results: rel } = await env.DB.prepare(`SELECT device, COUNT(*) AS checked,
-        SUM(CASE WHEN ABS(paid / predicted - 1) > 0.4 THEN 1 ELSE 0 END) AS far
+        SUM(CASE WHEN paid / predicted > 1.6 OR paid / predicted < 0.6 THEN 1 ELSE 0 END) AS far
       FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0
         AND device IN (${chunk.map((_, j) => `?${j + 1}`).join(',')}) GROUP BY device`).bind(...chunk).all();
     for (const r of rel) if (r.checked >= TRUST_MIN_CHECKED && r.far / r.checked < TRUST_MAX_FAR_OFF) trusted.add(r.device);
@@ -1055,8 +1056,11 @@ export const SURGE_WINDOW_MS = 30 * 60000;
 async function getSurge(env) {
   await ensureSchema(env.DB);
   const since = Date.now() - SURGE_WINDOW_MS;
-  const trips = await env.DB.prepare(`SELECT device, ts, lat, lng FROM formula_trips WHERE surge = 'surge' AND deleted IS NOT 1
-      AND lat IS NOT NULL AND lng IS NOT NULL AND ts > ?1 ORDER BY ts DESC LIMIT 500`).bind(since).all();
+  // Test: surge is told by the price: paid SURGE_PRICE_MIN+ above the normal estimate made before
+  // saving (the green arrow on Grab's card shows on most jobs, so the tag isn't used).
+  const trips = await env.DB.prepare(`SELECT device, ts, lat, lng FROM formula_trips WHERE surge != 'airport' AND deleted IS NOT 1
+      AND predicted > 0 AND paid >= predicted * ?2
+      AND lat IS NOT NULL AND lng IS NOT NULL AND ts > ?1 ORDER BY ts DESC LIMIT 500`).bind(since, 1 + SURGE_PRICE_MIN).all();
   const tags = new Map();
   const tag = async (d) => { if (!tags.has(d)) tags.set(d, (await sha256(`surge:${d}`)).slice(0, 10)); return tags.get(d); };
   const points = [];
@@ -1262,7 +1266,7 @@ async function listInvites(env) {
        ${count('jobs')} AS jobs, ${count('formula_trips')} AS trips, ${count('airport_queue')} AS queue,
        (SELECT COUNT(*) FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0
           AND device IN (SELECT device FROM phones WHERE who = invites.token)) AS checked,
-       (SELECT COUNT(*) FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0 AND ABS(paid / predicted - 1) > 0.4
+       (SELECT COUNT(*) FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0 AND (paid / predicted > 1.6 OR paid / predicted < 0.6)
           AND device IN (SELECT device FROM phones WHERE who = invites.token)) AS far_off,
        (SELECT MAX(last_at) FROM phones WHERE who = invites.token) AS last_at
      FROM invites ORDER BY created_at DESC LIMIT 200`,
