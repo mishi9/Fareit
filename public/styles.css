@@ -605,3 +605,4 @@ main { flex: 1 0 auto; width: 100%; padding-bottom: 36px; }
 .arrow-test .r b { font-family: var(--mono); }
 .band-pills { display: inline-flex; align-items: center; gap: 6px; }
 .band-rain { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--log); color: var(--log-ink); }
+.arrow-fix.on { border-color: var(--go); color: var(--go); }

@@ -929,6 +929,22 @@ function renderList() {
       syncLab();
     });
     acts.append(del);
+    // Green arrow test (owner's phone): fix the arrow on a saved job with one tap. It re-uploads,
+    // so the server copy changes too.
+    if (isOwnerPhone()) {
+      const ar = document.createElement('button');
+      ar.type = 'button';
+      ar.className = `ghost small arrow-fix${t.arrow === 1 ? ' on' : ''}`;
+      ar.textContent = t.arrow === 1 ? 'Green ↑ seen ✓' : 'Mark green ↑';
+      ar.addEventListener('click', async () => {
+        t.arrow = t.arrow === 1 ? 0 : 1;
+        changed();
+        await db.setKV(KEY, lab.trips);
+        renderAll();
+        syncLab();
+      });
+      acts.prepend(ar);
+    }
     card.append(acts);
     box.append(card);
   }
