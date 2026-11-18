@@ -182,7 +182,7 @@ main {
    the screen between the header and the tabs, and the thumb area is pushed to the bottom. */
 #view-window:not([hidden]) {
   display: flex; flex-direction: column; gap: 12px;
-  min-height: var(--view-h, calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px)));
+  min-height: calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px));
 }
 #view-window .thumb { margin-top: auto; display: grid; gap: 12px; }
 #view-window .group { gap: 6px; }
@@ -574,15 +574,3 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .log-guide-key > span:not(.adv-h) { display: grid; grid-template-columns: 26px 1fr; flex-wrap: nowrap; }
 .log-guide-key .adv-h { color: var(--warn); font-weight: 800; }
 
-/* App shell: the screen itself never scrolls, so the header and the tab bar stay put on every tab
-   (iPhone Home Screen apps moved a fixed bar with the page). Only the middle (main) scrolls. */
-html, body { overflow: hidden; }
-body { position: fixed; inset: 0; display: flex; flex-direction: column; }
-.top { position: relative; flex: none; }
-main { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
-  width: 100%; max-width: none; margin: 0;
-  padding-bottom: 36px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px), calc((100% - 528px) / 2));
-  padding-right: max(16px, env(safe-area-inset-right, 0px), calc((100% - 528px) / 2)); }
-.tabs { position: relative; flex: none; }
-body.sheet-open main { overflow: hidden; }
