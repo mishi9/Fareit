@@ -89,6 +89,7 @@ The main tab, in the middle of the bar. **Log a job** in two steps from Grab's t
 ## Earnings (tab)
 
 A private notebook for drivers on several platforms (Grab, TADA, Gojek, Zig, Ryde, other):
+- **A shift is one block** until you end it, even past midnight: "This shift · since 22:10 (yesterday) · 9.2 h · S$185 · 12 jobs · S$20.10/h". **End shift** takes a second tap, so a stray tap can't split it.
 - **Today at a glance:** total after costs, jobs, hours on shift, **S$/hour** (after the first hour), split by platform. The day is the calendar day, 00:00 to 23:59 (a shift past midnight is split across the two days). The estimates still treat 00:00–05:59 as the night before, for weekday / weekend patterns.
 - **Start shift / End shift** (one tap). Adding the first earning starts a shift on its own if none is running.
 - **Quick add:** pick the platform (remembered), the amount, optionally km. **+ Cost** for fuel / charging, car rental, parking, other.

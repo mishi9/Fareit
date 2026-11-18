@@ -163,7 +163,13 @@ export function renderEarnings() {
       <div class="ea-sub">${t.jobs.length} job${t.jobs.length === 1 ? '' : 's'} · ${t.hours ? `${t.hours.toFixed(1)} h on shift` : 'no shift timed'} · <b>${t.perHour != null ? `${money(t.perHour)}/h` : t.hours ? 'S$/h after 1 h' : '—/h'}</b>${t.feeSum ? ` · fees ${money(t.feeSum)}` : ''}${t.spent ? ` · costs ${money(t.spent)}` : ''}</div>
       ${goal ? `<div class="ea-goal"><div class="ea-bar"><span style="width:${Math.min(100, (t.net / goal) * 100).toFixed(1)}%"></span></div>
         <div class="note">${t.net >= goal ? `<b>Goal reached</b> (${money(goal)})` : `<b>${money(toGo)}</b> to your ${money(goal)} goal${t.perHour ? ` · about <b>${(toGo / t.perHour).toFixed(1)} h</b> at today's pace` : ''}`}</div></div>` : ''}
-      <button type="button" class="${sh ? 'ghost' : 'primary'} wide" data-act="shift">${sh ? `End shift · on since ${hm(sh.start)} (${((now - sh.start) / 3600000).toFixed(1)} h)` : 'Start shift'}</button>
+      ${sh ? (() => {
+        // A running shift is one block, however long and across midnight: its own total and S$/hour.
+        const b = summary(sh.start, now + 1, now);
+        const h = (now - sh.start) / 3600000;
+        return `<div class="ea-shift"><span>This shift · since <b>${hm(sh.start)}</b>${new Date(sh.start).toDateString() !== new Date(now).toDateString() ? ' (yesterday)' : ''} · <b>${h.toFixed(1)} h</b></span><span><b>${money(b.net)}</b> · ${b.jobs.length} job${b.jobs.length === 1 ? '' : 's'}${h >= 1 ? ` · <b>${money(b.net / h)}/h</b>` : ''}</span></div>`;
+      })() : ''}
+      <button type="button" class="${sh ? 'ghost' : 'primary'} wide" data-act="shift">${sh ? 'End shift' : 'Start shift'}</button>
     </div>
     ${t.by.length ? `<div class="ea-plats">${t.by.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">${p.jobs} job${p.jobs === 1 ? '' : 's'}${p.fee ? ` · fees ${money(p.fee)}` : ''}</span><span class="ea-amt">${money(p.sum)}</span></div>`).join('')}</div>` : ''}
 
@@ -211,7 +217,7 @@ export function renderEarnings() {
   const goalIn = r.querySelector('#ea-goal');
   goalIn.addEventListener('change', async () => { const v = parseFloat(goalIn.value); e.data.goal = v > 0 ? v : null; await save(); renderEarnings(); });
   clearInterval(e.timer);
-  if (sh) e.timer = setInterval(() => { if (!r.closest('[hidden]')) renderEarnings(); }, 60000);
+  if (sh) e.timer = setInterval(() => { if (!r.closest('[hidden]') && r.querySelector('[data-act="shift"]')?.dataset.armed !== '1') renderEarnings(); }, 60000);
 }
 const addLabel = () => (e.mode === 'job' ? `Add ${platform(e.data.last).name} earning` : e.mode === 'fee' ? `Add ${platform(e.data.last).name} ${feeName(e.feeCat || 'cancel').toLowerCase()}` : 'Add cost');
 const del = (x) => `<button type="button" class="ghost small" data-del="${esc(x.id)}">✕</button>`;
@@ -238,6 +244,12 @@ async function onClick(ev) {
   const act = b.dataset.act;
   if (act === 'shift') {
     const sh = running();
+    // Ending takes a second tap, so a stray tap can't split a shift in two.
+    if (sh && b.dataset.armed !== '1') {
+      b.dataset.armed = '1'; b.textContent = 'Tap again to end the shift'; b.classList.add('danger');
+      setTimeout(() => { if (b.isConnected && b.dataset.armed === '1') { b.dataset.armed = ''; b.textContent = 'End shift'; b.classList.remove('danger'); } }, 4000);
+      return;
+    }
     if (sh) sh.end = Date.now(); else e.data.shifts.push({ start: Date.now(), end: null });
     e.data.shifts = e.data.shifts.slice(-400);
     await save(); renderEarnings(); return;
