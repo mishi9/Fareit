@@ -7,6 +7,7 @@ import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
 import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv } from './lab.js';
 import { clearMyQueue } from './queue.js';
+import { buildEarnings, renderEarnings } from './earnings.js';
 import { locationState, onMove } from './where.js';
 import { buildInfo, showInfo, renderOldJobs } from './info.js';
 import { holidayTag } from './daypattern.js';
@@ -131,10 +132,10 @@ function show(view) {
   // Reconcile (older jobs waiting for a fare) is reached from Info, so Info stays lit.
   for (const t of $$('.tabs button')) t.classList.toggle('on', t.dataset.view === (view === 'reconcile' ? 'info' : view));
   if (view === 'info') showInfo();
-  if (view === 'settings') renderSettingsLive();
+  if (view === 'settings') { renderSettingsLive(); renderTrips(); }
   if (location.hash !== `#${view}`) history.replaceState(null, '', `#${view}`);
   if (view === 'reconcile') { if (!state.form) renderReconList(); }
-  if (view === 'trips') renderTrips();
+  if (view === 'trips') renderEarnings();
   if (view === 'lab') syncLab();
   keepAwake();
 }
@@ -664,7 +665,9 @@ function deleteButton(t) {
 
 // ---------- trips ----------
 function renderTrips() {
-  const box = $('#view-trips');
+  // Older jobs (the slider and Reconcile) and the old shared pool: now under Settings.
+  const box = $('#st-legacy');
+  if (!box) return;
   const rec = state.trips.filter((t) => t.status === 'reconciled').sort((a, b) => b.ts - a.ts);
   const own = new Set(state.trips.map((t) => t.id));
   const poolOthers = state.shared.filter((r) => !own.has(r.id) && isTrainable(r)).length;
@@ -1014,6 +1017,7 @@ async function boot() {
   buildWindow();
   buildLab($('#view-lab'));
   buildInfo($('#view-info'));
+  buildEarnings($('#view-trips'));
   buildReconForm();
   buildSettings();
   for (const t of $$('.tabs button')) t.addEventListener('click', () => { if (t.dataset.view === 'reconcile') state.form = null; show(t.dataset.view); });

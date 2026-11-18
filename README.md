@@ -78,6 +78,20 @@ The owner's experience is the starting point ("busy +10%, the rest normal"), cou
 - Weekday after-work 18:00–20:00: +10%
 - Everything else (Mon–Tue nights, Thu and Sun nights, public holidays, lunch): normal
 
+## Earnings (tab)
+
+A private notebook for drivers on several platforms (Grab, TADA, Gojek, Zig, Ryde, other):
+- **Today at a glance:** total after costs, jobs, hours on shift, **S$/hour** (after the first hour), split by platform. The day runs 06:00 to 06:00, so a night shift past midnight stays in one day.
+- **Start shift / End shift** (one tap). Adding the first earning starts a shift on its own if none is running.
+- **Quick add:** pick the platform (remembered), the amount, optionally km. **+ Cost** for fuel / charging, car rental, parking, other.
+- **Grab jobs from Got a job / Est. appear automatically** (no double entry).
+- **Daily goal** with progress and hours to go at today's pace.
+- **Suggestions** from the last 4 weeks: best platform per job and per km, best and slowest hours, this week vs last.
+- This week and month, per platform; **Download (CSV)**.
+- Stays on the phone (`public/earnings.js`, kept in the phone's storage); nothing typed here is uploaded.
+
+The old Trips view (reconciled jobs from the slider era, the old shared pool) is under **Settings → Older jobs**.
+
 ## Settings
 
 - **Owner** (owner's phone only, at the top): tiles for testers in, invites waiting, trips from testers and drivers to check; **+ Add event**; **Export all trips (CSV)**; show / hide the workings; invites.
