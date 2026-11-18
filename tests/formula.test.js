@@ -580,3 +580,18 @@ test('layers 3 and 4: a troll in one area cannot take over "now", and wrong fare
   const dirty = passengerFare(fw3([...good, ...bad], { includeBase: false }), 15, 22).fare;
   assert.ok(Math.abs(dirty / clean - 1) < 0.06, `rates bent by ${((dirty / clean - 1) * 100).toFixed(1)}%`);
 });
+
+test('earned trust: a reliable driver on a shift (many jobs in one zone) counts nearly fully; a new one stays capped', () => {
+  const day = (d, h, mi = 10) => new Date(`2026-11-${d}T${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}:00+08:00`).getTime();
+  const at = { lat: 1.30, lng: 103.83 };
+  const others = [11, 13].map((d, i) => ({ ...make(8, 15, { ts: day(d, 19), ...at }), shared: true, d: `other${i}` }));
+  // 8 short jobs in two hours around Orchard at peak, all +25% (a busy evening)
+  const shift = (trusted) => Array.from({ length: 8 }, (_, i) => { const t = make(4 + (i % 3), 10, { ts: day(18, 18, 0) + i * 14 * 60000, ...at }); return { ...t, id: `s${i}`, actual: null, earned: Math.round(t.earned * 1.25 * 100) / 100, shared: true, d: 'shift', trusted }; }); // earnings only: moves "now", not the formula
+  const now = day(18, 20, 0);
+  const full = tod3([...others, ...shift(true).map((t, i) => ({ ...t, d: `solo${i}` }))], now, at).lift; // as if uncapped
+  const trusted = tod3([...others, ...shift(true)], now, at).lift;
+  const fresh = tod3([...others, ...shift(false)], now, at).lift;
+  assert.ok(full > 0.1, `the busy evening shows: ${full.toFixed(3)}`);
+  assert.ok(trusted > 0.95 * full, `trusted shift driver counts fully: ${trusted.toFixed(3)} of ${full.toFixed(3)}`);
+  assert.ok(fresh < 0.8 * full, `a new driver with the same jobs stays capped: ${fresh.toFixed(3)}`);
+});

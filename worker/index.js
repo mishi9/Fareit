@@ -605,6 +605,8 @@ async function postFormula(request, env) {
   return json({ accepted, rejected });
 }
 
+export const TRUST_MIN_CHECKED = 10;
+export const TRUST_MAX_FAR_OFF = 0.1;
 async function getFormula(url, env) {
   const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
@@ -615,13 +617,25 @@ async function getFormula(url, env) {
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
   // d: an opaque tag per phone, so one phone's trips can be capped together; never the device id.
+  // tr: the phone has earned trust (TRUST_MIN_CHECKED+ fares checked, under TRUST_MAX_FAR_OFF far
+  // off the estimate), so its trips may count more in an area (e.g. a driver on a shift).
+  const devices = [...new Set(results.filter((r) => r.deleted !== 1).map((r) => r.device))];
+  const trusted = new Set();
+  for (let i = 0; i < devices.length; i += 50) {
+    const chunk = devices.slice(i, i + 50);
+    const { results: rel } = await env.DB.prepare(`SELECT device, COUNT(*) AS checked,
+        SUM(CASE WHEN ABS(paid / predicted - 1) > 0.4 THEN 1 ELSE 0 END) AS far
+      FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0
+        AND device IN (${chunk.map((_, j) => `?${j + 1}`).join(',')}) GROUP BY device`).bind(...chunk).all();
+    for (const r of rel) if (r.checked >= TRUST_MIN_CHECKED && r.far / r.checked < TRUST_MAX_FAR_OFF) trusted.add(r.device);
+  }
   const tags = new Map();
   const tag = async (dev) => { if (!tags.has(dev)) tags.set(dev, (await sha256(`trip:${env.HASH_SALT || ''}:${dev}`)).slice(0, 10)); return tags.get(dev); };
   const trips = [];
   for (const r of results.slice(0, limit)) {
     if (r.deleted === 1) { trips.push({ rev: r.rev, id: r.id, deleted: 1 }); continue; }
     const { deleted, device, ...rest } = r;
-    trips.push({ ...rest, d: await tag(device) });
+    trips.push({ ...rest, d: await tag(device), ...(trusted.has(device) ? { tr: 1 } : {}) });
   }
   return json({ trips, next: trips.length ? trips[trips.length - 1].rev : since, more });
 }

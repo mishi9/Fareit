@@ -336,3 +336,19 @@ test('layers 1, 6 and 7: impossible trips refused; far-off rate per code name; r
   const after = (await req('/api/formula?since=0', { key: okey })).body.trips;
   assert.ok(after.every((t) => t.deleted === 1));
 });
+
+test('earned trust: a phone is marked trusted after 10+ checked fares with under 10% far off', async () => {
+  const { req, owner } = setup();
+  const key = await owner();
+  const mk = (i, paid) => ({ id: `trust-trip-${String(i).padStart(4, '0')}`, ts: Date.now() - (i + 1) * 60000, km: 10, min: 18, erp: 0, paid, earned: Math.round(paid * 0.73 * 100) / 100, surge: 'normal', predicted: 15, predicted_earned: 11, lat: 1.3, lng: 103.83 });
+  await req('/api/formula', { body: { device: 'good-phone-01', trips: Array.from({ length: 9 }, (_, i) => mk(i, 15 + (i % 3) * 0.3)) }, key });
+  let pulled = (await req('/api/formula?since=0', { key })).body.trips;
+  assert.ok(pulled.every((t) => !t.tr), 'not yet: 9 fares');
+  await req('/api/formula', { body: { device: 'good-phone-01', trips: [mk(9, 15.2)] }, key });
+  pulled = (await req('/api/formula?since=0', { key })).body.trips;
+  assert.ok(pulled.every((t) => t.tr === 1), '10 accurate fares: trusted');
+  // a phone with many far-off fares never is
+  await req('/api/formula', { body: { device: 'odd-phone-002', trips: Array.from({ length: 12 }, (_, i) => ({ ...mk(i + 20, i % 2 ? 15 : 24), id: `odd-trip-${String(i).padStart(4, '0')}` })) }, key });
+  pulled = (await req('/api/formula?since=0', { key })).body.trips.filter((t) => t.id.startsWith('odd'));
+  assert.ok(pulled.length === 12 && pulled.every((t) => !t.tr));
+});

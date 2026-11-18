@@ -923,7 +923,8 @@ function buildOwner() {
           const flag = inv.checked >= 5 && share >= 0.25;
           const rel = document.createElement('div');
           rel.className = `note reliab${flag ? ' warn' : ''}`;
-          rel.textContent = `${inv.far_off} of ${inv.checked} fares far off the estimate (${Math.round(share * 100)}%)${flag ? ' · check this driver' : ''}`;
+          const trusted = inv.checked >= 10 && share < 0.1;
+          rel.textContent = `${inv.far_off} of ${inv.checked} fares far off the estimate (${Math.round(share * 100)}%)${flag ? ' · check this driver' : trusted ? ' · trusted' : ''}`;
           row.querySelector('div').append(rel);
         }
         if (!inv.revoked) {

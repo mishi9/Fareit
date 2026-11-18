@@ -254,6 +254,7 @@ function ratioToFormula(t, w, est, c) {
 // many trips' worth always counts), so 20 jobs from one phone can't take over an area. d is an
 // opaque tag per phone from the server; your own trips are 'me'.
 export const DRIVER_CAP = 3;
+export const TRUSTED_CAP = 3;
 const driverOf = (t) => t.d || (t.shared ? 'other' : 'me');
 
 // With `loc`, only trips saved near there count, more the closer they are (1 km 80%, 3 km 14%,
@@ -322,15 +323,22 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
   }
   // No other single driver outweighs everyone else combined (at least DRIVER_CAP trips' worth is
   // always allowed). Your own trips and the base trip aren't capped on your phone.
+  // Drivers with a good track record (e.g. on a shift, 3-4 jobs an hour in one zone) may count up
+  // to TRUSTED_CAP times everyone else.
   const per = new Map();
+  const trusted = new Set();
   let total = 0;
   for (const it of items) {
     if (it.t.base) continue;
     total += it.x;
     per.set(driverOf(it.t), (per.get(driverOf(it.t)) || 0) + it.x);
+    if (it.t.trusted) trusted.add(driverOf(it.t));
   }
   const factor = new Map();
-  for (const [d, w] of per) factor.set(d, d === 'me' ? 1 : Math.min(1, Math.max(DRIVER_CAP, total - w) / w));
+  for (const [d, w] of per) {
+    const m = trusted.has(d) ? TRUSTED_CAP : 1;
+    factor.set(d, d === 'me' ? 1 : Math.min(1, Math.max(DRIVER_CAP * m, (total - w) * m) / w));
+  }
   for (const it of items) {
     const x = it.t.base ? it.x : it.x * factor.get(driverOf(it.t));
     const { t, d, r, g, ageMin } = it;
