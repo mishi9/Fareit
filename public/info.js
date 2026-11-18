@@ -91,49 +91,70 @@ function renderEvents() {
 function buildEventForm() {
   const box = info.root.querySelector('#info-event-add');
   if (!isOwnerPhone()) { box.innerHTML = ''; return; }
-  const today = new Date();
-  const iso = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-  box.innerHTML = `
-    <details class="ev-add"><summary>Add an event</summary>
-      <div class="stack">
-        <div class="field"><label for="ev-name">What</label><input id="ev-name" type="text" maxlength="60" placeholder="e.g. Coldplay concert"></div>
-        <div class="field"><label for="ev-venue">Where</label><select id="ev-venue"></select></div>
-        <div class="field"><label for="ev-date">Date</label><input id="ev-date" type="date" value="${iso}"></div>
-        <div class="row2">
-          <div class="field"><label for="ev-start">Starts (optional)</label><input id="ev-start" type="time"></div>
-          <div class="field"><label for="ev-end">Ends (about)</label><input id="ev-end" type="time" value="22:30"></div>
-        </div>
-        <p class="note">The end time matters most: that's when the crowd comes out. Ending after midnight? Use the start date; it's worked out.</p>
-        <button type="button" class="primary" id="ev-save">Add event</button>
-        <p class="msg" id="ev-msg" role="status"></p>
+  box.innerHTML = '<button type="button" class="ghost wide" id="ev-open">+ Add event</button>';
+  // The form is a card over the page, like Got a job.
+  const sheet = document.createElement('div');
+  sheet.id = 'event-sheet';
+  sheet.className = 'sheet';
+  sheet.hidden = true;
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-label', 'Add event');
+  sheet.innerHTML = `
+    <div class="sheet-head"><div class="sheet-title">Add event</div><button type="button" class="ghost small" id="ev-close">Close</button></div>
+    <div class="sheet-body stack">
+      <div class="field"><label for="ev-name">What</label><input id="ev-name" type="text" maxlength="60" placeholder="e.g. Coldplay concert"></div>
+      <div class="field"><label for="ev-venue">Where</label><select id="ev-venue"></select></div>
+      <div class="field"><label for="ev-date">Date</label><input id="ev-date" type="date"></div>
+      <div class="row2">
+        <div class="field"><label for="ev-start">Starts (optional)</label><input id="ev-start" type="time"></div>
+        <div class="field"><label for="ev-end">Ends (about)</label><input id="ev-end" type="time" value="22:30"></div>
       </div>
-    </details>`;
+      <p class="note">The end time matters most: that's when the crowd comes out. Past midnight? Keep the start date.</p>
+      <button type="button" class="primary wide" id="ev-save">Add event</button>
+      <p class="msg" id="ev-msg" role="status"></p>
+    </div>`;
+  document.body.append(sheet);
+  const $s = (q) => sheet.querySelector(q);
   const fillVenues = () => {
-    const sel = box.querySelector('#ev-venue');
+    const sel = $s('#ev-venue');
     const cur = sel.value;
     sel.innerHTML = venuesList().map((v) => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
     if (cur) sel.value = cur;
   };
-  fillVenues();
+  const open = () => {
+    const t = new Date();
+    $s('#ev-date').value = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+    $s('#ev-msg').textContent = '';
+    sheet.hidden = false;
+    document.body.classList.add('sheet-open');
+    loadEvents(true).then(fillVenues);
+    fillVenues();
+  };
+  const close = () => { sheet.hidden = true; document.body.classList.remove('sheet-open'); };
+  box.querySelector('#ev-open').addEventListener('click', open);
+  $s('#ev-close').addEventListener('click', close);
   onEventsChange(fillVenues);
-  box.querySelector('details').addEventListener('toggle', () => { loadEvents(true).then(fillVenues); });
-  box.querySelector('#ev-save').addEventListener('click', async () => {
-    const msg = box.querySelector('#ev-msg');
-    const name = box.querySelector('#ev-name').value.trim();
-    const date = box.querySelector('#ev-date').value;
-    const start = box.querySelector('#ev-start').value;
-    const end = box.querySelector('#ev-end').value;
+  $s('#ev-save').addEventListener('click', async () => {
+    const msg = $s('#ev-msg');
+    const name = $s('#ev-name').value.trim();
+    const date = $s('#ev-date').value;
+    const start = $s('#ev-start').value;
+    const end = $s('#ev-end').value;
     if (!name || !date || !end) { msg.textContent = 'Add what it is, the date and roughly when it ends.'; msg.classList.add('err'); return; }
     const startsAt = start ? new Date(`${date}T${start}`).getTime() : null;
     let endsAt = new Date(`${date}T${end}`).getTime();
     if (startsAt && endsAt <= startsAt) endsAt += 86400000; // ends after midnight
     if (!startsAt && end < '06:00') endsAt += 86400000;
+    const btn = $s('#ev-save');
+    btn.disabled = true;
     try {
-      await addEvent({ name, venue: box.querySelector('#ev-venue').value, starts_at: startsAt, ends_at: endsAt });
-      msg.classList.remove('err');
-      msg.textContent = `Added: ${name}, ends ~${hm(endsAt)} ${dayLabel(endsAt).toLowerCase()}.`;
-      box.querySelector('#ev-name').value = '';
+      await addEvent({ name, venue: $s('#ev-venue').value, starts_at: startsAt, ends_at: endsAt });
+      $s('#ev-name').value = '';
+      $s('#ev-start').value = '';
+      close();
+      renderEvents();
     } catch (e) { msg.textContent = e.message; msg.classList.add('err'); }
+    btn.disabled = false;
   });
 }
 

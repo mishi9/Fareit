@@ -376,7 +376,10 @@ const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = Math
 
 // With `loc`: "now" comes from trips near here around this hour; if there are none yet, from all
 // areas at this hour (scope says which).
-export function bandOutlook(trips, ts, loc = null) {
+// opts.event: the event letting out where you are (eventFor). Then "now" is the normal price
+// lifted by what event trips have paid (eventLift; +0% until there are some), state 'event'.
+// Normal and surge prices stay as on any other day: event trips never feed them.
+export function bandOutlook(trips, ts, loc = null, opts = {}) {
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
@@ -385,6 +388,7 @@ export function bandOutlook(trips, ts, loc = null) {
   const tod = timeOfDay(trips, ts, loc);
   const scope = !loc ? 'all' : tod.near ? 'here' : 'nearest';
   const surge = surgeLift(trips, ts);
+  const ev = opts.event ? eventLift(trips) : null;
   return EARN_BANDS.map((b) => {
     const inBand = all.filter((t) => t.km >= b.lo && t.km < b.hi);
     const km = inBand.length >= 3 ? median(inBand.map((t) => t.km)) : b.km;
@@ -392,12 +396,12 @@ export function bandOutlook(trips, ts, loc = null) {
     const normal = driverEarns(c, normalPaid);
     // Each band leans on trips of its own distance, falling back on the overall picture.
     const own = timeOfDay(trips, ts, loc, { band: b, prior: tod.lift });
-    const nowLift = own.lift;
+    const nowLift = ev ? ev.lift : own.lift;
     const now = driverEarns(c, normalPaid * (1 + nowLift));
     const withSurge = driverEarns(c, normalPaid * (1 + surge.lift));
     const vs = now / normal - 1;
-    const state = vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, vs, state, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
+    const state = ev ? 'event' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
+    return { ...b, km, normal, now, surge: withSurge, vs, state, eventTrips: ev ? ev.n : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
   });
 }
 
@@ -455,4 +459,17 @@ export function eventLift(trips) {
   }
   if (!rs.length) return { lift: 0, n: 0, guess: true };
   return { lift: Math.exp(rs.reduce((a, b) => a + b, 0) / (rs.length + 1)) - 1, n: rs.length, guess: false };
+}
+
+// For Radar's banner: the event letting out nearest to you, within NEAR km, from an hour before it
+// ends to EVENT_AFTER_MIN after.
+export function eventNear(events, loc, ts = Date.now(), nearKm = 3) {
+  if (!loc || !events || !events.length) return null;
+  let best = null;
+  for (const e of events) {
+    if (!Number.isFinite(e.ends_at) || ts < e.ends_at - 60 * 60000 || ts > e.ends_at + EVENT_AFTER_MIN * 60000) continue;
+    const km = kmApart(loc, e);
+    if (km <= nearKm && (!best || km < best.km)) best = { event: e, km };
+  }
+  return best;
 }

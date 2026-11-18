@@ -524,3 +524,23 @@ test('Radar alerts: major MRT disruption anywhere, floods only within 3 km', () 
   assert.deepEqual(far.map((a) => a.kind), ['mrt']);
   assert.deepEqual(radarAlerts({ train: { major: false, lines: [], messages: [] }, floods: [] }, null), []);
 });
+
+import { bandOutlook as bo2, eventNear } from '../public/formula.js';
+test('event mode on the cards: Event pill, event prices; normal prices unchanged', () => {
+  const ends = new Date('2026-11-21T22:30:00+08:00').getTime();
+  const stadium = { id: 'ev-9', name: 'Concert', venue_name: 'National Stadium', lat: 1.304, lng: 103.8746, ends_at: ends };
+  const at = { lat: 1.30, lng: 103.87 };
+  const normal = [14, 15, 17].map((d) => make(10, 20, { ts: new Date(`2026-11-${d}T22:45:00+08:00`).getTime(), ...at }));
+  const ev = [0, 10, 20].map((m) => { const t = make(10, 20, { ts: ends + m * 60000, ...at, event: 'ev-9' }); return { ...t, actual: t.actual * 1.3, earned: t.earned * 1.3 }; });
+  const trips = [...normal, ...ev];
+  const off = bo2(trips, ends, at);
+  const on = bo2(trips, ends, at, { event: stadium });
+  assert.ok(on.every((b) => b.state === 'event' && b.eventTrips === 3));
+  assert.ok(on[1].now > off[1].now, 'event price above');
+  assert.deepEqual(on.map((b) => b.normal), off.map((b) => b.normal), 'normal prices the same');
+  assert.deepEqual(on.map((b) => b.surge), off.map((b) => b.surge), 'surge prices the same');
+  // banner: within 3 km, from an hour before the end to 90 min after
+  assert.equal(eventNear([stadium], { lat: 1.3100, lng: 103.8600 }, ends - 30 * 60000).event.id, 'ev-9');
+  assert.equal(eventNear([stadium], { lat: 1.3100, lng: 103.8600 }, ends - 2 * 3600000), null, 'too early');
+  assert.equal(eventNear([stadium], { lat: 1.3526, lng: 103.9447 }, ends), null, 'too far');
+});

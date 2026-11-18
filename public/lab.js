@@ -16,7 +16,7 @@ import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob,
-  markEvents, eventLift,
+  markEvents, eventLift, eventFor, eventNear,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -276,6 +276,19 @@ export function renderBands() {
     surgeBox.hidden = !s;
     if (s) surgeBox.innerHTML = surgeBanner(s, areaName({ lat: Math.round(s.lat * 100) / 100, lng: Math.round(s.lng * 100) / 100 }), now);
   }
+  // An event letting out within 3 km (from an hour before it ends to 90 min after): like surge.
+  const evBox = document.querySelector('#radar-event');
+  const near = eventNear(eventsList(), loc, now);
+  if (evBox) {
+    evBox.hidden = !near;
+    if (near) {
+      const e = near.event;
+      const t = new Date(e.ends_at);
+      const when = now < e.ends_at ? `ends ~${pad(t.getHours())}:${pad(t.getMinutes())}` : `ended ${pad(t.getHours())}:${pad(t.getMinutes())} · crowd out`;
+      const esc = (x) => String(x).replace(/[&<>"']/g, '');
+      evBox.innerHTML = `<div class="glance-line event"><span class="surge-up" aria-hidden="true">★</span> <b>${esc(e.name)}</b> · <b>${esc(e.venue_name || '')}</b><span class="glance-sub">${when} · ${near.km < 1 ? '<1' : near.km.toFixed(1)} km</span></div>`;
+    }
+  }
   // Near Woodlands or a JB bus drop-off: what's arriving next, at the top, to decide whether to
   // head there or wait. (Ferry terminals next, once there's a timetable for them.)
   const placeBox = document.querySelector('#radar-place');
@@ -297,7 +310,9 @@ export function renderBands() {
   }
   box.hidden = airport;
   if (airport) return;
-  const bands = bandOutlook(dataset(), now, loc);
+  // At a venue as it lets out: the cards show event prices (learned only from event trips).
+  const atEvent = loc ? eventFor({ lat: loc.lat, lng: loc.lng, ts: now }, eventsList()) : null;
+  const bands = bandOutlook(dataset(), now, loc, { event: atEvent });
   const h = new Date(now);
   const at = `${pad(h.getHours())}:${pad(h.getMinutes())}`;
   const place = loc ? (areaName(loc) || 'your area') : null;
@@ -312,7 +327,7 @@ export function renderBands() {
     : b0.scope === 'here'
       ? `From all trips, closest counting most: ${b0.nearHour} within 3 km and 1½ h of now; ${clText}.`
       : `Nothing within 3 km and 1½ h yet, so leaning on the closest available: ${clText}.`;
-  const word = { good: 'Above', normal: 'Normal', bad: 'Below' };
+  const word = { good: 'Above', normal: 'Normal', bad: 'Below', event: 'Event' };
   // At a glance: where, the three prices, and the latest job. How it's worked out is on Est.
   void basis;
   box.innerHTML = `
@@ -320,7 +335,7 @@ export function renderBands() {
     ${latestLine(now)}
     ${bands.map((b) => `
       <div class="band-card ${b.state}">
-        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
+        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
         <div class="band-now">${money(b.now)}</div>
         <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)}</div>
       </div>`).join('')}`;
