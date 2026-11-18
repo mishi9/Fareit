@@ -1,9 +1,8 @@
 // Earnings: a private notebook of what a driver makes across platforms (Grab, TADA, Gojek, Zig…).
 // Today at a glance (total after costs, jobs, hours on shift, S$/hour, by platform), a one-tap
 // shift timer, a daily goal, and suggestions from the driver's own history. Everything typed here
-// stays on this phone. Grab jobs saved with Got a job or Log show up here automatically.
+// stays on this phone (days run 00:00-23:59). Grab jobs saved with Got a job or Log show up here automatically.
 import * as db from './db.js';
-import { nightOf } from './daypattern.js';
 import { myLabTrips } from './lab.js';
 
 export const PLATFORMS = [
@@ -32,9 +31,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const platform = (id) => PLATFORMS.find((p) => p.id === id) || PLATFORMS[PLATFORMS.length - 1];
 const save = () => db.setKV(KEY, e.data);
 
-// The driving day: a night shift past midnight belongs to the evening it started (like the
-// estimates: 00:00-05:59 counts as the night before).
-const dayKey = (ts) => { const d = nightOf(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+// The day: the calendar day, 00:00 to 23:59.
+const dayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 
 // Everything earned: what was typed here, plus Grab jobs logged with Got a job / Log
 export function allJobs() {
@@ -78,12 +76,13 @@ export function summary(fromTs, toTs, now = Date.now()) {
   return { jobs, fees: feeList, feeSum, gross, spent, net: gross - spent, hours, perHour: hours >= 1 ? (gross - spent) / hours : null, by };
 }
 
-// The current driving day's span (06:00 to 06:00).
+// The day's span: the calendar day, 00:00 to 23:59 (a shift past midnight is split across the two days).
 function daySpan(ts = Date.now(), offsetDays = 0) {
-  const d = nightOf(ts);
+  const d = new Date(ts);
   d.setDate(d.getDate() + offsetDays);
-  d.setHours(6, 0, 0, 0);
-  return [d.getTime(), d.getTime() + 86400000];
+  d.setHours(0, 0, 0, 0);
+  const end = new Date(d); end.setDate(end.getDate() + 1);
+  return [d.getTime(), end.getTime()];
 }
 
 // Suggestions from the driver's own last 4 weeks.
@@ -153,7 +152,7 @@ export function renderEarnings() {
   const day = new Date(d0).toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'short' });
   const [w0] = daySpan(now, -((new Date(d0).getDay() + 6) % 7));
   const week = summary(w0, now + 1, now);
-  const m0 = (() => { const d = new Date(d0); d.setDate(1); d.setHours(6, 0, 0, 0); return d.getTime(); })();
+  const m0 = (() => { const d = new Date(d0); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); })();
   const month = summary(m0, now + 1, now);
   const todayList = [...t.jobs.map((j) => ({ ...j, kind: 'job' })), ...t.fees, ...costs().filter((c) => c.ts >= d0 && c.ts < d1)].sort((a, b) => b.ts - a.ts);
   const tips = suggestions(now);
