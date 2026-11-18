@@ -80,7 +80,7 @@ The owner's experience is the starting point ("busy +10%, the rest normal"), cou
 
 ## Log (tab)
 
-The main tab, in the middle of the bar. **Log a job** in two steps from Grab's trip summary: **1. trip km** (and Normal / Surge ↑ / Airport), which shows the estimate, then **2. passenger paid** and **you earned**, then **Save job**. Testers see one plain line per figure (e.g. "+8% vs estimate"); the owner still sees the full workings. Trip minutes, job card time and km to pickup are under **More details (optional)**; the accuracy tables are folded under **How the estimates are doing**. On the road, **Got a job** on Radar does the same and keeps the pickup time and place.
+The main tab, in the middle of the bar. **Log a job** in two steps from Grab's trip summary: **1. trip km** (and Normal / Surge ↑ / Airport), which shows the estimate, then **2. passenger paid** and **you earned**, then **Save job**. Testers see one plain line per figure (e.g. "+8% vs estimate"); the owner still sees the full workings. A **Simple / Advanced** switch at the top (remembered on the phone): Advanced shows trip minutes, job card total time and km to pickup right in the form, all optional; the accuracy tables are folded under **How the estimates are doing**. On the road, **Got a job** on Radar does the same and keeps the pickup time and place.
 
 ## Earnings (tab)
 

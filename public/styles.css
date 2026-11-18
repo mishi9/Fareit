@@ -542,3 +542,11 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .lab-check .close { color: var(--go); } .lab-check .off { color: var(--warn); } .lab-check .far { color: var(--stop); }
 .log-label b { color: var(--ink); font-weight: 800; font-size: 15px; }
 .log-from { color: var(--warn); font-weight: 700; font-size: 13px; }
+.log-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.log-mode { flex: none; width: 168px; }
+.log-mode button { min-height: 36px; font-size: 13px; padding: 0 6px; }
+.log-adv { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--line); }
+.log-adv .hint { margin: 0; }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.row3 label { font-size: 12px; }
+.log-clear { justify-self: start; }

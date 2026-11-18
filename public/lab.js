@@ -161,11 +161,26 @@ export async function buildLab(root) {
     <div class="card lab-formula" id="lab-formula"></div>
 
     <div id="lab-form-home"><div id="lab-form" class="stack log-form">
-    <div class="log-head"><h2>Log a job</h2><p class="note">Three numbers from Grab's trip summary.</p></div>
+    <div class="log-head"><div><h2>Log a job</h2><p class="note" id="lab-mode-note">Three numbers from Grab's trip summary.</p></div>
+      <div id="lab-mode" class="seg g2 log-mode" role="group" aria-label="Form">
+        <button type="button" data-v="simple">Simple</button>
+        <button type="button" data-v="advanced">Advanced</button>
+      </div></div>
 
     <div class="log-step"><span class="log-n">1</span>
       <div class="field"><label for="lab-km" class="log-label"><b>Trip km</b> <span class="log-from">from PICK UP only</span></label>
         <input id="lab-km" class="log-big" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 8.4"></div></div>
+    <div id="lab-adv" class="log-adv" hidden>
+      <div class="row3">
+        <div class="field"><label for="lab-min">Trip min</label>
+          <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="optional"></div>
+        <div class="field"><label for="lab-cardmin">Card total min</label>
+          <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0" placeholder="optional"></div>
+        <div class="field"><label for="lab-pickupkm">Km to pickup</label>
+          <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0" placeholder="optional"></div>
+      </div>
+      <p class="hint">All optional: fill in what you have. Trip min is from pickup; card total includes your drive there.</p>
+    </div>
     <div id="lab-surge" class="seg g3">
       <button type="button" data-v="normal">Normal</button>
       <button type="button" data-v="surge">Surge ↑</button>
@@ -193,20 +208,7 @@ export async function buildLab(root) {
     <p class="msg" id="lab-msg" role="status"></p>
     <button type="button" class="primary wide log-save" id="lab-save">Save job</button>
 
-    <details class="log-more"><summary>More details (optional)</summary>
-      <div class="stack">
-        <div class="row2">
-          <div class="field"><label for="lab-min">Trip minutes</label>
-            <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="blank = estimate"></div>
-          <div class="field"><label for="lab-cardmin">Job card total min</label>
-            <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0"></div>
-        </div>
-        <div class="field"><label for="lab-pickupkm">Km to pickup</label>
-          <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0"></div>
-        <p class="hint">Trip only, from pickup to drop-off. The job card's total time includes your drive to the pickup.</p>
-        <button type="button" class="ghost small" id="lab-clear">Clear the form</button>
-      </div>
-    </details>
+    <button type="button" class="ghost small log-clear" id="lab-clear">Clear the form</button>
     <p class="note log-tip">On the road? Tap <b>Got a job</b> on Radar at pickup: it keeps the time and place for you.</p>
     </div></div>
 
@@ -231,6 +233,18 @@ export async function buildLab(root) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
   $('#lab-save', root).addEventListener('click', save);
+  // Simple or Advanced: remembered on this phone. Advanced shows the extra (optional) boxes inline.
+  const MODE = 'agaration-log-mode';
+  const setMode = (m) => {
+    try { localStorage.setItem(MODE, m); } catch { /* private mode */ }
+    for (const b of root.querySelectorAll('#lab-mode button')) b.classList.toggle('sel', b.dataset.v === m);
+    $('#lab-adv', root).hidden = m !== 'advanced';
+    $('#lab-mode-note', root).textContent = m === 'advanced' ? 'Grab\u2019s trip summary, plus any extras you have.' : 'Three numbers from Grab\u2019s trip summary.';
+  };
+  let mode = 'simple';
+  try { mode = localStorage.getItem(MODE) === 'advanced' ? 'advanced' : 'simple'; } catch { /* private mode */ }
+  setMode(mode);
+  for (const b of root.querySelectorAll('#lab-mode button')) b.addEventListener('click', () => setMode(b.dataset.v));
   $('#lab-clear', root).addEventListener('click', () => { lab.pending = null; clearForm(); });
   document.querySelector('#got-job')?.addEventListener('click', openJob);
   document.querySelector('#job-close')?.addEventListener('click', closeJob);
