@@ -83,16 +83,16 @@ export const queueWaitNow = () => queueWait(all(), Date.now());
 // "07:19 (12 min ago)", or a day for older readings.
 export function updatedText(at, now = Date.now()) {
   const mins = Math.round((now - at) / 60000);
-  if (mins < 60) return `${hm(at)} (${mins < 1 ? 'just now' : `${mins} min ago`})`;
-  if (mins < 24 * 60) return `${hm(at)} (${Math.round(mins / 60)} h ago)`;
+  if (mins < 60) return mins < 1 ? 'just now' : `${mins} min ago`;
+  if (mins < 24 * 60) return hm(at);
   return new Date(at).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 export function waitHtml(w, now = Date.now()) {
-  if (!w) return '<p class="note">No queue readings yet. Drivers at the airport add them on Radar.</p>';
-  const basis = w.basis === 'latest' ? `from the latest reading${w.cars != null ? ` (${w.cars} cars ahead)` : ''}`
-    : w.basis === 'usual' ? `usual around this hour (${w.n} reading${w.n === 1 ? '' : 's'}${w.cars != null ? `, ~${Math.round(w.cars)} cars ahead` : ''})` : 'not enough to estimate';
+  if (!w) return '<p class="note">No queue readings yet.</p>';
+  const cars = w.cars != null ? `<b>${Math.round(w.cars)}</b> cars` : '';
+  const basis = w.basis === 'usual' ? 'usual for this hour' : '';
   return `<div class="q-wait"><div class="q-wait-min">${w.min != null ? `~${w.min} min` : '—'}</div>
-    <div class="note">Estimated wait, ${basis}${w.corrected ? ', adjusted by real waits' : ''}. Last updated ${updatedText(w.at, now)}.</div></div>`;
+    <div class="note">${[cars, basis, `updated ${updatedText(w.at, now)}`].filter(Boolean).join(' · ')}</div></div>`;
 }
 
 export function syncQueue() {
@@ -147,20 +147,20 @@ export async function buildQueue(root) {
   q.device = await db.getKV('device');
   onMove(() => render());
   root.innerHTML = `
-    <div class="band-head">Airport queue</div>
-    <p class="note" id="q-where"></p>
+    <div class="band-head">Airport queue · <b id="q-where"></b></div>
     <div id="q-summary"></div>
-    <p class="note">Joined the queue? Note what Grab shows. When a job comes, tap <b>Got a job</b>: it records how long you really waited, then takes the fare.</p>
+    <div id="q-form" class="stack">
     <div class="row2">
       <div class="field"><label for="q-cars">Cars ahead</label>
         <input id="q-cars" type="number" inputmode="numeric" step="1" min="0"></div>
-      <div class="field"><label for="q-est">Estimated wait (min)</label>
+      <div class="field"><label for="q-est">Grab's wait (min)</label>
         <input id="q-est" type="number" inputmode="numeric" step="1" min="0"></div>
     </div>
     <p class="msg" id="q-msg" role="status"></p>
-    <button type="button" class="primary wide" id="q-save">Save queue reading</button>
+    <button type="button" class="primary wide" id="q-save">Save</button>
+    </div>
     <div id="q-open"></div>
-    <div id="q-list" class="stack"></div>`;
+`;
   $('#q-save', root).addEventListener('click', save);
   render();
   syncQueue();
@@ -171,7 +171,7 @@ async function save() {
   const cars = parseFloat($('#q-cars', r).value);
   const est = parseFloat($('#q-est', r).value);
   const msg = $('#q-msg', r);
-  if (!Number.isFinite(cars) && !Number.isFinite(est)) { msg.textContent = 'Add the cars ahead or the estimated wait.'; msg.classList.add('err'); return; }
+  if (!Number.isFinite(cars) && !Number.isFinite(est)) { msg.textContent = 'Add cars ahead or the wait.'; msg.classList.add('err'); return; }
   q.mine.push({
     id: `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ts: Date.now(),
     cars: Number.isFinite(cars) ? Math.round(cars) : null, est: Number.isFinite(est) ? est : null, actual: null,
@@ -180,7 +180,7 @@ async function save() {
   $('#q-cars', r).value = '';
   $('#q-est', r).value = '';
   msg.classList.remove('err');
-  msg.textContent = `Saved at ${hm(Date.now())}.`;
+  msg.textContent = '';
   render();
   syncQueue();
 }
@@ -201,6 +201,26 @@ async function gotJob(reading) {
   syncQueue();
 }
 
+// Small Delete (tap twice) for a reading saved by mistake.
+function deleteButton(x) {
+  let armed = false;
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'ghost small danger';
+  del.textContent = 'Delete';
+  del.addEventListener('click', async () => {
+    if (!armed) { armed = true; del.textContent = 'Tap again'; setTimeout(() => { armed = false; del.textContent = 'Delete'; }, 4000); return; }
+    q.mine = q.mine.filter((y) => y.id !== x.id);
+    delete q.shared[x.id];
+    await db.setKV(KEY, q.mine);
+    const dels = (await db.getKV('queueDeletes')) || [];
+    await db.setKV('queueDeletes', [...dels, x.id]);
+    render();
+    syncQueue();
+  });
+  return del;
+}
+
 function render() {
   const r = q.root;
   if (!r) return;
@@ -208,44 +228,20 @@ function render() {
   const openNow = q.mine.some((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
   const inZone = atAirport(here());
   r.hidden = !(inZone || openNow);
-  $('#q-where', r).textContent = inZone ? `Changi · ${hm(Date.now())}` : 'Shown because a queue reading is still open.';
+  $('#q-where', r).textContent = inZone ? `Changi · ${hm(Date.now())}` : 'reading still open';
   // The latest open reading of yours: Got a job closes it with the actual wait.
   const open = [...q.mine].reverse().find((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
   const openBox = $('#q-open', r);
   openBox.innerHTML = '';
+  $('#q-form', r).hidden = Boolean(open); // already in the queue: nothing to fill in
   if (open) {
     const mins = Math.round((Date.now() - open.ts) / 60000);
     const card = document.createElement('div');
     card.className = 'card q-open';
-    card.innerHTML = `<div class="meta">In the queue since ${hm(open.ts)} (${mins} min)${open.cars != null ? ` · ${open.cars} cars ahead` : ''}${open.est ? ` · Grab estimated ${open.est} min` : ''}. Tap <b>Got a job</b> when one comes.</div>`;
+    card.innerHTML = `<div class="meta">In queue <b>${mins} min</b>${open.cars != null ? ` · ${open.cars} cars` : ''}${open.est ? ` · Grab said ${open.est}` : ''}</div>`;
+    card.append(deleteButton(open));
     openBox.append(card);
   }
   $('#q-summary', r).innerHTML = waitHtml(queueWaitNow()) + (q.note ? `<p class="note">${q.note}</p>` : '');
-  const list = $('#q-list', r);
-  list.innerHTML = '';
-  for (const x of [...q.mine].reverse().slice(0, 3)) {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `<div class="meta">${new Date(x.ts).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} · ${x.cars != null ? `${x.cars} cars ahead` : 'cars not noted'} · est ${x.est ? `${x.est} min` : '—'} · ${x.actual > 0 ? `waited ${x.actual} min` : 'wait not recorded'}</div>`;
-    const acts = document.createElement('div');
-    acts.className = 'acts';
-    let armed = false;
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'ghost small danger';
-    del.textContent = 'Delete';
-    del.addEventListener('click', async () => {
-      if (!armed) { armed = true; del.textContent = 'Tap again to delete'; setTimeout(() => { armed = false; del.textContent = 'Delete'; }, 4000); return; }
-      q.mine = q.mine.filter((y) => y.id !== x.id);
-      delete q.shared[x.id];
-      await db.setKV(KEY, q.mine);
-      const dels = (await db.getKV('queueDeletes')) || [];
-      await db.setKV('queueDeletes', [...dels, x.id]);
-      render();
-      syncQueue();
-    });
-    acts.append(del);
-    card.append(acts);
-    list.append(card);
-  }
+
 }

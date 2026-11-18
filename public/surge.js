@@ -63,11 +63,11 @@ export async function loadSurge(onDone, force = false) {
 export const surgeNow = () => surgeFor(here(), surgeSpots(sg.points));
 
 
-// Banner text for Radar (area: the planning-area name, when known).
+// Banner for Radar (area: the planning-area name, when known): one line, places in bold.
 export function surgeBanner(s, area, now = Date.now()) {
   const ago = Math.max(0, Math.round((now - s.latest) / 60000));
-  const dist = `${s.km < 1 ? 'under 1' : s.km.toFixed(1)} km away`;
-  const where = s.inside ? `Likely surging around you${area ? ` (${area})` : ''}` : area ? `${area} likely surging · ${dist}` : `Likely surging ${dist}`;
-  return `<div class="surge-alert"><div class="surge-up" aria-hidden="true">↑</div><div><b>${where}</b>
-    <div class="note">${s.drivers} drivers had surge trips in the last 30 min · latest ${ago < 1 ? 'just now' : `${ago} min ago`}</div></div></div>`;
+  const e = (t) => String(t).replace(/[&<>"']/g, '');
+  const where = s.inside ? `Surging <b>around you</b>${area ? ` · <b>${e(area)}</b>` : ''}`
+    : `<b>${e(area || 'Nearby')}</b> surging · ${s.km < 1 ? '<1' : s.km.toFixed(1)} km`;
+  return `<div class="glance-line good"><span class="surge-up" aria-hidden="true">↑</span> ${where}<span class="glance-sub">${s.drivers} drivers · ${ago < 1 ? 'now' : `${ago} min ago`}</span></div>`;
 }

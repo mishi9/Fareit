@@ -417,3 +417,15 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .alert-card.compact { padding: 7px 10px; gap: 1px; border-width: 1.5px; }
 .alert-card.compact .note { font-size: 13px; }
 #radar-alerts { gap: 6px; }
+
+/* At a glance: one-line alerts at the top of Radar */
+.glance-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 12px; border-radius: 12px; border: 2px solid var(--line);
+  background: var(--surface); font-size: 16px; line-height: 1.3; }
+.glance-line.bad { border-color: var(--stop); background: color-mix(in srgb, var(--stop) 14%, var(--surface)); }
+.glance-line.good { border-color: var(--go); background: color-mix(in srgb, var(--go) 16%, var(--surface)); }
+.glance-line .surge-up { font-size: 20px; font-weight: 800; color: var(--go); }
+.glance-sub { font-size: 13px; color: var(--muted); margin-left: auto; }
+.band-head b, .note b { color: var(--ink); }
+.inc-row .inc-type { margin-right: 2px; }
+.q-open { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.q-open .meta { margin: 0; font-size: 15px; }

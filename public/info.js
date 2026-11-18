@@ -8,6 +8,7 @@ import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow } from './lab.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
+import { boldPlaces, unstamp, mrtStretch } from './glance.js';
 import { FERRY_TERMINALS, ferryRowsHtml } from './ferries.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
@@ -68,17 +69,16 @@ function renderEvents() {
     const del = isOwnerPhone() ? `<button type="button" class="ghost small" data-del="${esc(e.id)}">Delete</button>` : '';
     return `<div class="ev-card ${ended ? 'out' : e.ends_at <= now + 2 * 3600000 ? 'soon' : ''}">
       <div class="ev-main"><b>${esc(e.name)}</b>
-        <div class="note">${esc(e.venue_name)}${dist != null ? ` · ${dist < 1 ? 'under 1' : Math.round(dist)} km from you` : ''}</div>
-        <div class="ev-when">${ended ? `Ended ${hm(e.ends_at)}: crowd leaving now` : `${e.ends_at > now + 2 * 3600000 ? `${dayLabel(e.ends_at)} · ` : ''}${e.starts_at ? `${hm(e.starts_at)} to ` : 'ends '}~${hm(e.ends_at)}`}</div>
+        <div class="note"><b>${esc(e.venue_name)}</b>${dist != null ? ` · ${dist < 1 ? '<1' : Math.round(dist)} km` : ''}</div>
+        <div class="ev-when">${ended ? `Ended ${hm(e.ends_at)} · crowd out now` : `${e.ends_at > now + 2 * 3600000 ? `${dayLabel(e.ends_at)} · ` : ''}ends ~${hm(e.ends_at)}`}</div>
       </div>${del}</div>`;
   };
-  // Only what's next: everything ending soon, then the next one coming up; the rest folded away.
-  const more = later.slice(1);
+  // Only what's next: everything ending soon, then the next two (the owner sees all, to manage them).
+  const next = isOwnerPhone() ? later : later.slice(0, 2);
   box.innerHTML = `
-    ${soon.length ? `<div class="band-head">Ending soon</div>${soon.map(card).join('')}` : '<p class="note">Nothing letting out in the next 2 hours.</p>'}
-    ${later.length ? `<div class="band-head">Next up</div>${card(later[0])}` : ''}
-    ${more.length ? `<details class="ev-more"><summary>${more.length} more this week</summary><div class="stack">${more.map(card).join('')}</div></details>` : ''}
-    <p class="note">${lift.n ? `Around events, fares have run <b>${signed(lift.lift)}</b> vs normal (${lift.n} trip${lift.n === 1 ? '' : 's'}).` : 'No trips around events yet.'} Trips near a venue as it lets out are kept out of normal estimates.</p>`;
+    ${soon.length ? `<div class="band-head">Ending soon</div>${soon.map(card).join('')}` : '<p class="note">Nothing ending in the next 2 h.</p>'}
+    ${next.length ? `<div class="band-head">Next up</div>${next.map(card).join('')}` : ''}
+    ${lift.n ? `<p class="note">After events, fares ran <b>${signed(lift.lift)}</b> (${lift.n} trip${lift.n === 1 ? '' : 's'}).</p>` : ''}`;
   for (const b of box.querySelectorAll('[data-del]')) {
     let armed = false;
     b.addEventListener('click', async () => {
@@ -162,9 +162,9 @@ function renderLive() {
   r.querySelector('#info-airport').innerHTML = `
     <div class="band-head">Grab queue</div>
     ${waitHtml(queueWaitNow())}
-    <div class="band-head">Street taxis free at Changi</div>
+    <div class="band-head">Taxis waiting at Changi</div>
     <div class="q-wait"><div class="q-wait-min">${taxis && Number.isFinite(taxis.changi) ? taxis.changi : '—'}</div>
-      <div class="note">From LTA: not Grab cars, but a fair sign of how crowded the airport is.${taxis ? ` Last updated ${updatedText(taxis.at)}.` : info.liveErr ? ` ${esc(info.liveErr)}` : ''}</div></div>`;
+      <div class="note">street taxis free${taxis ? ` · updated ${updatedText(taxis.at)}` : info.liveErr ? ` · ${esc(info.liveErr)}` : ''}</div></div>`;
   renderJb();
   renderFerries();
   renderLta(L.lta || {});
@@ -194,33 +194,31 @@ function renderLta(lta) {
   const upd = `Last updated ${updatedText(lta.at)}.`;
   // MRT: only when something's wrong
   const tr = lta.train;
-  trn.innerHTML = tr && tr.disrupted ? `<div class="alert-card ${tr.major ? 'bad' : ''}"><b>MRT ${tr.major ? 'disruption' : 'delays'}${tr.lines.length ? `: ${esc([...new Set(tr.lines.map((x) => x.line))].join(', '))}` : ''}</b>
-    ${tr.messages.slice(0, 2).map((m) => `<div class="note">${esc(m)}</div>`).join('')}
-    ${tr.lines.map((x) => x.stations ? `<div class="note">${esc(x.line)}${x.direction ? ` (towards ${esc(x.direction)})` : ''}: ${esc(x.stations)}</div>` : '').join('')}
-    <div class="note">Stranded commuters often book rides near the affected stations.</div></div>` : '';
+  const st = tr && tr.disrupted ? mrtStretch(tr.messages[0] || '') : null;
+  trn.innerHTML = tr && tr.disrupted ? `<div class="alert-card ${tr.major ? 'bad' : ''}"><b>${esc([...new Set(tr.lines.map((x) => x.line))].join(', ') || 'MRT')} ${tr.major ? 'down' : 'delays'}${st ? `: ${esc(st.from)} – ${esc(st.to)}` : ''}</b>
+    ${tr.messages.slice(0, 1).map((m) => `<div class="note">${boldPlaces(unstamp(m).replace(/^[A-Z]{2,4}\s*[-–]\s*/, ''))}</div>`).join('')}</div>` : '';
   // Floods and incidents, nearest first
   const dist = (p) => (loc && p.lat && p.lng ? kmApart(loc, p) : null);
   const floods = (lta.floods || []).map((f) => ({ ...f, d: dist(f) })).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9));
   const incidents = (lta.incidents || []).map((x) => ({ ...x, d: dist(x) }))
     .sort((a, b) => (loc ? (a.d ?? 1e9) - (b.d ?? 1e9) : INCIDENT_ORDER.indexOf(a.type) - INCIDENT_ORDER.indexOf(b.type)));
   const main = incidents.filter((x) => x.type !== 'Roadwork');
-  const works = incidents.filter((x) => x.type === 'Roadwork');
-  const km = (d) => (d == null ? '' : ` · ${d < 1 ? 'under 1' : Math.round(d)} km away`);
-  const row = (x) => `<div class="inc-row"><span class="inc-type t-${esc(x.type.toLowerCase().replace(/[^a-z]/g, ''))}">${esc(x.type)}</span>
-    <div class="note">${esc(x.msg)}${km(x.d)}</div></div>`;
-  const shown = main.slice(0, 5);
-  const more = [...main.slice(5), ...works];
+  const km = (d) => (d == null ? '' : ` · ${d < 1 ? '<1' : Math.round(d)} km`);
+  const row = (x) => `<div class="inc-row"><div class="note"><span class="inc-type t-${esc(x.type.toLowerCase().replace(/[^a-z]/g, ''))}">${esc(x.type)}</span>${km(x.d)}</div>
+    <div>${boldPlaces(unstamp(x.msg).replace(new RegExp(`^${x.type}\\s+`, 'i'), ''))}</div></div>`;
+  // Everything that matters to a driver, no tapping to see more; roadworks left out.
+  const shown = main.slice(0, 8);
   inc.innerHTML = `
-    ${floods.map((f) => `<div class="alert-card bad"><b>${esc(f.headline)}</b><div class="note">${esc(f.desc)}${km(f.d)}</div>${f.advice ? `<div class="note">${esc(f.advice)}</div>` : ''}</div>`).join('')}
-    ${shown.length ? shown.map(row).join('') : '<p class="note">No accidents or breakdowns reported right now.</p>'}
-    ${more.length ? `<details class="ev-more"><summary>${more.length} more${works.length ? ` (incl. ${works.length} roadwork${works.length === 1 ? '' : 's'})` : ''}</summary><div class="stack">${more.map(row).join('')}</div></details>` : ''}
-    <p class="note">From LTA${loc ? ', nearest to you first' : ''}. ${upd}</p>`;
+    ${floods.map((f) => `<div class="alert-card bad"><div><b>Flash flood</b>${km(f.d)}</div><div>${boldPlaces(unstamp(f.desc))}</div></div>`).join('')}
+    ${shown.length ? shown.map(row).join('') : '<p class="note">No accidents or breakdowns now.</p>'}
+    ${main.length > 8 ? `<p class="note">+${main.length - 8} further away.</p>` : ''}
+    <p class="note">LTA · ${upd.replace(/^Last updated /, 'updated ').replace(/\.$/, '')}</p>`;
   // Expressway times: one row per expressway, both directions
   const by = new Map();
   for (const t of lta.travel || []) { if (!by.has(t.name)) by.set(t.name, []); by.get(t.name).push(t); }
   trv.innerHTML = by.size ? `${[...by.entries()].map(([name, dirs]) => `<div class="jb-row compact"><b>${esc(name)}</b>
       <span class="note">${dirs.map((d) => `to ${esc(titleCase(d.to))} <b>${d.min} min</b>`).join(' · ')}</span></div>`).join('')}
-    <p class="note">Whole length, each direction, from LTA. ${upd}</p>` : `<p class="note">No travel times right now. ${upd}</p>`;
+    <p class="note">Full length · LTA · ${upd.replace(/^Last updated /, 'updated ').replace(/\.$/, '')}</p>` : `<p class="note">No travel times now.</p>`;
 }
 const titleCase = (s) => String(s).toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase()).replace(/\b(Pie|Cte|Aye|Ecp|Bke|Kje|Kpe|Mce|Sle|Tpe|Nsc)\b/g, (m) => m.toUpperCase());
 
@@ -230,7 +228,7 @@ function renderJb() {
   const box = info.root?.querySelector('#info-jb');
   if (!box) return;
   box.innerHTML = `${jbRowsHtml(new Date())}
-    <p class="note">Times with ~ are estimates: the published timetable plus rough journey and immigration times, so they slip when the checkpoints are busy. KTM: KTMB timetable (1 Jan 2026). Buses: Land Transport Guru (2026). The KTM shuttle is due to stop after the RTS Link opens (reported for early 2027).</p>`;
+    <p class="note">~ = estimate (timetable + journey + immigration); later when checkpoints are busy.</p>`;
 }
 
 // Ferries from Batam and Bintan: the next few arrivals at each terminal, from the operators'
@@ -239,13 +237,13 @@ function renderFerries() {
   const box = info.root?.querySelector('#info-ferries');
   if (!box) return;
   const now = new Date();
-  box.innerHTML = `${FERRY_TERMINALS.map((t) => `<div class="band-head">Into ${esc(t.name)}</div>${ferryRowsHtml(t.id, now)}`).join('')}
-    <p class="note">From the operators' published timetables, not live. Indonesian departures are one hour behind Singapore; arrivals are in Singapore time, then immigration. On public holidays, weekend timetables usually apply.</p>`;
+  box.innerHTML = `${FERRY_TERMINALS.map((t) => `<div class="band-head">Into <b>${esc(t.short)}</b></div>${ferryRowsHtml(t.id, now)}`).join('')}
+    <p class="note">Published timetables, Singapore time; then immigration.</p>`;
 }
 
 // Old jobs from before Radar (the slider) that still need a fare.
 export function renderOldJobs(n) {
   const box = info.root?.querySelector('#info-old');
   if (!box) return;
-  box.innerHTML = n ? `<div class="band-latest">${n} older job${n === 1 ? '' : 's'} still waiting for a fare. <a href="#reconcile">Finish them</a></div>` : '';
+  box.innerHTML = n ? `<div class="band-latest">${n} old job${n === 1 ? '' : 's'} need a fare · <a href="#reconcile">Finish</a></div>` : '';
 }

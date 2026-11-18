@@ -241,7 +241,7 @@ function latestLine(now) {
   const mins = Math.round((now - t.ts) / 60000);
   const where = t.lat && t.lng ? areaName({ lat: t.lat, lng: t.lng }) : null;
   const cls = j.vs >= 0.1 ? 'good' : j.vs <= -0.1 ? 'bad' : '';
-  return `<div class="band-latest ${cls}">Latest job · ${pad(d.getHours())}:${pad(d.getMinutes())} (${mins} min ago)${where ? ` · ${where}` : ''}${t.shared ? ' · another driver' : ''}${t.event ? ` · ${t.eventName || 'event'}` : ''}: ${t.km} km, earned <b>${money(j.earned)}</b> (${signed(j.vs)} vs normal)</div>`;
+  return `<div class="band-latest ${cls}">Latest <b>${money(j.earned)}</b> · ${t.km} km (${signed(j.vs)})${where ? ` · <b>${where}</b>` : ''}${t.event ? ` · ${t.eventName || 'event'}` : ''} · ${mins < 1 ? 'now' : `${mins} min ago`}</div>`;
 }
 
 // The planning area for where the phone is, looked up once per ~1 km and kept for the session.
@@ -286,8 +286,8 @@ export function renderBands() {
     const rows = pl ? jbRowsHtml(new Date(now), pl) : ferry ? ferryRowsHtml(ferry.id, new Date(now), { compact: true }) : '';
     placeBox.hidden = !rows;
     if (rows) placeBox.innerHTML = pl
-      ? `<div class="band-head">Next from JB · ${pl.at === 'woodlands' ? 'out at Woodlands' : `at ${pl.name}`} (est.)</div>${rows}`
-      : `<div class="band-head">Next ferry into ${ferry.short}</div>${rows}`;
+      ? `<div class="band-head">Next from JB · <b>${pl.at === 'woodlands' ? 'Woodlands' : pl.name}</b></div>${rows}`
+      : `<div class="band-head">Next ferry · <b>${ferry.short}</b></div>${rows}`;
   }
   const airport = atAirport(loc);
   const ap = document.querySelector('#ap-flights');
@@ -312,19 +312,18 @@ export function renderBands() {
     : b0.scope === 'here'
       ? `From all trips, closest counting most: ${b0.nearHour} within 3 km and 1½ h of now; ${clText}.`
       : `Nothing within 3 km and 1½ h yet, so leaning on the closest available: ${clText}.`;
-  const word = { good: 'Above normal', normal: 'Normal', bad: 'Below normal' };
+  const word = { good: 'Above', normal: 'Normal', bad: 'Below' };
+  // At a glance: where, the three prices, and the latest job. How it's worked out is on Est.
+  void basis;
   box.innerHTML = `
-    <div class="band-head">What you'd earn now · ${place ? `${place} · ` : ''}${at}</div>
-    <div class="band-basis">${loc ? '' : 'Location off: using all areas. '}${basis}</div>
+    <div class="band-head">Earn now · ${place ? `<b>${place}</b>` : 'all areas'} · ${at}</div>
     ${latestLine(now)}
     ${bands.map((b) => `
       <div class="band-card ${b.state}">
         <div class="band-top"><span class="band-name">${b.label}</span><span class="band-tag">${word[b.state]}${b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></div>
         <div class="band-now">${money(b.now)}</div>
-        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)} <span class="band-km">(about ${Math.round(b.km)} km)</span></div>
-        <div class="band-km">${b.inBandNear ? `From ${b.inBandNear} trip${b.inBandNear === 1 ? '' : 's'} in this range${loc ? ' near you' : ''} around this hour.` : 'No trips in this range near now: following the overall picture.'}</div>
-      </div>`).join('')}
-    <p class="note band-note">Grey: normal for now. Green: fares here at this hour have been running 10% or more above normal. Red: 10% or more below. Learns from every trip saved, from Got a job or the Est. tab.</p>`;
+        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surge)}</div>
+      </div>`).join('')}`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
 

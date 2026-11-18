@@ -427,7 +427,7 @@ test('airport queue: estimated wait from the latest reading, else the usual for 
   assert.equal(old.min, 40);
   assert.equal(old.at, past[0].ts);
   assert.equal(queueWait([], t0), null);
-  assert.match(updatedText(t0 - 12 * m, t0), /\(12 min ago\)$/);
+  assert.equal(updatedText(t0 - 12 * m, t0), '12 min ago');
 });
 
 import { ferryArrivals, ferryTerminalAt } from '../public/ferries.js';

@@ -137,8 +137,8 @@ export function ferryRowsHtml(terminal, now = new Date(), { count = 3, compact =
   return list.map((a) => {
     const day = a.at.getDate() !== now.getDate() ? ' tmrw' : '';
     return compact
-      ? `<div class="jb-row compact"><span class="note">${esc(a.from)}</span><span class="jb-eta">~${a.arrive}${day}</span></div>`
-      : `<div class="jb-row"><div><b>${esc(a.from)}</b><div class="note">${esc(a.op)} · leaves ${a.departWib} Indonesian time</div></div>
-        <div class="jb-eta">~${a.arrive}${day}<div class="note">${a.est ? 'arrives (est.)' : 'arrives'}</div></div></div>`;
+      ? `<div class="jb-row compact"><span class="note">from <b>${esc(a.from)}</b></span><span class="jb-eta">~${a.arrive}${day}</span></div>`
+      : `<div class="jb-row"><div>from <b>${esc(a.from)}</b><div class="note">${esc(a.op)}</div></div>
+        <div class="jb-eta">~${a.arrive}${day}</div></div>`;
   }).join('');
 }

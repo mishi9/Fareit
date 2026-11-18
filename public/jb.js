@@ -136,12 +136,12 @@ export function jbRowsHtml(now = new Date(), place = null) {
   const rows = jbNext(now);
   return rows.map((r) => {
     const when = place && place.at === 'woodlands' ? r.woodlands : r.dropAt;
-    const where = place && place.at === 'woodlands' ? 'out at Woodlands' : `at ${r.drop}`;
+    const where = place && place.at === 'woodlands' ? 'Woodlands' : r.drop;
     if (place) {
       // Radar: one short line each, so the earnings cards stay in view.
       return `<div class="jb-row compact"><b>${esc(r.id === 'ktm' ? 'KTM' : r.id)}</b><span class="note">${esc(r.short || r.what)}</span><span class="jb-eta">${when ? `~${when}` : '—'}</span></div>`;
     }
-    return `<div class="jb-row"><div><b>${esc(r.name)}</b><div class="note">${esc(r.what)}</div></div>
-      <div class="jb-eta">${when ? `~${when}<div class="note">${esc(where)}</div>` : '<div class="note">—</div>'}</div></div>`;
+    return `<div class="jb-row"><div><b>${esc(r.id === 'ktm' ? 'KTM' : r.id)}</b> <span class="note">${esc(r.short || r.what)}</span></div>
+      <div class="jb-eta">${when ? `~${when}<div class="note"><b>${esc(where)}</b></div>` : '<div class="note">—</div>'}</div></div>`;
   }).join('');
 }
