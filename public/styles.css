@@ -15,6 +15,7 @@
   --dead: #ef5b4f;
   --sel: #5fb3d3;
   --sel-ink: #04121a;
+  --log: #8fd3f0; --log-ink: #06202c;
   --display: "Archivo", "SF Pro Display", system-ui, -apple-system, sans-serif;
   --body: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -24,7 +25,7 @@
   :root {
     --bg: #f2f4f1; --surface: #ffffff; --raised: #e8ece7; --ink: #151917; --muted: #5a635e; --line: #d3d8d2;
     --accent: #1d6f8f; --go: #1f9a52; --go-ink: #ffffff; --stop: #cf3a2f; --stop-ink: #ffffff;
-    --warn: #a86a12; --dead: #cf3a2f; --sel: #1d6f8f; --sel-ink: #ffffff; color-scheme: light;
+    --warn: #a86a12; --dead: #cf3a2f; --sel: #1d6f8f; --sel-ink: #ffffff; --log: #7cc8ea; --log-ink: #06202c; color-scheme: light;
   }
 }
 
@@ -302,6 +303,13 @@ button:focus-visible, input:focus-visible, label.button:focus-visible { outline:
 .tabs button.on .ti { stroke-width: 2.2; }
 .tabs .badge { position: absolute; top: 2px; left: calc(50% + 8px); }
 .tabs button.on { color: var(--ink); }
+/* Log: the main tab, in the middle, baby blue (the reverse of the dark app) and raised above the bar. */
+.tabs .tab-main { color: var(--ink); font-weight: 800; font-size: 13px; overflow: visible; }
+.tabs .tab-disc { display: grid; place-items: center; width: 56px; height: 56px; margin-top: -26px; border-radius: 50%;
+  background: var(--log); color: var(--log-ink); border: 4px solid var(--bg); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+.tabs .tab-main .ti { width: 27px; height: 27px; stroke-width: 2.2; }
+.tabs .tab-main.on .tab-disc { box-shadow: 0 0 0 2px var(--log), 0 4px 16px color-mix(in srgb, var(--log) 55%, transparent); }
+.tabs .tab-main:active .tab-disc { transform: scale(0.95); }
 .badge { background: var(--warn); color: #1b1300; border-radius: 999px; font-size: 11px; padding: 1px 6px; font-weight: 800; }
 
 .toast {

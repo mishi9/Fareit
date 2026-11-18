@@ -1,7 +1,7 @@
 // Earnings: a private notebook of what a driver makes across platforms (Grab, TADA, Gojek, Zig…).
 // Today at a glance (total after costs, jobs, hours on shift, S$/hour, by platform), a one-tap
 // shift timer, a daily goal, and suggestions from the driver's own history. Everything typed here
-// stays on this phone. Grab jobs saved with Got a job or Est. show up here automatically.
+// stays on this phone. Grab jobs saved with Got a job or Log show up here automatically.
 import * as db from './db.js';
 import { nightOf } from './daypattern.js';
 import { myLabTrips } from './lab.js';
@@ -30,7 +30,7 @@ const save = () => db.setKV(KEY, e.data);
 // estimates: 00:00-05:59 counts as the night before).
 const dayKey = (ts) => { const d = nightOf(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 
-// Everything earned: what was typed here, plus Grab jobs logged with Got a job / Est.
+// Everything earned: what was typed here, plus Grab jobs logged with Got a job / Log
 export function allJobs() {
   const typed = e.data.entries.filter((x) => x.kind === 'job');
   const grab = myLabTrips().filter((t) => t.earned > 0 && Number.isFinite(t.ts))

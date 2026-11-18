@@ -329,7 +329,7 @@ export function renderBands() {
       ? `From all trips, closest counting most: ${b0.nearHour} within 3 km and 1½ h of now; ${clText}.`
       : `Nothing within 3 km and 1½ h yet, so leaning on the closest available: ${clText}.`;
   const word = { good: 'Above', normal: 'Normal', bad: 'Below', event: 'Event' };
-  // At a glance: where, the three prices, and the latest job. How it's worked out is on Est.
+  // At a glance: where, the three prices, and the latest job. How it's worked out is on Log.
   void basis;
   box.innerHTML = `
     <div class="band-head">Earn now · ${place ? `<b>${place}</b>` : 'all areas'} · ${at}</div>

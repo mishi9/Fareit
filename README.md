@@ -84,7 +84,7 @@ A private notebook for drivers on several platforms (Grab, TADA, Gojek, Zig, Ryd
 - **Today at a glance:** total after costs, jobs, hours on shift, **S$/hour** (after the first hour), split by platform. The day runs 06:00 to 06:00, so a night shift past midnight stays in one day.
 - **Start shift / End shift** (one tap). Adding the first earning starts a shift on its own if none is running.
 - **Quick add:** pick the platform (remembered), the amount, optionally km. **+ Cost** for fuel / charging, car rental, parking, other.
-- **Grab jobs from Got a job / Est. appear automatically** (no double entry).
+- **Grab jobs from Got a job / Log appear automatically** (no double entry).
 - **Daily goal** with progress and hours to go at today's pace.
 - **Suggestions** from the last 4 weeks: best platform per job and per km, best and slowest hours, this week vs last.
 - This week and month, per platform; **Download (CSV)**.
@@ -132,7 +132,7 @@ Live data is fetched by the server at most every 2 minutes and shared by every p
 
 ## Got a job (Radar)
 
-A full trip, at the job's own time and pickup area: **drop-off** (area, postal code or address, routed with OneMap for the distance; plain km also works), **paid by passenger** and **you earned**, plus Normal / Surge ↑ / Airport. Like an Est. trip, the estimate is recorded before saving (an honest test), then it teaches the fare, Grab's cut and "now" for every driver. The drop-off name stays on the phone; only the km is shared.
+A full trip, at the job's own time and pickup area: **drop-off** (area, postal code or address, routed with OneMap for the distance; plain km also works), **paid by passenger** and **you earned**, plus Normal / Surge ↑ / Airport. Like a Log trip, the estimate is recorded before saving (an honest test), then it teaches the fare, Grab's cut and "now" for every driver. The drop-off name stays on the phone; only the km is shared.
 
 ## Likely surging nearby
 
