@@ -181,9 +181,9 @@ export async function buildLab(root) {
         <span><span class="log-n">1</span> Trip km</span>
         <span><span class="log-n">2</span> Passenger paid · You earned</span>
         <span class="adv-h">Advanced only:</span>
-        <span class="adv"><span class="log-n sm">A</span> Trip min (from pickup)</span>
-        <span class="adv"><span class="log-n sm">B</span> Card min (job card total)</span>
-        <span class="adv"><span class="log-n sm">C</span> Km to pickup</span>
+        <span class="adv"><span class="log-n sm">A</span> Trip Mins (from pickup)</span>
+        <span class="adv"><span class="log-n sm">B</span> Est. Total Mins (job card, includes your drive there)</span>
+        <span class="adv"><span class="log-n sm">C</span> Dist. to Pick Up (km)</span>
       </div>
       <div class="log-guide-shots">${GUIDE.map((g) => `
         <figure class="log-shot"><div class="log-shot-img"><img src="${g.src}" alt="${g.title}" loading="lazy">${g.marks.map((m) => `<span class="log-n${/[ABC]/.test(m.k) ? ' sm' : ''}" style="left:${m.x}%;top:${m.y}%">${m.k}</span>`).join('')}</div>
@@ -196,14 +196,14 @@ export async function buildLab(root) {
         <input id="lab-km" class="log-big" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 8.4"></div></div>
     <fieldset id="lab-adv" class="log-adv" hidden><legend>Optional</legend>
       <div class="row3">
-        <div class="field"><label for="lab-min"><span class="log-n sm">A</span> Trip min</label>
+        <div class="field"><label for="lab-min"><span class="log-n sm">A</span> Trip Mins</label>
           <input id="lab-min" type="number" inputmode="decimal" step="1" min="0"></div>
-        <div class="field"><label for="lab-cardmin"><span class="log-n sm">B</span> Card min</label>
+        <div class="field"><label for="lab-cardmin"><span class="log-n sm">B</span> Est. Mins</label>
           <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0"></div>
-        <div class="field"><label for="lab-pickupkm"><span class="log-n sm">C</span> Km to pickup</label>
+        <div class="field"><label for="lab-pickupkm"><span class="log-n sm">C</span> Dist. to PU</label>
           <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0"></div>
       </div>
-      <p class="hint">Fill in what you have. Trip min is from pickup; card min includes your drive there.</p>
+      <p class="hint">Fill in what you have. Trip Mins is from pickup; Est. Mins (job card total) includes your drive there.</p>
     </fieldset>
     <div id="lab-surge" class="seg g3">
       <button type="button" data-v="normal">Normal</button>

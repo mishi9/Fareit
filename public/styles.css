@@ -572,3 +572,4 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .log-guide-key .adv-h { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
 .log-shot-img .log-n, .log-shot-img .log-n.sm { width: 26px; height: 26px; font-size: 13px; }
 .log-guide-key > span:not(.adv-h) { display: grid; grid-template-columns: 26px 1fr; flex-wrap: nowrap; }
+.log-guide-key .adv-h { color: var(--warn); font-weight: 800; }
