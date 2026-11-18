@@ -578,7 +578,9 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 /* App shell: the page itself never scrolls, so the header and the tab bar stay put on every tab.
    Only the middle (main) scrolls. On the iPhone Home Screen app the height is the screen's own
    (--app-h, set in index.html), because the height the iPhone reports there is too short. */
-html, body { overflow: hidden; }
+/* No overflow clipping on html / body: the iPhone clips that to its (too short) viewport, which cut
+   off the tab labels. The body is fixed, so the page still can't scroll. */
+html, body, body.sheet-open { overflow: visible; }
 body { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
 .ios-app body { bottom: auto; height: var(--app-h, 100%); }
 .top { position: relative; flex: none; }
