@@ -182,7 +182,7 @@ main {
    the screen between the header and the tabs, and the thumb area is pushed to the bottom. */
 #view-window:not([hidden]) {
   display: flex; flex-direction: column; gap: 12px;
-  min-height: calc(100dvh - var(--top-h, 78px) - 88px - env(safe-area-inset-bottom, 0px));
+  min-height: calc(100dvh - var(--top-h, 78px) - 106px - env(safe-area-inset-bottom, 0px));
 }
 #view-window .thumb { margin-top: auto; display: grid; gap: 12px; }
 #view-window .group { gap: 6px; }
@@ -576,3 +576,10 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 
 
 .mono-s { font-family: var(--mono); font-size: 11px; font-weight: 600; text-align: right; }
+
+/* Tab bar: part of the page, stuck to the bottom of the screen. The page is at least one screen
+   tall, so on a short page the bar still sits at the very bottom; on a long page it sticks there
+   while you scroll. (A fixed bar moved around on the iPhone Home Screen app.) */
+body { min-height: 100vh; min-height: 100lvh; display: flex; flex-direction: column; }
+main { flex: 1 0 auto; width: 100%; padding-bottom: 36px; }
+.tabs { position: sticky; bottom: 0; left: auto; right: auto; }
