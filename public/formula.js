@@ -307,6 +307,8 @@ const kmApart = (a, b) => {
 // about 3 times as much as one from last week at the same hour, fading over the next hours, so
 // the latest entry leans on the estimate without taking it over.
 const RECENT_H = 3;
+// The "just now" boost is local: only jobs within NEAR_KM of you get it, so fresh surge in one
+// area (e.g. River Valley) doesn't light up another (Toa Payoh) that has no jobs of its own.
 const recentBoost = (ageMin) => (ageMin >= 0 && ageMin <= RECENT_H * 60 ? 1 + 2 * Math.exp(-ageMin / 45) : 1);
 
 // Distance: with a band, trips in its range count fully and others less the further they are
@@ -365,7 +367,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     const ageMin = (ts - t.ts) / 60000;
     // Same kind of night (e.g. Friday and Saturday nights) counts fully; another kind less.
     const sameDay = t.base || dayType(t.ts) === kind ? 1 : OTHER_DAY_WEIGHT;
-    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * recentBoost(ageMin) * bandWeight(t.km, band) * sameDay * sameWeather(t, opts.raining);
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * (d <= NEAR_KM ? recentBoost(ageMin) : 1) * bandWeight(t.km, band) * sameDay * sameWeather(t, opts.raining);
     items.push({ t, d, r, g, ageMin, x });
   }
   // No other single driver outweighs everyone else combined (at least DRIVER_CAP trips' worth is

@@ -65,6 +65,8 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
+**Fresh jobs are local.** A job from the last few minutes counts up to 3× more, but only within 3 km of you. Jobs further away still count by distance (about a fifth at 6 km), without the boost, so a surge in River Valley doesn't show as surge in Toa Payoh.
+
 ## Days and nights
 
 The header shows the date and weekday, with **(PH)** or **(PH Eve)** on public holidays and the day before.

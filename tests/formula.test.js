@@ -698,3 +698,16 @@ test('green arrow test: jobs logged with and without the arrow, each vs the norm
   assert.ok(Math.abs(a.logged.none.lift) < 0.03);
   assert.deepEqual([a.older.arrow.n, a.older.none.n], [1, 1], 'old Surge / Normal tags counted apart');
 });
+
+test('fresh surge in one area does not light up another 6 km away (the "just now" boost is local)', async () => {
+  const { timeOfDay } = await import('../public/formula.js');
+  const now = Date.parse('2026-11-19T22:00:00+08:00');
+  const rv = { lat: 1.2935, lng: 103.8370 }; // River Valley
+  const tpy = { lat: 1.3343, lng: 103.8563 }; // Toa Payoh, ~5 km away
+  const older = Array.from({ length: 8 }, (_, i) => make(8 + i, 15 + i, { ts: now - (7 + i) * 86400000, lat: tpy.lat, lng: tpy.lng }));
+  const fresh = Array.from({ length: 4 }, (_, i) => { const t = make(9 + i, 18, { ts: now - (5 + i * 3) * 60000, lat: rv.lat, lng: rv.lng }); return { ...t, actual: Math.round(t.actual * 1.5 * 100) / 100 }; });
+  const atRv = timeOfDay([...older, ...fresh], now, rv).lift;
+  const atTpy = timeOfDay([...older, ...fresh], now, tpy).lift;
+  assert.ok(atRv > 0.2, `River Valley sees its surge: ${atRv}`);
+  assert.ok(atTpy < 0.12, `Toa Payoh barely moves: ${atTpy}`);
+});
