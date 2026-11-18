@@ -550,3 +550,25 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .row3 label { font-size: 12px; }
 .log-clear { justify-self: start; }
+
+/* Log guide (folded) and the A B C marks */
+.log-n.sm { width: 22px; height: 22px; margin: 0; font-size: 12px; display: inline-grid; vertical-align: -5px; }
+.log-adv { margin: 0; min-width: 0; }
+.log-adv legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.log-adv label { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.log-guide { border: 1px solid var(--line); border-radius: 12px; padding: 4px 12px; background: var(--surface); }
+.log-guide summary { color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px 0; }
+.log-guide-key { display: grid; gap: 6px; font-size: 14px; margin: 4px 0 10px; }
+.log-guide-key > span { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.log-guide-key .log-n:not(.sm) { width: 24px; height: 24px; margin: 0; font-size: 13px; }
+.log-guide-key .adv { color: var(--muted); }
+.log-guide-shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-bottom: 8px; }
+.log-shot { margin: 0; display: grid; gap: 4px; }
+.log-shot-img { position: relative; }
+.log-shot-img img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); }
+.log-shot-img .log-n { position: absolute; transform: translate(-50%, -50%); margin: 0; box-shadow: 0 0 0 2px var(--bg); }
+.log-shot figcaption { font-size: 12px; color: var(--muted); text-align: center; }
+.log-shot figcaption b { color: var(--ink); }
+.log-guide-key .adv-h { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
+.log-shot-img .log-n, .log-shot-img .log-n.sm { width: 26px; height: 26px; font-size: 13px; }
+.log-guide-key > span:not(.adv-h) { display: grid; grid-template-columns: 26px 1fr; flex-wrap: nowrap; }

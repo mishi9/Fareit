@@ -139,6 +139,15 @@ export function syncLab() {
   return syncing;
 }
 
+// The folded guide: one screenshot per place the numbers come from. Each mark is a circle on the
+// photo (x, y in % of the photo): 1 and 2 for the form's steps, A B C for Advanced.
+// Placeholders for now; marks are added when the real screenshots are in.
+const GUIDE = [
+  { src: 'guide/log-1.svg', title: 'Photo 1', note: 'example marks', marks: [{ k: '1', x: 30, y: 20 }, { k: 'B', x: 70, y: 20 }, { k: 'C', x: 50, y: 75 }] },
+  { src: 'guide/log-2.svg', title: 'Photo 2', note: 'example marks', marks: [{ k: '2', x: 50, y: 25 }] },
+  { src: 'guide/log-3.svg', title: 'Photo 3', note: 'example marks', marks: [{ k: 'A', x: 50, y: 25 }] },
+];
+
 export async function buildLab(root) {
   lab.root = root;
   lab.trips = (await db.getKV(KEY)) || [];
@@ -167,20 +176,35 @@ export async function buildLab(root) {
         <button type="button" data-v="advanced">Advanced</button>
       </div></div>
 
+    <details class="log-guide" id="lab-guide"><summary>Where do I find these numbers?</summary>
+      <div class="log-guide-key">
+        <span><span class="log-n">1</span> Trip km</span>
+        <span><span class="log-n">2</span> Passenger paid · You earned</span>
+        <span class="adv-h">Advanced only:</span>
+        <span class="adv"><span class="log-n sm">A</span> Trip min (from pickup)</span>
+        <span class="adv"><span class="log-n sm">B</span> Card min (job card total)</span>
+        <span class="adv"><span class="log-n sm">C</span> Km to pickup</span>
+      </div>
+      <div class="log-guide-shots">${GUIDE.map((g) => `
+        <figure class="log-shot"><div class="log-shot-img"><img src="${g.src}" alt="${g.title}" loading="lazy">${g.marks.map((m) => `<span class="log-n${/[ABC]/.test(m.k) ? ' sm' : ''}" style="left:${m.x}%;top:${m.y}%">${m.k}</span>`).join('')}</div>
+          <figcaption><b>${g.title}</b>${g.note ? ` · ${g.note}` : ''}</figcaption></figure>`).join('')}
+      </div>
+    </details>
+
     <div class="log-step"><span class="log-n">1</span>
       <div class="field"><label for="lab-km" class="log-label"><b>Trip km</b> <span class="log-from">from PICK UP only</span></label>
         <input id="lab-km" class="log-big" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 8.4"></div></div>
-    <div id="lab-adv" class="log-adv" hidden>
+    <fieldset id="lab-adv" class="log-adv" hidden><legend>Optional</legend>
       <div class="row3">
-        <div class="field"><label for="lab-min">Trip min</label>
-          <input id="lab-min" type="number" inputmode="decimal" step="1" min="0" placeholder="optional"></div>
-        <div class="field"><label for="lab-cardmin">Card total min</label>
-          <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0" placeholder="optional"></div>
-        <div class="field"><label for="lab-pickupkm">Km to pickup</label>
-          <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0" placeholder="optional"></div>
+        <div class="field"><label for="lab-min"><span class="log-n sm">A</span> Trip min</label>
+          <input id="lab-min" type="number" inputmode="decimal" step="1" min="0"></div>
+        <div class="field"><label for="lab-cardmin"><span class="log-n sm">B</span> Card min</label>
+          <input id="lab-cardmin" type="number" inputmode="decimal" step="1" min="0"></div>
+        <div class="field"><label for="lab-pickupkm"><span class="log-n sm">C</span> Km to pickup</label>
+          <input id="lab-pickupkm" type="number" inputmode="decimal" step="0.01" min="0"></div>
       </div>
-      <p class="hint">All optional: fill in what you have. Trip min is from pickup; card total includes your drive there.</p>
-    </div>
+      <p class="hint">Fill in what you have. Trip min is from pickup; card min includes your drive there.</p>
+    </fieldset>
     <div id="lab-surge" class="seg g3">
       <button type="button" data-v="normal">Normal</button>
       <button type="button" data-v="surge">Surge ↑</button>
