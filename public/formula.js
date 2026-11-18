@@ -309,6 +309,8 @@ const kmApart = (a, b) => {
 const RECENT_H = 3;
 // The "just now" boost is local: only jobs within NEAR_KM of you get it, so fresh surge in one
 // area (e.g. River Valley) doesn't light up another (Toa Payoh) that has no jobs of its own.
+export const TUNE = { freshNeeded: 2, rangeBlendUntil: 3 };
+export const FRESH_MIN = 60; // the boost is strongest within the hour (it fades over 45 min)
 const recentBoost = (ageMin) => (ageMin >= 0 && ageMin <= RECENT_H * 60 ? 1 + 2 * Math.exp(-ageMin / 45) : 1);
 
 // Distance: with a band, trips in its range count fully and others less the further they are
@@ -367,9 +369,13 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     const ageMin = (ts - t.ts) / 60000;
     // Same kind of night (e.g. Friday and Saturday nights) counts fully; another kind less.
     const sameDay = t.base || dayType(t.ts) === kind ? 1 : OTHER_DAY_WEIGHT;
-    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * (d <= NEAR_KM ? recentBoost(ageMin) : 1) * bandWeight(t.km, band) * sameDay * sameWeather(t, opts.raining);
-    items.push({ t, d, r, g, ageMin, x });
+    const x = Math.exp(-(g * g) / (2 * HOUR_SD * HOUR_SD)) * place * bandWeight(t.km, band) * sameDay * sameWeather(t, opts.raining);
+    items.push({ t, d, r, g, ageMin, x, boost: d <= NEAR_KM ? recentBoost(ageMin) : 1 });
   }
+  // The "just now" boost needs TUNE.freshNeeded jobs within NEAR_KM in the last FRESH_MIN minutes:
+  // one job alone (one driver, or one typo) counts like any other job and can't flip Radar.
+  const fresh = items.filter((it) => !it.t.base && it.d <= NEAR_KM && it.ageMin >= 0 && it.ageMin <= FRESH_MIN).length;
+  for (const it of items) it.x *= fresh >= TUNE.freshNeeded ? it.boost : 1;
   // No other single driver outweighs everyone else combined (at least DRIVER_CAP trips' worth is
   // always allowed). Your own trips and the base trip aren't capped on your phone.
   // Drivers with a good track record (e.g. on a shift, 3-4 jobs an hour in one zone) may count up
@@ -451,7 +457,11 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
     if (!rs.length) return { lo: SURGE_PRICE_MIN, hi: 0.4, guess: true };
     const xs = rs.map((x) => Math.exp(x.r) - 1).sort((a, b) => a - b);
     const q = (p) => xs[Math.min(xs.length - 1, Math.max(0, Math.round(p * (xs.length - 1))))];
-    return xs.length >= 5 ? { lo: q(0.1), hi: q(0.9) } : { lo: xs[0], hi: xs[xs.length - 1] };
+    const got = xs.length >= 5 ? { lo: q(0.1), hi: q(0.9) } : { lo: xs[0], hi: xs[xs.length - 1] };
+    // Until there are TUNE.rangeBlendUntil surge jobs, blend with the starting range (+15% to +40%),
+    // so one job nudges it instead of replacing it.
+    const k = Math.min(1, xs.length / Math.max(1, TUNE.rangeBlendUntil));
+    return { lo: SURGE_PRICE_MIN * (1 - k) + got.lo * k, hi: 0.4 * (1 - k) + got.hi * k };
   })();
   if (!rs.length) return { lift: startLift, n: 0, near: 0, guess: true, range };
   const overall = rs.reduce((s, x) => s + x.r, 0) / rs.length;

@@ -680,7 +680,8 @@ test('test: surge is told by the price, not the green arrow', async () => {
   // Surge on the cards: the range surge jobs have paid.
   const s = surgeLift(all, at('2026-11-20T18:00:00+08:00'));
   assert.equal(s.n, 2);
-  assert.ok(s.range.lo > 0.3 && s.range.lo < 0.4 && s.range.hi > 0.45 && s.range.hi < 0.55, JSON.stringify(s.range));
+  // 2 of 3: blended two-thirds toward +35%..+50% from the starting +15%..+40%
+  assert.ok(s.range.lo > 0.25 && s.range.lo < 0.3 && s.range.hi > 0.44 && s.range.hi < 0.48, JSON.stringify(s.range));
   // None yet: a starting range of +15% to +40%.
   assert.deepEqual(surgeLift(plain, Date.now()).range, { lo: 0.15, hi: 0.4, guess: true });
 });
