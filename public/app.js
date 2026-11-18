@@ -5,10 +5,12 @@ const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
-import { buildLab, syncLab } from './lab.js';
+import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv } from './lab.js';
+import { clearMyQueue } from './queue.js';
+import { locationState, onMove } from './where.js';
 import { buildInfo, showInfo, renderOldJobs } from './info.js';
 import { holidayTag } from './daypattern.js';
-import { ready, isOwner, isOwnerPhone, hideWorkings, claimOwner, ownerApi, inviteLink } from './access.js';
+import { ready, isOwner, isOwnerPhone, hideWorkings, claimOwner, ownerApi, inviteLink, accessKind } from './access.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -129,6 +131,7 @@ function show(view) {
   // Reconcile (older jobs waiting for a fare) is reached from Info, so Info stays lit.
   for (const t of $$('.tabs button')) t.classList.toggle('on', t.dataset.view === (view === 'reconcile' ? 'info' : view));
   if (view === 'info') showInfo();
+  if (view === 'settings') renderSettingsLive();
   if (location.hash !== `#${view}`) history.replaceState(null, '', `#${view}`);
   if (view === 'reconcile') { if (!state.form) renderReconList(); }
   if (view === 'trips') renderTrips();
@@ -737,123 +740,89 @@ async function retryDistances() {
 }
 
 // ---------- settings ----------
-const settingInputs = {
-  'st-minfare': ['minFare', 1],
-  'st-base': ['base', 1],
-  'st-km': ['perKm', 1],
-  'st-min': ['perMin', 1],
-};
-
-function buildSettings() {
-  fillSettings();
-  $('#settings-form').addEventListener('change', onSettingsChange);
-  $('#settings-form').addEventListener('submit', (e) => e.preventDefault());
-  $('#st-reset').addEventListener('click', async () => {
-    state.settings = mergeSettings();
-    await db.setKV('settings', state.settings);
-    fillSettings();
-    settingsMsg('Starting values restored.');
-  });
-  $('#st-export').addEventListener('click', exportData);
-  buildOwner();
-  $('#st-import').addEventListener('change', importData);
-  let armed = false;
-  let disarm;
-  $('#st-clear').addEventListener('click', async (e) => {
-    const b = e.currentTarget;
-    if (!armed) {
-      armed = true;
-      b.textContent = 'Tap again to delete every trip';
-      disarm = setTimeout(() => { armed = false; b.textContent = 'Delete all trips'; }, 4000);
-      return;
-    }
-    clearTimeout(disarm);
-    armed = false;
-    b.textContent = 'Delete all trips';
-    await db.clearTrips();
-    state.trips = [];
-    resetWindow();
-    renderBadge();
-    settingsMsg('All trips deleted.');
-  });
-}
-
-function fillSettings() {
-  for (const [id, [key, scale]] of Object.entries(settingInputs)) $(`#${id}`).value = +(state.settings[key] * scale).toFixed(2);
-  $('#st-key').value = state.apiKey;
-}
-
 function settingsMsg(text, isError = false) {
   const m = $('#st-msg');
   m.textContent = text;
   m.classList.toggle('err', isError);
 }
 
-async function onSettingsChange(e) {
-  if (['st-import', 'st-owner-code', 'st-beta-code'].includes(e.target.id)) return; // codes aren't settings
-  if (e.target.id === 'st-key') {
-    state.apiKey = e.target.value.trim();
-    await db.setKV('apiKey', state.apiKey);
-    checkStatus();
-    settingsMsg('Access key saved.');
-    return;
-  }
-  const next = mergeSettings(state.settings);
-  for (const [id, [key, scale]] of Object.entries(settingInputs)) {
-    const v = parseFloat($(`#${id}`).value);
-    if (Number.isFinite(v) && v >= 0) next[key] = v / scale;
-  }
-  state.settings = next;
-  await db.setKV('settings', next);
-  settingsMsg('Saved.');
+function buildSettings() {
+  $('#settings-form').addEventListener('submit', (e) => e.preventDefault());
+  buildOwner();
+  // This phone
+  const owner = isOwnerPhone();
+  $('#st-access').textContent = owner ? 'Owner' : accessKind() === 'driver' ? 'Tester (invited)' : 'Open';
+  // Version: from the app's offline worker file (works online), else from the offline cache.
+  fetch('sw.js', { cache: 'no-store' }).then((r) => r.text()).then((t) => /agaration-v(\d+)/.exec(t)[1])
+    .catch(() => caches.keys().then((ks) => ks.map((k) => /^agaration-v(\d+)$/.exec(k)).filter(Boolean).map((m) => m[1]).sort((a, b) => b - a)[0]))
+    .then((v) => { $('#st-ver').textContent = v ? `v${v}` : '—'; }).catch(() => {});
+  // Your trips
+  $('#st-download').addEventListener('click', downloadMine);
+  const rm = $('#st-remove-mine');
+  rm.hidden = owner; // the owner's trips are the core data; testers can take theirs out
+  let armed = false;
+  rm.addEventListener('click', async () => {
+    if (!armed) { armed = true; rm.textContent = 'Tap again: removes them for everyone'; setTimeout(() => { armed = false; rm.textContent = 'Remove all my trips'; }, 4000); return; }
+    rm.disabled = true;
+    try {
+      const res = await fetch('/api/access/purge-mine', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Couldn’t reach the server. Try again when connected.');
+      await clearMyLabTrips();
+      await clearMyQueue();
+      await db.clearTrips();
+      state.trips = [];
+      renderBadge();
+      settingsMsg('Removed all your trips, from this phone and the server.');
+      renderSettingsLive();
+    } catch (e) { settingsMsg(e.message, true); }
+    rm.disabled = false;
+    armed = false;
+    rm.textContent = 'Remove all my trips';
+  });
+  // Owner shortcuts
+  $('#st-add-event').addEventListener('click', () => { show('info'); setTimeout(() => document.querySelector('#ev-open')?.click(), 50); });
+  $('#st-export-all').addEventListener('click', () => exportAllCsv());
+  renderSettingsLive();
+  onMove(() => { if (state.view === 'settings') renderSettingsLive(); });
 }
 
-async function exportData() {
-  const payload = JSON.stringify({ app: 'fareit', version: 1, exportedAt: new Date().toISOString(), settings: state.settings, trips: state.trips }, null, 2);
-  const name = `fareit-${new Date().toISOString().slice(0, 10)}.json`;
-  const file = new File([payload], name, { type: 'application/json' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: 'Agaration trips' });
-      settingsMsg(`Exported ${state.trips.length} trips.`);
-      return;
-    } catch (e) {
-      if (e.name === 'AbortError') return;
-    }
+// The parts that change: location, how many trips.
+function renderSettingsLive() {
+  const st = locationState();
+  $('#st-loc').textContent = st === 'ok' ? 'On' : st === 'denied' ? 'Off' : 'Waiting…';
+  const help = $('#st-loc-help');
+  help.hidden = st !== 'denied';
+  help.textContent = 'Location is off, so Radar uses all areas. To turn it on: iPhone Settings → Privacy & Security → Location Services → Safari Websites (or the Agaration app) → While Using.';
+  const mine = myLabTrips();
+  const last = mine.length ? new Date(Math.max(...mine.map((t) => t.ts))) : null;
+  $('#st-mine').textContent = mine.length
+    ? `${mine.length} trip${mine.length === 1 ? '' : 's'} logged on this phone · last ${last.toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}, ${last.toLocaleTimeString('en-SG', { hour: 'numeric', minute: '2-digit' })}`
+    : 'No trips logged on this phone yet.';
+}
+
+async function downloadMine() {
+  const mine = myLabTrips().slice().sort((a, b) => a.ts - b.ts);
+  if (!mine.length) { settingsMsg('No trips to download yet.'); return; }
+  const esc = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+  const rows = [['date', 'time', 'km', 'paid_by_passenger', 'you_earned', 'pricing', 'drop_off']];
+  for (const t of mine) {
+    const d = new Date(t.ts);
+    rows.push([d.toLocaleDateString('en-CA'), d.toTimeString().slice(0, 5), t.km, t.actual ?? '', t.earned ?? '', t.surge, t.dropLabel || '']);
   }
-  const url = URL.createObjectURL(file);
+  const name = `my-agaration-trips-${new Date().toISOString().slice(0, 10)}.csv`;
+  const file = new File([rows.map((r) => r.map(esc).join(',')).join('\n')], name, { type: 'text/csv' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
   const a = document.createElement('a');
-  a.href = url;
+  a.href = URL.createObjectURL(file);
   a.download = name;
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-  settingsMsg(`Exported ${state.trips.length} trips.`);
-}
-
-async function importData(e) {
-  const file = e.target.files && e.target.files[0];
-  e.target.value = '';
-  if (!file) return;
-  try {
-    const data = JSON.parse(await file.text());
-    if (data.app !== 'fareit' || !Array.isArray(data.trips)) throw new Error('This file isn’t an Agaration (or Fareit) export.');
-    const valid = data.trips.filter((t) => t && typeof t.id === 'string' && Number.isFinite(t.ts));
-    const byId = new Map(state.trips.map((t) => [t.id, t]));
-    for (const t of valid) byId.set(t.id, t);
-    state.trips = [...byId.values()];
-    await db.putTrips(valid);
-    if (data.settings) {
-      state.settings = mergeSettings(data.settings);
-      await db.setKV('settings', state.settings);
-      fillSettings();
-    }
-    renderBadge();
-    settingsMsg(`Imported ${valid.length} trips.`);
-  } catch (err) {
-    settingsMsg(err instanceof SyntaxError ? 'That file couldn’t be read as JSON.' : err.message, true);
-  }
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  settingsMsg(`Downloaded ${mine.length} trips.`);
 }
 
 // ---------- keep the mounted screen awake on the Window tab ----------
@@ -874,13 +843,9 @@ async function keepAwake() {
 // ---------- owner: workings and invites ----------
 function buildOwner() {
   const owner = isOwnerPhone();
-  $('#st-owner-unlock').hidden = owner;
+  $('#st-owner-box').hidden = owner;
   $('#st-owner-on').hidden = !owner;
-  $('#st-owner-note').textContent = !owner
-    ? 'For the app\'s owner: shows how the estimate is worked out, and lets testers in.'
-    : isOwner() ? 'Owner mode is on: the Est. tab shows how the estimate is worked out.'
-    : 'Owner mode is on, with the workings hidden: you see what testers see.';
-  $('#st-owner-workings').textContent = isOwner() ? 'Hide the workings' : 'Show the workings';
+  $('#st-owner-workings').textContent = isOwner() ? 'Hide the workings (see what testers see)' : 'Show the workings';
   $('#st-owner').addEventListener('click', async () => {
     const btn = $('#st-owner');
     btn.disabled = true;
@@ -898,6 +863,13 @@ function buildOwner() {
     const box = $('#st-invites');
     try {
       const { invites } = await ownerApi('/api/invites');
+      // At a glance: who's in, who's waiting, what's come in, who to check.
+      const inUse = invites.filter((i) => i.used_at && !i.revoked).length;
+      const waiting = invites.filter((i) => !i.used_at && !i.revoked && !(i.expires_at && i.expires_at < Date.now())).length;
+      const trips = invites.reduce((n, i) => n + (i.trips || 0), 0);
+      const check = invites.filter((i) => !i.revoked && i.checked >= 5 && i.far_off / i.checked >= 0.25).length;
+      $('#st-owner-summary').innerHTML = [[inUse, 'testers in'], [waiting, 'invites waiting'], [trips, 'trips from testers'], [check, 'drivers to check']]
+        .map(([v, k], i) => `<div class="tile${i === 3 && v ? ' warn' : ''}"><span class="v">${v}</span><span class="k">${k}</span></div>`).join('');
       box.replaceChildren(...invites.map((inv) => {
         const row = document.createElement('div');
         row.className = `invite-row${inv.revoked ? ' off' : ''}`;

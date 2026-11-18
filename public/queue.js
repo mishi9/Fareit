@@ -79,6 +79,12 @@ async function post(path, body) {
 let syncing = null;
 // Around this hour, from every driver's readings (Info tab).
 export const queueNow = () => queueSummary(all(), Date.now());
+// Settings: forget this phone's own readings (the server copies are removed separately).
+export async function clearMyQueue() {
+  q.mine = [];
+  await db.setKV(KEY, []);
+  if (q.root) render();
+}
 export const queueWaitNow = () => queueWait(all(), Date.now());
 // "07:19 (12 min ago)", or a day for older readings.
 export function updatedText(at, now = Date.now()) {

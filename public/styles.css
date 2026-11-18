@@ -473,3 +473,15 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
   50% { box-shadow: 0 0 9px 3px color-mix(in srgb, var(--go) 75%, transparent); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+/* Settings */
+.st-rows { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.st-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--surface); font-size: 15px; }
+.st-row + .st-row { border-top: 1px solid var(--line); }
+.st-row span { color: var(--muted); }
+.st-row b { text-align: right; }
+.st-list { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; display: grid; gap: 4px; }
+.st-owner-unlock summary { color: var(--muted); font-size: 14px; cursor: pointer; padding: 6px 0; }
+.st-owner-unlock .row2 { margin-top: 8px; }
+.tile.warn { border-color: var(--stop); }
+.tile.warn .v { color: var(--stop); }

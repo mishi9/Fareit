@@ -147,50 +147,17 @@
 
   <section id="view-settings" class="view" hidden>
     <form id="settings-form" class="stack" novalidate>
-      <h2>Shared pool</h2>
-      <p class="note">Everyone learns from the pool, with no accounts. Every reconciled job goes in as: time to the nearest 5 minutes, distance band, km and minutes, fare, surge / normal / bad if you tagged it, taken or cancelled, and pickup and drop-off rounded to about 1 km. Addresses, postal codes and names never leave this phone.</p>
-
-      <h2>Take-home starting point</h2>
-      <p class="note">What the card shows is already your take-home, so these are in take-home terms. They're estimates, and reconciled jobs from you and the shared pool correct them automatically, so you rarely need to touch them.</p>
-      <div class="row2">
-        <div class="field">
-          <label for="st-minfare">Minimum fare (S$)</label>
-          <input id="st-minfare" type="number" inputmode="decimal" min="0" step="0.01">
-        </div>
-      </div>
-      <div class="row2">
-        <div class="field"><label for="st-base">Base (S$)</label><input id="st-base" type="number" inputmode="decimal" step="0.01" min="0"></div>
-        <div class="field"><label for="st-km">Per km (S$)</label><input id="st-km" type="number" inputmode="decimal" step="0.01" min="0"></div>
-        <div class="field"><label for="st-min">Per minute (S$)</label><input id="st-min" type="number" inputmode="decimal" step="0.01" min="0"></div>
-      </div>
-      <button type="button" class="ghost" id="st-reset">Restore starting values</button>
-
-      <h2>Server</h2>
-      <div class="field">
-        <label for="st-key">Access key</label>
-        <input id="st-key" type="password" autocomplete="off" placeholder="Only if your server asks for one">
-      </div>
-
-      <h2>Your data</h2>
-      <p class="note">Trips are stored on this phone only. Export a copy every week or so.</p>
-      <div class="row2">
-        <button type="button" class="primary" id="st-export">Export trips</button>
-        <label class="button ghost" for="st-import">Import trips</label>
-      </div>
-      <input id="st-import" type="file" accept="application/json,.json" hidden>
-      <button type="button" class="danger" id="st-clear">Delete all trips</button>
-
-      <h2>Owner</h2>
-      <p class="note" id="st-owner-note">For the app's owner: shows how the estimate is worked out, and lets testers in.</p>
-      <div class="row2" id="st-owner-unlock">
-        <div class="field"><label for="st-owner-code">Owner code</label>
-          <input id="st-owner-code" type="text" inputmode="numeric" autocomplete="off" placeholder="Code"></div>
-        <button type="button" class="ghost" id="st-owner">Unlock</button>
-      </div>
+      <!-- Owner: everything to run the test in one place (only on the owner's phone) -->
       <div id="st-owner-on" class="stack" hidden>
+        <h2>Owner</h2>
+        <div id="st-owner-summary" class="tiles"></div>
+        <div class="row2">
+          <button type="button" class="ghost" id="st-add-event">+ Add event</button>
+          <button type="button" class="ghost" id="st-export-all">Export all trips (CSV)</button>
+        </div>
         <button type="button" class="ghost" id="st-owner-workings">Hide the workings</button>
         <h2>Invites</h2>
-        <p class="note">Each link works for 60 minutes after it's first opened, then never again, and only one phone stays in per link: if it's used again in that hour, the newer phone replaces the older one. Send it to one person. Each gets an animal code name so you can tell who sent what. Only you see it.</p>
+        <p class="note">One link per person. It works for 60 min after first opening, on one phone. Each gets an animal code name only you see.</p>
         <div class="row2">
           <div class="field"><label for="st-invite-label">Note (optional, only you see it)</label>
             <input id="st-invite-label" type="text" autocomplete="off" maxlength="40" placeholder="e.g. night shift"></div>
@@ -206,6 +173,38 @@
         </div>
         <div id="st-invites" class="invite-list"></div>
       </div>
+
+      <h2>This phone</h2>
+      <div class="st-rows">
+        <div class="st-row"><span>Access</span><b id="st-access">—</b></div>
+        <div class="st-row"><span>Location</span><b id="st-loc">—</b></div>
+        <div class="st-row"><span>Screen</span><b>Stays on while Radar is open</b></div>
+        <div class="st-row"><span>Version</span><b id="st-ver">—</b></div>
+      </div>
+      <p class="note" id="st-loc-help" hidden></p>
+
+      <h2>Your trips</h2>
+      <p class="note" id="st-mine">—</p>
+      <div class="row2">
+        <button type="button" class="ghost" id="st-download">Download (CSV)</button>
+        <button type="button" class="ghost danger" id="st-remove-mine">Remove all my trips</button>
+      </div>
+
+      <h2>Privacy</h2>
+      <ul class="st-list">
+        <li>No accounts, names or phone numbers.</li>
+        <li>Location is used only while the app is open. Trips keep only the area (about 1 km).</li>
+        <li>Trips are shared anonymously, so every driver's estimates learn from them.</li>
+      </ul>
+
+      <details class="st-owner-unlock" id="st-owner-box">
+        <summary>I'm the owner</summary>
+        <div class="row2" id="st-owner-unlock">
+          <div class="field"><label for="st-owner-code">Owner code</label>
+            <input id="st-owner-code" type="text" inputmode="numeric" autocomplete="off" placeholder="Code"></div>
+          <button type="button" class="ghost" id="st-owner">Unlock</button>
+        </div>
+      </details>
       <p id="st-msg" class="msg" role="status"></p>
     </form>
   </section>

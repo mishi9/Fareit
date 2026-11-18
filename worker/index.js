@@ -35,6 +35,7 @@
 //   GET  /api/invites                         -> { invites }     owner only
 //   POST /api/invites/revoke { token }        -> { revoked }     owner only: the invite and its phone
 //   POST /api/invites/purge { token }         -> { removed }     owner only: delete everything that phone sent
+//   POST /api/access/purge-mine               -> { removed }     a tester removes everything they sent (keeps access)
 //
 // No accounts. Each phone sends a random device id so it can correct its own rows and nobody
 // else's. The pool holds no addresses, names or exact places: pickup and drop are rounded to
@@ -1163,6 +1164,10 @@ async function purgeInvite(request, env) {
   if (error) return error;
   const token = String(body.token || '').toUpperCase().trim();
   if (!TOKEN_RE.test(token)) return json({ error: 'Not an invite.' }, 400);
+  return purgeToken(env, token);
+}
+
+async function purgeToken(env, token) {
   const now = Date.now();
   const of = (table) => env.DB.prepare(`SELECT id, device FROM ${table} WHERE deleted IS NOT 1
     AND device IN (SELECT device FROM phones WHERE who = ?1) LIMIT ${PURGE_MAX}`).bind(token).all();
@@ -1215,7 +1220,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/access/purge-mine', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -1243,6 +1248,11 @@ export default {
         if (url.pathname === '/api/owner/claim') return await claimOwner(request, env);
         if (!who) who = await whoIs(request, env);
         if (url.pathname === '/api/access') return who ? json({ ok: true, kind: who.kind }) : json({ error: 'Not let in.', locked: true }, 401);
+        // A tester takes out everything their phone(s) sent; the owner's data stays (use Remove trips per invite).
+        if (url.pathname === '/api/access/purge-mine') {
+          if (!who || who.kind !== 'driver' || !who.invite) return json({ error: 'Only testers can remove their trips here.' }, 403);
+          return await purgeToken(env, who.invite);
+        }
         if (!who || who.kind !== 'owner') return json({ error: 'Owner only.' }, 403);
         if (url.pathname === '/api/invites/create') return await createInvite(request, env);
         if (url.pathname === '/api/invites/revoke') return await revokeInvite(request, env);

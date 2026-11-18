@@ -352,3 +352,21 @@ test('earned trust: a phone is marked trusted after 10+ checked fares with under
   pulled = (await req('/api/formula?since=0', { key })).body.trips.filter((t) => t.id.startsWith('odd'));
   assert.ok(pulled.length === 12 && pulled.every((t) => !t.tr));
 });
+
+test('a tester can remove everything they sent (and keeps access); the owner cannot use it', async () => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const { token } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  const key = (await req('/api/access/redeem', { body: { token, device: 'tester-phone-9' } })).body.key;
+  const mk = (id) => ({ id, ts: Date.now() - 60000, km: 10, min: 18, erp: 0, paid: 15, earned: 11, surge: 'normal', predicted: 15.2, predicted_earned: 11.1, lat: 1.3, lng: 103.83 });
+  await req('/api/formula', { body: { device: 'tester-app-0009', trips: [mk('mine-0001'), mk('mine-0002')] }, key });
+  await req('/api/formula', { body: { device: 'owner-app-0001', trips: [mk('owner-0001')] }, key: okey });
+  assert.equal((await req('/api/access/purge-mine', { body: {}, key: okey })).status, 403);
+  const r = await req('/api/access/purge-mine', { body: {}, key });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.removed.trips, 2);
+  const after = (await req('/api/formula?since=0', { key: okey })).body.trips;
+  assert.ok(after.filter((t) => t.id.startsWith('mine')).every((t) => t.deleted === 1));
+  assert.ok(after.some((t) => t.id === 'owner-0001' && !t.deleted), "the owner's trips stay");
+  assert.equal((await req('/api/access', { key })).status, 200, 'still let in');
+});

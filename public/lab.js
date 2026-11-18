@@ -825,6 +825,16 @@ function baseCard() {
   return card;
 }
 
+// For Settings: this phone's own trips, removing them, and the owner's full export.
+export const myLabTrips = () => lab.trips;
+export async function clearMyLabTrips() {
+  lab.trips = [];
+  changed();
+  await db.setKV(KEY, []);
+  if (lab.root) renderAll();
+}
+export const exportAllCsv = () => exportCsv();
+
 async function exportCsv() {
   const name = `agaration-trips-${new Date().toISOString().slice(0, 10)}.csv`;
   const file = new File([toCsv(dataset())], name, { type: 'text/csv' });

@@ -78,6 +78,14 @@ The owner's experience is the starting point ("busy +10%, the rest normal"), cou
 - Weekday after-work 18:00–20:00: +10%
 - Everything else (Mon–Tue nights, Thu and Sun nights, public holidays, lunch): normal
 
+## Settings
+
+- **Owner** (owner's phone only, at the top): tiles for testers in, invites waiting, trips from testers and drivers to check; **+ Add event**; **Export all trips (CSV)**; show / hide the workings; invites.
+- **This phone:** access (owner / tester), location (with how to turn it on), screen stays on while Radar is open, version.
+- **Your trips:** how many are logged on this phone, **Download (CSV)** (date, time, km, paid, earned, pricing, drop-off), and for testers **Remove all my trips**, which deletes them from the phone and the server for everyone, keeping access.
+- **Privacy:** what is and isn't collected.
+- **I'm the owner:** the owner code, folded away.
+
 ## Safeguards against wrong or made-up data
 
 The data is shared by every driver, so a typo or a troll mustn't skew everyone's estimates.
