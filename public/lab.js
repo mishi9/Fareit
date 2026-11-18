@@ -191,7 +191,7 @@ export async function buildLab(root) {
       <div class="log-guide-key">
         <span><span class="log-n">1</span> Trip km</span>
         <span><span class="log-n">2</span> Passenger paid · You earned</span>
-        <span class="adv-h">Advanced only:</span>
+        <span class="adv-h">Advanced only (optional):</span>
         <span class="adv"><span class="log-n sm">A</span> Trip Mins (from pickup: B minus the time to pickup)</span>
         <span class="adv"><span class="log-n sm">B</span> Est. Total Mins (job card, includes your drive there)</span>
         <span class="adv"><span class="log-n sm">C</span> Dist. to Pick Up (km)</span>
