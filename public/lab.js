@@ -11,6 +11,7 @@ import { eventsList, onEventsChange, loadEvents } from './events.js';
 import { jbPlace, jbRowsHtml } from './jb.js';
 import { ferryTerminalAt, ferryRowsHtml } from './ferries.js';
 import { loadSurge, surgeNow, surgeBanner } from './surge.js';
+import { loadAlerts, alertsHtml } from './alerts.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
@@ -263,6 +264,10 @@ export function renderBands() {
   const loc = here();
   // At Changi there's no 8-second window (jobs are auto-accepted), so Radar shows the queue
   // (above, from queue.js) and arrivals by terminal instead of the earnings cards.
+  // Urgent from LTA: a major MRT disruption, or a flood alert within 3 km.
+  loadAlerts(renderBands);
+  const alertBox = document.querySelector('#radar-alerts');
+  if (alertBox) { const h = alertsHtml(); alertBox.hidden = !h; alertBox.innerHTML = h; }
   // Likely surging within 3 km (2+ drivers' Surge trips in the last 30 min): first thing on Radar.
   loadSurge(renderBands);
   const surgeBox = document.querySelector('#radar-surge');

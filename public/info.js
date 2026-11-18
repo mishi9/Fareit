@@ -31,8 +31,9 @@ export function buildInfo(root) {
   info.root = root;
   root.innerHTML = `
     <div id="info-old"></div>
-    <section class="stack"><h2>Road incidents</h2><div id="info-incidents"></div></section>
-    <section class="stack"><h2>Expressway travel times</h2><div id="info-travel"></div></section>
+    <div id="info-train"></div>
+    <section class="stack"><h2>Road incidents</h2><div id="info-incidents" class="stack"></div></section>
+    <section class="stack"><h2>Expressway travel times</h2><div id="info-travel" class="stack"></div></section>
     <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
     <section class="stack"><h2>From JB</h2><div id="info-jb" class="stack"></div></section>
     <section class="stack"><h2>Ferries</h2><div id="info-ferries" class="stack"></div></section>
@@ -166,11 +167,62 @@ function renderLive() {
       <div class="note">From LTA: not Grab cars, but a fair sign of how crowded the airport is.${taxis ? ` Last updated ${updatedText(taxis.at)}.` : info.liveErr ? ` ${esc(info.liveErr)}` : ''}</div></div>`;
   renderJb();
   renderFerries();
-  const ltaText = L.lta && L.lta.ready ? 'Loading…'
-    : isOwner() || isOwnerPhone() ? 'Needs the LTA DataMall key (free) to switch on.' : 'Coming soon.';
-  r.querySelector('#info-incidents').innerHTML = `<p class="note">${ltaText}${L.lta && L.lta.ready ? '' : ' Accidents, breakdowns, roadworks and heavy traffic, nearest to you first.'}</p>`;
-  r.querySelector('#info-travel').innerHTML = `<p class="note">${ltaText}${L.lta && L.lta.ready ? '' : ' e.g. "CTE to the city: 12 min".'}</p>`;
+  renderLta(L.lta || {});
 }
+
+// ---------- LTA DataMall: MRT disruptions, road incidents, floods, expressway times ----------
+const INCIDENT_ORDER = ['Accident', 'Road Block', 'Fire', 'Vehicle breakdown', 'Heavy Traffic', 'Obstacle', 'Unattended Vehicle', 'Diversion', 'Weather', 'Reverse Flow', 'Plant Failure', 'Miscellaneous', 'Roadwork'];
+function renderLta(lta) {
+  const r = info.root;
+  const inc = r.querySelector('#info-incidents');
+  const trv = r.querySelector('#info-travel');
+  const trn = r.querySelector('#info-train');
+  if (!lta.ready) {
+    const t = isOwner() || isOwnerPhone() ? 'Needs the LTA DataMall key to switch on.' : 'Coming soon.';
+    inc.innerHTML = `<p class="note">${t}</p>`;
+    trv.innerHTML = `<p class="note">${t}</p>`;
+    trn.innerHTML = '';
+    return;
+  }
+  if (!lta.at) {
+    const t = info.liveErr ? esc(info.liveErr) : 'Loading…';
+    inc.innerHTML = `<p class="note">${t}</p>`;
+    trv.innerHTML = `<p class="note">${t}</p>`;
+    return;
+  }
+  const loc = here();
+  const upd = `Last updated ${updatedText(lta.at)}.`;
+  // MRT: only when something's wrong
+  const tr = lta.train;
+  trn.innerHTML = tr && tr.disrupted ? `<div class="alert-card ${tr.major ? 'bad' : ''}"><b>MRT ${tr.major ? 'disruption' : 'delays'}${tr.lines.length ? `: ${esc([...new Set(tr.lines.map((x) => x.line))].join(', '))}` : ''}</b>
+    ${tr.messages.slice(0, 2).map((m) => `<div class="note">${esc(m)}</div>`).join('')}
+    ${tr.lines.map((x) => x.stations ? `<div class="note">${esc(x.line)}${x.direction ? ` (towards ${esc(x.direction)})` : ''}: ${esc(x.stations)}</div>` : '').join('')}
+    <div class="note">Stranded commuters often book rides near the affected stations.</div></div>` : '';
+  // Floods and incidents, nearest first
+  const dist = (p) => (loc && p.lat && p.lng ? kmApart(loc, p) : null);
+  const floods = (lta.floods || []).map((f) => ({ ...f, d: dist(f) })).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9));
+  const incidents = (lta.incidents || []).map((x) => ({ ...x, d: dist(x) }))
+    .sort((a, b) => (loc ? (a.d ?? 1e9) - (b.d ?? 1e9) : INCIDENT_ORDER.indexOf(a.type) - INCIDENT_ORDER.indexOf(b.type)));
+  const main = incidents.filter((x) => x.type !== 'Roadwork');
+  const works = incidents.filter((x) => x.type === 'Roadwork');
+  const km = (d) => (d == null ? '' : ` · ${d < 1 ? 'under 1' : Math.round(d)} km away`);
+  const row = (x) => `<div class="inc-row"><span class="inc-type t-${esc(x.type.toLowerCase().replace(/[^a-z]/g, ''))}">${esc(x.type)}</span>
+    <div class="note">${esc(x.msg)}${km(x.d)}</div></div>`;
+  const shown = main.slice(0, 5);
+  const more = [...main.slice(5), ...works];
+  inc.innerHTML = `
+    ${floods.map((f) => `<div class="alert-card bad"><b>${esc(f.headline)}</b><div class="note">${esc(f.desc)}${km(f.d)}</div>${f.advice ? `<div class="note">${esc(f.advice)}</div>` : ''}</div>`).join('')}
+    ${shown.length ? shown.map(row).join('') : '<p class="note">No accidents or breakdowns reported right now.</p>'}
+    ${more.length ? `<details class="ev-more"><summary>${more.length} more${works.length ? ` (incl. ${works.length} roadwork${works.length === 1 ? '' : 's'})` : ''}</summary><div class="stack">${more.map(row).join('')}</div></details>` : ''}
+    <p class="note">From LTA${loc ? ', nearest to you first' : ''}. ${upd}</p>`;
+  // Expressway times: one row per expressway, both directions
+  const by = new Map();
+  for (const t of lta.travel || []) { if (!by.has(t.name)) by.set(t.name, []); by.get(t.name).push(t); }
+  trv.innerHTML = by.size ? `${[...by.entries()].map(([name, dirs]) => `<div class="jb-row compact"><b>${esc(name)}</b>
+      <span class="note">${dirs.map((d) => `to ${esc(titleCase(d.to))} <b>${d.min} min</b>`).join(' · ')}</span></div>`).join('')}
+    <p class="note">Whole length, each direction, from LTA. ${upd}</p>` : `<p class="note">No travel times right now. ${upd}</p>`;
+}
+const titleCase = (s) => String(s).toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase()).replace(/\b(Pie|Cte|Aye|Ecp|Bke|Kje|Kpe|Mce|Sle|Tpe|Nsc)\b/g, (m) => m.toUpperCase());
 
 // People coming in from JB by train or bus often take a Grab from where they're dropped off.
 // What's next on each route, with a best-estimate time they're out in Singapore (jb.js).

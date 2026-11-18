@@ -28,7 +28,8 @@
 //   GET  /api/events                          -> { venues, events }   events the owner has added
 //   POST /api/events { name, venue, starts_at, ends_at } -> { venues, events }   owner only
 //   POST /api/events/delete { id }            -> { venues, events }   owner only
-//   GET  /api/info                            -> taxis at Changi (data.gov.sg)
+//   GET  /api/info                            -> taxis at Changi (data.gov.sg); with LTA_KEY, LTA DataMall:
+//                                                road incidents, expressway travel times, MRT disruptions, flood alerts
 //   GET  /api/surge                           -> { points }  surge-tagged trips, last 30 min (about 1 km)
 //   POST /api/invites/create { label }        -> { token }       owner only
 //   GET  /api/invites                         -> { invites }     owner only
@@ -801,7 +802,79 @@ export function changiTaxis(coords) {
   return coords.filter(([lng, lat]) => inAirportZone(lat, lng)).length;
 }
 
-async function fetchLive() {
+// ---------- LTA DataMall (needs the LTA_KEY secret) ----------
+// Per the DataMall API User Guide v6.11: key in the AccountKey header, JSON { value: [...] },
+// 500 records per call ($skip for more).
+const LTA = 'https://datamall2.mytransport.sg/ltaodataservice';
+async function ltaGet(env, path, pages = 1) {
+  const out = [];
+  for (let p = 0; p < pages; p++) {
+    const sep = path.includes('?') ? '&' : '?';
+    const res = await fetch(`${LTA}/${path}${p ? `${sep}$skip=${p * 500}` : ''}`, { headers: { AccountKey: env.LTA_KEY, accept: 'application/json' } });
+    if (!res.ok) throw new Error(`LTA ${path} ${res.status}`);
+    const body = await res.json();
+    const v = body.value;
+    if (!Array.isArray(v)) return v ?? body; // Train Service Alerts returns one object
+    out.push(...v);
+    if (v.length < 500) break;
+  }
+  return out;
+}
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+
+export function cleanIncidents(rows) {
+  return (rows || []).map((r) => ({ type: String(r.Type || ''), lat: num(r.Latitude), lng: num(r.Longitude), msg: String(r.Message || '').trim() }))
+    .filter((r) => r.msg).slice(0, 300);
+}
+// One line per expressway and direction: total minutes to its far end, plus the slowest stretch.
+export function cleanTravel(rows) {
+  const by = new Map();
+  for (const r of rows || []) {
+    const k = `${r.Name}|${r.Direction}`;
+    const t = num(r.EstTime);
+    if (t === null) continue;
+    const e = by.get(k) || { name: String(r.Name), dir: num(r.Direction), to: String(r.FarEndPoint || ''), min: 0, slow: null };
+    e.min += t;
+    if (!e.slow || t > e.slow.min) e.slow = { from: String(r.StartPoint || ''), to: String(r.EndPoint || ''), min: t };
+    by.set(k, e);
+  }
+  return [...by.values()].sort((a, b) => a.name.localeCompare(b.name) || a.dir - b.dir);
+}
+// Disruptions only (Status 2, or any affected stretch), with LTA's message.
+export function cleanTrain(v) {
+  const o = Array.isArray(v) ? v[0] : v;
+  if (!o) return { disrupted: false, lines: [], messages: [] };
+  const segs = o.AffectedSegments || [];
+  const msgs = (o.Message || []).map((m) => String(m.Content || '').trim()).filter(Boolean);
+  const lines = segs.map((s) => ({ line: String(s.Line || ''), direction: String(s.Direction || ''), stations: String(s.Stations || ''), freeBus: String(s.FreePublicBus || '') }));
+  return { disrupted: Number(o.Status) === 2 || lines.length > 0, major: Number(o.Status) === 2, lines, messages: msgs };
+}
+export function cleanFloods(rows, now = Date.now()) {
+  return (rows || []).filter((r) => String(r.msgType || '').toLowerCase() === 'alert' && (!r.expires || Date.parse(r.expires) > now))
+    .map((r) => {
+      const [ll, km] = String(r.circle || '').trim().split(/\s+/);
+      const [lat, lng] = String(ll || '').split(',').map(Number);
+      return { headline: String(r.headline || 'Flood alert'), desc: String(r.description || ''), advice: String(r.instruction || ''),
+        area: String(r.areaDesc || ''), lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
+        severity: String(r.severity || ''), at: Date.parse(r.dateTime) || null };
+    });
+}
+async function fetchLta(env) {
+  const [inc, travel, train, flood] = await Promise.allSettled([
+    ltaGet(env, 'TrafficIncidents'), ltaGet(env, 'EstTravelTimes', 3), ltaGet(env, 'TrainServiceAlerts'), ltaGet(env, 'PubFloodAlerts'),
+  ]);
+  const at = Date.now();
+  const out = { at };
+  if (inc.status === 'fulfilled') out.incidents = cleanIncidents(inc.value);
+  if (travel.status === 'fulfilled') out.travel = cleanTravel(travel.value);
+  if (train.status === 'fulfilled') out.train = cleanTrain(train.value);
+  if (flood.status === 'fulfilled') out.floods = cleanFloods(flood.value);
+  const failed = [inc, travel, train, flood].filter((x) => x.status === 'rejected').map((x) => String(x.reason?.message || x.reason));
+  if (failed.length) out.errors = failed;
+  return out;
+}
+
+async function fetchLive(env = {}) {
   const get = async (path) => {
     const res = await fetch(`https://api.data.gov.sg/v1/transport/${path}`, { headers: { accept: 'application/json' } });
     if (!res.ok) throw new Error(`data.gov.sg ${res.status}`);
@@ -814,6 +887,9 @@ async function fetchLive() {
     const coords = f?.geometry?.coordinates || [];
     out.taxis = { changi: changiTaxis(coords), total: coords.length, at: Date.parse(f?.properties?.timestamp) || Date.now() };
   }
+  if (env.LTA_KEY) {
+    try { out.lta = await fetchLta(env); } catch { /* keep the last copy */ }
+  }
   return out;
 }
 
@@ -824,13 +900,14 @@ async function getInfo(env) {
   let live = row ? JSON.parse(row.value) : null;
   if (!row || now - row.at >= 2 * 60000) {
     try {
-      const fresh = await fetchLive();
+      const fresh = await fetchLive(env);
       live = { ...(live || {}), ...fresh };
       await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('info', ?1, ?2)
         ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(now, JSON.stringify(live)).run();
     } catch { /* keep the last copy */ }
   }
-  return json({ ...(live || {}), lta: { ready: Boolean(env.LTA_KEY) } });
+  const lta = live && live.lta ? live.lta : {};
+  return json({ ...(live || {}), lta: { ...lta, ready: Boolean(env.LTA_KEY) } });
 }
 
 // ---------- Surge reports ----------

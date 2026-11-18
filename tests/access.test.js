@@ -274,3 +274,41 @@ test('surge points: Surge-tagged trips from the last 30 min, one tag per phone, 
   assert.ok(pts.every((p) => !String(p.d).includes('phone')), 'device ids are never sent out');
   assert.equal((await req('/api/surge')).status, 401);
 });
+
+test('LTA DataMall: incidents, travel times, MRT and floods, key sent as AccountKey', async (t) => {
+  const { req, owner } = setup({ LTA_KEY: 'test-account-key' });
+  const key = await owner();
+  const seen = [];
+  t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
+    const u = String(url);
+    if (u.includes('datamall2.mytransport.sg')) {
+      seen.push({ u, key: init.headers && init.headers.AccountKey });
+      if (u.includes('TrafficIncidents')) return new Response(JSON.stringify({ value: [
+        { Type: 'Vehicle breakdown', Latitude: 1.30398068448214, Longitude: 103.919182834377, Message: '(29/3)18:22 Vehicle breakdown on ECP (towards Changi Airport) after Still Rd Sth Exit. Avoid lane 3.' },
+        { Type: 'Roadwork', Latitude: 1.35, Longitude: 103.85, Message: 'Roadworks on CTE' },
+      ] }));
+      if (u.includes('EstTravelTimes')) return new Response(JSON.stringify({ value: [
+        { Name: 'AYE', Direction: 1, FarEndPoint: 'TUAS CHECKPOINT', StartPoint: 'AYE/MCE INTERCHANGE', EndPoint: 'TELOK BLANGAH RD', EstTime: 2 },
+        { Name: 'AYE', Direction: 1, FarEndPoint: 'TUAS CHECKPOINT', StartPoint: 'TELOK BLANGAH RD', EndPoint: 'CLEMENTI AVE 6', EstTime: 9 },
+        { Name: 'AYE', Direction: 2, FarEndPoint: 'MCE', StartPoint: 'TUAS', EndPoint: 'JURONG', EstTime: 5 },
+      ] }));
+      if (u.includes('TrainServiceAlerts')) return new Response(JSON.stringify({ value: { Status: 2,
+        AffectedSegments: [{ Line: 'NEL', Direction: 'Punggol', Stations: 'NE1,NE3,NE4,NE5,NE6', FreePublicBus: 'NE1,NE3,NE4,NE5,NE6' }],
+        Message: [{ Content: '1710hrs: NEL – No train service between Harbourfront to Dhoby Ghaut stations towards Punggol station due to a signalling fault.', CreatedDate: '2026-11-18 17:10:00' }] } }));
+      if (u.includes('PubFloodAlerts')) return new Response('not here', { status: 500 }); // one feed failing doesn't stop the rest
+    }
+    return new Response(JSON.stringify({ features: [{ geometry: { coordinates: [] }, properties: {} }] }));
+  });
+  const b = (await req('/api/info', { key })).body;
+  assert.ok(seen.length >= 4 && seen.every((s) => s.key === 'test-account-key'));
+  assert.equal(b.lta.ready, true);
+  assert.equal(b.lta.incidents.length, 2);
+  assert.equal(b.lta.incidents[0].type, 'Vehicle breakdown');
+  const aye = b.lta.travel.filter((x) => x.name === 'AYE');
+  assert.equal(aye.find((x) => x.dir === 1).min, 11);
+  assert.equal(aye.find((x) => x.dir === 1).to, 'TUAS CHECKPOINT');
+  assert.equal(b.lta.train.major, true);
+  assert.equal(b.lta.train.lines[0].line, 'NEL');
+  assert.equal(b.lta.floods, undefined);
+  assert.equal(b.lta.errors.length, 1);
+});

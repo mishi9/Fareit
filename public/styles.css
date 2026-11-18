@@ -403,3 +403,17 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
   background: color-mix(in srgb, var(--go) 16%, var(--surface)); }
 .surge-up { font-size: 28px; font-weight: 800; color: var(--go); line-height: 1; }
 .surge-alert .note { margin: 2px 0 0; }
+
+/* LTA: MRT disruptions, floods, road incidents */
+.alert-card { display: grid; gap: 3px; padding: 10px 12px; border-radius: 12px; border: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--surface)); }
+.alert-card.bad { border-color: var(--stop); background: color-mix(in srgb, var(--stop) 12%, var(--surface)); }
+.alert-card .note { margin: 0; }
+.inc-row { display: grid; gap: 2px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
+.inc-row .note { margin: 0; }
+.inc-type { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.inc-type.t-accident, .inc-type.t-roadblock, .inc-type.t-fire { color: var(--stop); }
+.inc-type.t-vehiclebreakdown, .inc-type.t-heavytraffic { color: var(--warn); }
+#info-travel .jb-row.compact .note { line-height: 1.5; }
+.alert-card.compact { padding: 7px 10px; gap: 1px; border-width: 1.5px; }
+.alert-card.compact .note { font-size: 13px; }
+#radar-alerts { gap: 6px; }

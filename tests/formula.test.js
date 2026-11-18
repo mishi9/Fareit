@@ -513,3 +513,14 @@ test('the airport zone is the airport, not the rest of Changi', () => {
     assert.equal(inAirportZone(lat, lng), false, name);
   }
 });
+
+import { radarAlerts } from '../public/alerts.js';
+test('Radar alerts: major MRT disruption anywhere, floods only within 3 km', () => {
+  const lta = { train: { major: true, lines: [{ line: 'NEL' }], messages: ['No train service between Harbourfront and Dhoby Ghaut'] },
+    floods: [{ headline: 'Flash Flood Alert', desc: 'Flash flood at Bt Timah Rd', lat: 1.3305, lng: 103.8006 }] };
+  const near = radarAlerts(lta, { lat: 1.3200, lng: 103.8100 }); // ~1.6 km
+  assert.deepEqual(near.map((a) => a.kind), ['mrt', 'flood']);
+  const far = radarAlerts(lta, { lat: 1.3526, lng: 103.9447 }); // Tampines
+  assert.deepEqual(far.map((a) => a.kind), ['mrt']);
+  assert.deepEqual(radarAlerts({ train: { major: false, lines: [], messages: [] }, floods: [] }, null), []);
+});
