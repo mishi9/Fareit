@@ -502,3 +502,14 @@ test('likely surging: 2+ drivers within 1.5 km in 30 min; shown to drivers withi
   assert.ok(surgeFor(tiongBahru, spots).km < 3);
   assert.equal(surgeFor(tampines, spots), null);
 });
+
+import { inAirportZone } from '../public/airport-zone.js';
+test('the airport zone is the airport, not the rest of Changi', () => {
+  for (const [name, lat, lng] of [['T1', 1.3614, 103.9894], ['T2', 1.3554, 103.9908], ['T3', 1.3566, 103.9863], ['T4', 1.3381, 103.9832], ['Jewel', 1.3603, 103.9894]]) {
+    assert.equal(inAirportZone(lat, lng), true, name);
+  }
+  for (const [name, lat, lng] of [['Changi Village', 1.3893, 103.9878], ['Changi Prison', 1.3560, 103.9740], ['Changi Business Park', 1.3343, 103.9636],
+    ['Simei', 1.3432, 103.9533], ['Expo', 1.3352, 103.9584], ['Tanah Merah Ferry Terminal', 1.3155, 103.9890], ['Changi Exhibition Centre', 1.3346, 104.0157]]) {
+    assert.equal(inAirportZone(lat, lng), false, name);
+  }
+});

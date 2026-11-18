@@ -86,7 +86,9 @@ No extra taps: it comes from trips saved as **Surge** (green ↑ on the job card
 
 ## Radar at the airport
 
-At Changi (within the airport zone, any terminal) jobs are auto-accepted, so there's no 8-second window to estimate for. Radar swaps the earnings cards for:
+The airport zone (`public/airport-zone.js`) is the official Changi Airport boundary (URA Master Plan 2019 subzone, from data.gov.sg) **and** within 1.5 km of a terminal, so nearby Changi (Changi Village, Changi Prison, the business park, Simei, Tanah Merah Ferry Terminal, the exhibition centre) doesn't count as the airport. The taxi count on Info uses the same zone.
+
+At Changi Airport (any terminal) jobs are auto-accepted, so there's no 8-second window to estimate for. Radar swaps the earnings cards for:
 
 - **Airport queue** at the top: note Grab's cars ahead and estimated wait. **Got a job** records how long you really waited, then opens the fare card with **Airport** already picked.
 - **Arrivals by terminal** (T1 to T4): flights landed in the last 30 min, landing in the next hour, and the hour after. Flight counts only, no passenger estimate.

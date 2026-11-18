@@ -45,6 +45,8 @@
 //   APP_KEY (optional)             if set, the app must send it as x-fareit-key. Leave it unset
 //                                  for an open, collective app.
 
+import { inAirportZone } from '../public/airport-zone.js';
+
 const OM = 'https://www.onemap.gov.sg';
 const SG = { latMin: 1.15, latMax: 1.48, lngMin: 103.55, lngMax: 104.1 };
 const ROUTE_CACHE_SECONDS = 60 * 60 * 24 * 14;
@@ -794,14 +796,9 @@ async function removeEvent(request, env) {
 // ---------- Live info (data.gov.sg, free, no key) ----------
 // Available street taxis around Changi, fetched at most every 2 minutes
 // and shared by every phone.
-const CHANGI = [[1.3614, 103.9894], [1.3554, 103.9908], [1.3566, 103.9863], [1.3381, 103.9832], [1.3603, 103.9894]];
-const kmBetween = (a, b, c, d) => {
-  const rad = (x) => (x * Math.PI) / 180;
-  const h = Math.sin(rad(c - a) / 2) ** 2 + Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(rad(d - b) / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.sqrt(h));
-};
+// Same airport zone as the app (inside the airport boundary, near a terminal).
 export function changiTaxis(coords) {
-  return coords.filter(([lng, lat]) => CHANGI.some(([a, b]) => kmBetween(lat, lng, a, b) <= 1.5)).length;
+  return coords.filter(([lng, lat]) => inAirportZone(lat, lng)).length;
 }
 
 async function fetchLive() {
