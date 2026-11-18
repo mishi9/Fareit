@@ -755,10 +755,9 @@ function buildSettings() {
   // This phone
   const owner = isOwnerPhone();
   $('#st-access').textContent = owner ? 'Owner' : accessKind() === 'driver' ? 'Tester (invited)' : 'Open';
-  // Version: from the app's offline worker file (works online), else from the offline cache.
-  fetch('sw.js', { cache: 'no-store' }).then((r) => r.text()).then((t) => /agaration-v(\d+)/.exec(t)[1])
-    .catch(() => caches.keys().then((ks) => ks.map((k) => /^agaration-v(\d+)$/.exec(k)).filter(Boolean).map((m) => m[1]).sort((a, b) => b - a)[0]))
-    .then((v) => { $('#st-ver').textContent = v ? `v${v}` : '—'; }).catch(() => {});
+  // Version this screen is running, and a button to check for (and install) a newer one.
+  loadedVersion.then((v) => { $('#st-ver').textContent = v ? `v${v}` : '—'; });
+  $('#st-update').addEventListener('click', checkForUpdate);
   // Your trips
   $('#st-download').addEventListener('click', downloadMine);
   const rm = $('#st-remove-mine');
@@ -788,6 +787,67 @@ function buildSettings() {
   $('#st-export-all').addEventListener('click', () => exportAllCsv());
   renderSettingsLive();
   onMove(() => { if (state.view === 'settings') renderSettingsLive(); });
+}
+
+// ---------- app updates ----------
+// The version the page was loaded with: the app's offline copy is stored under "agaration-vN".
+const versionOf = (text) => { const m = /agaration-v(\d+)/.exec(text || ''); return m ? Number(m[1]) : null; };
+const loadedVersion = (async () => {
+  try {
+    const ks = await caches.keys();
+    const v = ks.map(versionOf).filter(Boolean).sort((a, b) => b - a)[0];
+    if (v) return v;
+  } catch { /* no offline copy */ }
+  try { return versionOf(await (await fetch(`sw.js?v=${Date.now()}`, { cache: 'no-store' })).text()); } catch { return null; }
+})();
+// The newest version on the server (always asked fresh).
+async function latestVersion() {
+  const res = await fetch(`sw.js?check=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('server');
+  return versionOf(await res.text());
+}
+async function checkForUpdate() {
+  const btn = $('#st-update');
+  const label = (t, cls = 'ghost') => { btn.textContent = t; btn.className = `${cls} small`; };
+  if (btn.dataset.ready) { await installUpdate(btn); return; }
+  btn.disabled = true;
+  label('Checking…');
+  try {
+    const [have, latest] = await Promise.all([loadedVersion, latestVersion()]);
+    if (latest && have && latest > have) {
+      btn.dataset.ready = String(latest);
+      label(`Update to v${latest}`, 'primary');
+      settingsMsg(`A new version (v${latest}) is ready. Tap Update; the app reloads in a second.`);
+    } else {
+      label('Up to date \u2713');
+      setTimeout(() => label('Check for update'), 4000);
+    }
+  } catch {
+    label('Check for update');
+    settingsMsg(navigator.onLine ? 'Couldn\u2019t reach the server. Try again in a moment.' : 'You\u2019re offline. Connect to check for updates.', true);
+  }
+  btn.disabled = false;
+}
+// Fetch the new version into the offline copy, then reload onto it.
+async function installUpdate(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Updating…';
+  try {
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg) {
+      await reg.update();
+      const w = reg.installing || reg.waiting;
+      if (w && w.state !== 'activated') {
+        await new Promise((res) => {
+          const done = () => { if (w.state === 'activated' || w.state === 'redundant') res(); };
+          w.addEventListener('statechange', done);
+          done();
+          setTimeout(res, 15000);
+        });
+      }
+    }
+  } catch { /* reload anyway */ }
+  location.reload();
 }
 
 // The parts that change: location, how many trips.

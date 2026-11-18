@@ -1,5 +1,5 @@
 // Offline shell: the app opens and predicts with no signal. /api calls always go to the network.
-const CACHE = 'agaration-v36';
+const CACHE = 'agaration-v37';
 const SHELL = [
   './',
   'index.html',
@@ -34,7 +34,7 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -51,6 +51,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   if (url.pathname.startsWith('/beta/')) return; // the old beta address only redirects here
+  if (url.pathname.endsWith('/sw.js')) return; // always from the server: it says which version is the latest
 
   // Stale-while-revalidate: answer from cache instantly, refresh in the background.
   event.respondWith(

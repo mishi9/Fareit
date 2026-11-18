@@ -511,3 +511,6 @@ body.gated > :not(.gate):not(script) { visibility: hidden; }
 .seg.g2 { grid-template-columns: repeat(2, 1fr); }
 .st-legacy summary { color: var(--muted); font-size: 14px; cursor: pointer; padding: 6px 0; }
 .st-legacy .stack { margin-top: 8px; }
+
+.st-ver-r { display: inline-flex; align-items: center; gap: 10px; }
+.st-ver-row { align-items: center; }

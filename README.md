@@ -95,7 +95,7 @@ The old Trips view (reconciled jobs from the slider era, the old shared pool) is
 ## Settings
 
 - **Owner** (owner's phone only, at the top): tiles for testers in, invites waiting, trips from testers and drivers to check; **+ Add event**; **Export all trips (CSV)**; show / hide the workings; invites.
-- **This phone:** access (owner / tester), location (with how to turn it on), screen stays on while Radar is open, version.
+- **This phone:** access (owner / tester), location (with how to turn it on), screen stays on while Radar is open, version with **Check for update** (asks the server for the newest version; if there is one the button turns into **Update to vN**, which loads it and reloads the app).
 - **Your trips:** how many are logged on this phone, **Download (CSV)** (date, time, km, paid, earned, pricing, drop-off), and for testers **Remove all my trips**, which deletes them from the phone and the server for everyone, keeping access.
 - **Privacy:** what is and isn't collected.
 - **I'm the owner:** the owner code, folded away.
