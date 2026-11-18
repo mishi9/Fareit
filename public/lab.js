@@ -151,11 +151,11 @@ export function syncLab() {
 
 // The folded guide: one screenshot per place the numbers come from. Each mark is a circle on the
 // photo (x, y in % of the photo): 1 and 2 for the form's steps, A B C for Advanced.
-// Placeholders for now; marks are added when the real screenshots are in.
+// Grab screenshots with personal details blacked out and the maps blurred.
 const GUIDE = [
-  { src: 'guide/log-1.svg', title: 'Photo 1', note: 'example marks', marks: [{ k: '1', x: 30, y: 20 }, { k: 'B', x: 70, y: 20 }, { k: 'C', x: 50, y: 75 }] },
-  { src: 'guide/log-2.svg', title: 'Photo 2', note: 'example marks', marks: [{ k: '2', x: 50, y: 25 }] },
-  { src: 'guide/log-3.svg', title: 'Photo 3', note: 'example marks', marks: [{ k: 'A', x: 50, y: 25 }] },
+  { src: 'guide/log-1.jpg', title: 'Job card', note: '1 trip km · B total min · C km to pickup', marks: [{ k: 'B', x: 62, y: 75.2 }, { k: 'C', x: 77.5, y: 79 }, { k: '1', x: 76, y: 82.9 }] },
+  { src: 'guide/log-2.jpg', title: 'On the way to pickup', note: 'A = B − this time (32 − 3 = 29 min)', marks: [{ k: 'A', x: 32.5, y: 85.2 }] },
+  { src: 'guide/log-3.jpg', title: 'Route details', note: '2 you earn · passenger paid', marks: [{ k: '2', x: 50, y: 14.3 }, { k: '2', x: 76.5, y: 71.8 }] },
 ];
 
 export async function buildLab(root) {
@@ -191,7 +191,7 @@ export async function buildLab(root) {
         <span><span class="log-n">1</span> Trip km</span>
         <span><span class="log-n">2</span> Passenger paid · You earned</span>
         <span class="adv-h">Advanced only:</span>
-        <span class="adv"><span class="log-n sm">A</span> Trip Mins (from pickup)</span>
+        <span class="adv"><span class="log-n sm">A</span> Trip Mins (from pickup: B minus the time to pickup)</span>
         <span class="adv"><span class="log-n sm">B</span> Est. Total Mins (job card, includes your drive there)</span>
         <span class="adv"><span class="log-n sm">C</span> Dist. to Pick Up (km)</span>
       </div>
@@ -269,6 +269,15 @@ export async function buildLab(root) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
   $('#lab-save', root).addEventListener('click', save);
+  // Guide photos: tap one to see it full screen (with its marks); tap again to close.
+  for (const shot of root.querySelectorAll('.log-shot-img')) shot.addEventListener('click', () => {
+    const big = document.createElement('div');
+    big.className = 'shot-big';
+    big.setAttribute('role', 'dialog');
+    big.innerHTML = `<div class="shot-big-in">${shot.innerHTML}</div><p class="note">${shot.nextElementSibling ? shot.nextElementSibling.innerHTML : ''} · tap to close</p>`;
+    big.addEventListener('click', () => big.remove());
+    document.body.append(big);
+  });
   $('#lab-arrow', root).addEventListener('click', () => { lab.arrow = !lab.arrow; update(); });
   // Simple or Advanced: remembered on this phone. Advanced shows the extra (optional) boxes inline.
   const MODE = 'agaration-log-mode';
