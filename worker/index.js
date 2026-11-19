@@ -335,6 +335,10 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'lng REAL', 'formula_trips'))
       .then(() => addColumn(db, 'rain INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'arrow INTEGER', 'formula_trips'))
+      .then(() => addColumn(db, 'platform TEXT', 'formula_trips'))
+      .then(() => addColumn(db, 'offer INTEGER', 'formula_trips'))
+      .then(() => addColumn(db, 'level INTEGER', 'formula_trips'))
+      .then(() => addColumn(db, 'fuel REAL', 'formula_trips'))
       .then(() => addColumn(db, 'animal TEXT', 'invites'))
       .then(() => addColumn(db, 'opened_at INTEGER', 'invites'))
       .catch((e) => {
@@ -551,21 +555,28 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   const rain = t.rain === 1 || t.rain === true ? 1 : t.rain === 0 || t.rain === false ? 0 : null;
   // arrow: Grab's green arrow seen on the job (1) or not (0), for the arrow test; null if not recorded.
   const arrow = t.arrow === 1 || t.arrow === true ? 1 : t.arrow === 0 || t.arrow === false ? 0 : null;
+  // Which app (null = Grab, as before). TADA: an offer seen but not taken (offer 1, no earnings),
+  // TADA's colour on the job (level 0 grey, 1 yellow surge, 2 orange super surge), fuel support.
+  const platform = t.platform === 'tada' ? 'tada' : null;
+  const offer = platform && (t.offer === 1 || t.offer === true) ? 1 : null;
+  const level = platform && [0, 1, 2].includes(t.level) ? t.level : null;
+  const fuel = platform && inRange(n(t.fuel), 0, 10) ? r2(n(t.fuel)) : null;
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
-    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1], rain, arrow,
+    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1], rain, arrow, platform, offer, level, fuel,
   };
 }
 
 const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received_at, updated_at, rev, ts, km, min, erp, paid,
-    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng, rain, arrow)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17, ?18, ?19)
+    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng, rain, arrow, platform, offer, level, fuel)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
     min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
     predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0,
     card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng,
-    rain = COALESCE(excluded.rain, formula_trips.rain), arrow = COALESCE(excluded.arrow, formula_trips.arrow)
+    rain = COALESCE(excluded.rain, formula_trips.rain), arrow = COALESCE(excluded.arrow, formula_trips.arrow),
+    platform = excluded.platform, offer = excluded.offer, level = excluded.level, fuel = excluded.fuel
   WHERE formula_trips.device = excluded.device`;
 
 async function readJson(request) {
@@ -607,7 +618,7 @@ async function postFormula(request, env) {
     }
     writes.push(env.DB.prepare(FORMULA_UPSERT).bind(
       t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
-      t.card_min, t.pickup_km, t.lat, t.lng, t.rain, t.arrow,
+      t.card_min, t.pickup_km, t.lat, t.lng, t.rain, t.arrow, t.platform, t.offer, t.level, t.fuel,
     ));
     accepted.push(t.id);
   }
@@ -622,7 +633,7 @@ async function getFormula(url, env) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, rain, arrow, deleted, device
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, rain, arrow, platform, offer, level, fuel, deleted, device
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
@@ -1061,7 +1072,7 @@ async function getSurge(env) {
   const since = Date.now() - SURGE_WINDOW_MS;
   // Test: surge is told by the price: paid SURGE_PRICE_MIN+ above the normal estimate made before
   // saving (the green arrow on Grab's card shows on most jobs, so the tag isn't used).
-  const trips = await env.DB.prepare(`SELECT device, ts, lat, lng FROM formula_trips WHERE surge != 'airport' AND deleted IS NOT 1
+  const trips = await env.DB.prepare(`SELECT device, ts, lat, lng FROM formula_trips WHERE surge != 'airport' AND deleted IS NOT 1 AND platform IS NULL
       AND predicted > 0 AND paid >= predicted * ?2
       AND lat IS NOT NULL AND lng IS NOT NULL AND ts > ?1 ORDER BY ts DESC LIMIT 500`).bind(since, 1 + SURGE_PRICE_MIN).all();
   const tags = new Map();

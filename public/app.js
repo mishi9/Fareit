@@ -5,7 +5,7 @@ const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
-import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv } from './lab.js';
+import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv, setPlatform } from './lab.js';
 import { clearMyQueue } from './queue.js';
 import { buildEarnings, renderEarnings } from './earnings.js';
 import { locationState, onMove } from './where.js';
@@ -128,6 +128,7 @@ function show(view) {
   if (view === 'radar') view = 'window'; // the Window is now called Radar
   if (!['window', 'info', 'reconcile', 'trips', 'lab', 'settings'].includes(view)) view = 'window';
   state.view = view;
+  document.body.dataset.view = view; // the Grab | TADA switch shows on Radar and Log only
   for (const v of $$('.view')) v.hidden = v.id !== `view-${view}`;
   // Reconcile (older jobs waiting for a fare) is reached from Info, so Info stays lit.
   for (const t of $$('.tabs button')) t.classList.toggle('on', t.dataset.view === (view === 'reconcile' ? 'info' : view));
@@ -1084,6 +1085,7 @@ async function boot() {
   const sizeWindow = () => {
     const top = $('.top').offsetHeight + parseFloat(getComputedStyle($('main')).paddingTop || '0');
     document.documentElement.style.setProperty('--top-h', `${top}px`);
+    document.documentElement.style.setProperty('--tabs-h', `${$('.tabs').offsetHeight}px`);
   };
   sizeWindow();
   window.addEventListener('resize', sizeWindow);
@@ -1092,6 +1094,7 @@ async function boot() {
   setInterval(renderToday, 60 * 1000);
   buildWindow();
   buildLab($('#view-lab'));
+  for (const b of $$('#plat-bar button')) b.addEventListener('click', () => setPlatform(b.dataset.p));
   buildInfo($('#view-info'));
   buildEarnings($('#view-trips'));
   buildReconForm();

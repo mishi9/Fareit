@@ -38,7 +38,7 @@ const dayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${pa
 export function allJobs() {
   const typed = e.data.entries.filter((x) => x.kind === 'job');
   const grab = myLabTrips().filter((t) => t.earned > 0 && Number.isFinite(t.ts))
-    .map((t) => ({ id: `lab-${t.id}`, ts: t.ts, platform: 'grab', amount: t.earned, km: t.km || null, auto: true, note: t.dropLabel || '' }));
+    .map((t) => ({ id: `lab-${t.id}`, ts: t.ts, platform: t.platform === 'tada' ? 'tada' : 'grab', amount: t.earned, km: t.km || null, auto: true, note: t.dropLabel || '' }));
   return [...typed, ...grab].sort((a, b) => b.ts - a.ts);
 }
 const costs = () => e.data.entries.filter((x) => x.kind === 'cost');

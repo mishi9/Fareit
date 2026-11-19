@@ -18,7 +18,7 @@ import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN, arrowCompare,
-  markEvents, eventLift, eventFor, eventNear, rainLift,
+  markEvents, eventLift, eventFor, eventNear, rainLift, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -45,17 +45,26 @@ const offText = (pred, actual) => {
   return Math.abs(off) < 0.005 ? 'exact' : `${money(Math.abs(off))} ${off > 0 ? 'high' : 'low'}`;
 };
 
-const lab = { trips: [], shared: {}, surge: 'normal', arrow: false, root: null, device: null, syncNote: '', version: 0, cache: null };
+const lab = { trips: [], shared: {}, surge: 'normal', arrow: false, level: 0, root: null, device: null, syncNote: '', version: 0, cache: null, platform: 'grab' };
+// Which app the estimates and forms are for (Grab or TADA), remembered on this phone.
+const PLAT_KEY = 'agaration-platform';
+try { if (localStorage.getItem(PLAT_KEY) === 'tada') lab.platform = 'tada'; } catch { /* private mode */ }
+usePlatform(lab.platform);
+export const currentPlatform = () => lab.platform;
+const isTada = () => lab.platform === 'tada';
+const TADA_LEARN = 15; // TADA cards show "learning" until this many TADA trips
 
 // Everyone's trips: yours (on this phone) plus other testers' (from the server). The same array is
 // handed out until the trips change (changed()), so the formula, cut and time estimate built from
 // it are worked out once per change. Nothing is dropped: it's always every trip.
 const changed = () => { lab.version++; };
 const dataset = () => {
-  if (!lab.cache || lab.cache.version !== lab.version) {
+  if (!lab.cache || lab.cache.version !== lab.version || lab.cache.platform !== lab.platform) {
     const mine = new Set(lab.trips.map((t) => t.id));
     // Trips around a listed event are marked, so they're kept apart from normal (formula.js).
-    lab.cache = { version: lab.version, trips: markEvents([...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))], eventsList()) };
+    // Only this app's trips: Grab and TADA each learn their own formula.
+    const all = [...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))].filter((t) => platformOf(t) === lab.platform);
+    lab.cache = { version: lab.version, platform: lab.platform, trips: markEvents(all, eventsList()) };
   }
   return lab.cache.trips;
 };
@@ -72,10 +81,11 @@ const toRow = (t) => ({
   card_min: t.cardMin ?? null, pickup_km: t.pickupKm ?? null, lat: t.lat ?? null, lng: t.lng ?? null,
   ...(t.rain === 0 || t.rain === 1 ? { rain: t.rain } : {}),
   ...(t.arrow === 0 || t.arrow === 1 ? { arrow: t.arrow } : {}),
+  ...(t.platform === 'tada' ? { platform: 'tada', offer: t.offer ? 1 : 0, level: [0, 1, 2].includes(t.level) ? t.level : null, fuel: t.fuel ?? null } : {}),
 });
 const fromRow = (r) => ({
   id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
-  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, rain: r.rain === 1 ? 1 : r.rain === 0 ? 0 : null, arrow: r.arrow === 1 ? 1 : r.arrow === 0 ? 0 : null, shared: true, d: r.d || null, trusted: r.tr === 1,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, rain: r.rain === 1 ? 1 : r.rain === 0 ? 0 : null, arrow: r.arrow === 1 ? 1 : r.arrow === 0 ? 0 : null, ...(r.platform === 'tada' ? { platform: 'tada', offer: r.offer === 1, level: r.level ?? null, fuel: r.fuel ?? null } : {}), shared: true, d: r.d || null, trusted: r.tr === 1,
 });
 // Surge or airport: the learned % on top of the normal fare (null for normal trips).
 const liftFor = (kind, ts) => (kind === 'surge' ? surgeLift(dataset(), ts) : kind === 'airport' ? airportLift(dataset(), ts) : null);
@@ -194,7 +204,12 @@ export async function buildLab(root) {
 
     <details class="log-guide" id="lab-guide"><summary>Where do I find these numbers?</summary>
       <p class="log-km-note">Distances in <b>km</b>: if Grab shows metres, divide by 1000. <b>800 m = 0.8</b> · 1,250 m = 1.25</p>
-      <div class="log-guide-key">
+      <div class="log-guide-key tada-only" hidden>
+        <span><span class="log-n">1</span> Trip km (TADA's Job Details, under the date)</span>
+        <span><span class="log-n">2</span> Ride fare · Fuel support (under Net Earnings)</span>
+        <span class="adv">The driver platform fee (S$0.60, or S$0.82 over a S$25 fare) is filled in for you.</span>
+      </div>
+      <div class="log-guide-key grab-only">
         <span><span class="log-n">1</span> Trip km</span>
         <span><span class="log-n">2</span> Passenger paid · You earned</span>
         <span class="adv-h">Advanced only (optional):</span>
@@ -202,7 +217,7 @@ export async function buildLab(root) {
         <span class="adv"><span class="log-n sm">B</span> Est. Total Mins (job card, includes your drive there)</span>
         <span class="adv"><span class="log-n sm">C</span> Dist. to Pick Up (km)</span>
       </div>
-      <div class="log-guide-shots">${GUIDE.map((g) => `
+      <div class="log-guide-shots grab-only">${GUIDE.map((g) => `
         <figure class="log-shot"><div class="log-shot-img"><img src="${g.src}" alt="${g.title}" loading="lazy">${g.marks.map((m) => `<span class="log-n${/[ABC]/.test(m.k) ? ' sm' : ''}" style="left:${m.x}%;top:${m.y}%">${m.k}</span>`).join('')}</div>
           <figcaption><b>${g.title}</b>${g.note ? ` · ${g.note}` : ''}</figcaption></figure>`).join('')}
       </div>
@@ -227,6 +242,8 @@ export async function buildLab(root) {
       <button type="button" data-v="airport">Airport</button>
     </div>
     <button type="button" class="arrow-tog" id="lab-arrow" aria-pressed="false" hidden><span class="arrow-box"></span> Green <b>↑</b> on the job</button>
+    <div class="field tada-only" hidden><span class="flabel">TADA colour on the job</span>
+      <div class="lv" id="lab-level"><button type="button" class="g" data-l="0">Grey · normal</button><button type="button" class="y" data-l="1">Yellow · surge</button><button type="button" class="o" data-l="2">Orange · super</button></div></div>
 
     <div class="lab-predict" id="lab-predict" aria-live="polite">
       <div class="lab-two">
@@ -251,6 +268,15 @@ export async function buildLab(root) {
     <button type="button" class="primary wide log-save" id="lab-save">Save job</button>
 
     <button type="button" class="ghost small log-clear" id="lab-clear">Clear the form</button>
+    <div class="offer tada-only" id="lab-offer" hidden>
+      <b>⚡ Log an offer</b>
+      <span class="note">A TADA offer you saw but didn't take still teaches TADA's prices. The ride fare shown on the offer, before the S$0.60 / S$0.82 fee.</span>
+      <div class="row2"><div class="field"><label for="of-km">Km</label><input id="of-km" type="number" inputmode="decimal" step="0.1" min="0"></div>
+        <div class="field"><label for="of-fare">Ride fare shown (S$)</label><input id="of-fare" type="number" inputmode="decimal" step="0.01" min="0"></div></div>
+      <div class="lv" id="of-level"><button type="button" class="g" data-l="0">Grey</button><button type="button" class="y" data-l="1">Yellow</button><button type="button" class="o" data-l="2">Orange</button></div>
+      <p class="msg" id="of-msg" role="status"></p>
+      <button type="button" class="ghost wide" id="of-save">Save offer</button>
+    </div>
     <div class="card arrow-test" id="lab-arrow-test" hidden></div>
     <p class="note log-tip">On the road? Tap <b>Got a job</b> on Radar at pickup: it keeps the time and place for you.</p>
     </div></div>
@@ -276,6 +302,29 @@ export async function buildLab(root) {
     b.addEventListener('click', () => { lab.surge = b.dataset.v; update(); });
   }
   $('#lab-save', root).addEventListener('click', save);
+  for (const b of root.querySelectorAll('#lab-level button')) b.addEventListener('click', () => { lab.level = Number(b.dataset.l); update(); });
+  let offerLevel = 0;
+  const showOfferLevel = () => { for (const b of root.querySelectorAll('#of-level button')) b.classList.toggle('on', Number(b.dataset.l) === offerLevel); };
+  for (const b of root.querySelectorAll('#of-level button')) b.addEventListener('click', () => { offerLevel = Number(b.dataset.l); showOfferLevel(); });
+  showOfferLevel();
+  $('#of-save', root).addEventListener('click', async () => {
+    const km = num($('#of-km', root)); const fare = num($('#of-fare', root)); const m = $('#of-msg', root);
+    if (!(km > 0) || !(fare > 0)) { m.textContent = 'Add the km and the ride fare shown.'; m.classList.add('err'); return; }
+    const sane = plausible({ km, paid: fare });
+    if (!sane.ok) { m.textContent = sane.reason; m.classList.add('err'); return; }
+    const w = weights();
+    const predicted = passengerFare(w, km, estimate()(km)).fare;
+    changed();
+    lab.trips.push({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, platform: 'tada', offer: true, level: offerLevel,
+      ts: Date.now(), km, min: null, erp: 0, actual: fare, earned: null, surge: 'normal', timeSplit: true, ...(rounded(here()) || {}),
+      predicted, predictedNormal: predicted, rain: rainTagNow(here(), Date.now()) });
+    await db.setKV(KEY, lab.trips);
+    m.classList.remove('err');
+    m.textContent = `Offer saved \u2713 ${km} km · S$${fare.toFixed(2)} (${['grey', 'yellow', 'orange'][offerLevel]}). Thanks: TADA learns from it.`;
+    $('#of-km', root).value = ''; $('#of-fare', root).value = ''; offerLevel = 0; showOfferLevel();
+    renderAll(); syncLab();
+  });
+  applyPlatform();
   // Guide photos: tap one to see it full screen (with its marks); tap again to close.
   for (const shot of root.querySelectorAll('.log-shot-img')) shot.addEventListener('click', () => {
     const big = document.createElement('div');
@@ -409,19 +458,24 @@ export function renderBands() {
     : b0.scope === 'here'
       ? `From all trips, closest counting most: ${b0.nearHour} within 3 km and 1½ h of now; ${clText}.`
       : `Nothing within 3 km and 1½ h yet, so leaning on the closest available: ${clText}.`;
-  const word = { good: 'Surge', normal: 'Normal', bad: 'Bad', event: 'Event' };
+  const word = { good: 'Surge', normal: 'Normal', bad: 'Bad', event: 'Event', tgrey: 'Normal', tyellow: 'Surge', torange: 'Super surge' };
+  // TADA in TADA's own colours: grey normal, yellow surge (10%+), orange super surge (40%+); red below.
+  const tada = isTada();
+  const tadaN = tada ? dataset().filter((t) => !t.base).length : 0;
+  const learning = tada && tadaN < TADA_LEARN;
+  for (const b of bands) if (tada && b.state !== 'event') b.state = b.vs >= 0.4 ? 'torange' : b.vs >= 0.1 ? 'tyellow' : b.vs <= -0.1 ? 'bad' : 'tgrey';
   // Rain is its own small pill beside the price state (the card keeps Normal / Surge / Bad colours).
   const rainPill = wet ? `<span class="band-rain">${isThunder(wet.forecast) ? '⛈' : '☔'} Rain</span>` : '';
   // At a glance: where, the three prices, and the latest job. How it's worked out is on Log.
   void basis;
   box.innerHTML = `
-    <div class="band-head">Earn now · ${place ? `<b>${place}</b>` : 'all areas'} · ${at}</div>
-    ${latestLine(now)}
+    <div class="band-head">Earn now · ${place ? `<b>${place}</b>` : 'all areas'} · ${at}${tada ? ' · TADA' : ''}</div>
+    ${tada ? '' : latestLine(now)}
     ${bands.map((b) => `
-      <div class="band-card ${b.state}">
-        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-pills">${rainPill}<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : b.state !== 'normal' ? ` ${signed(b.vs)}` : ''}</span></span></div>
-        <div class="band-now">${money(b.now)}</div>
-        <div class="band-sub">Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}</div>
+      <div class="band-card ${b.state}${learning ? ' learning' : ''}">
+        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-pills">${rainPill}${learning ? `<span class="learn">learning · ${tadaN} of ${TADA_LEARN}</span>` : `<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : !['normal', 'tgrey'].includes(b.state) ? ` ${signed(b.vs)}` : ''}</span>`}</span></div>
+        <div class="band-now">${learning ? '~' : ''}${money(b.now)}</div>
+        <div class="band-sub">${tada ? `Normal ${money(b.normal)} · you keep ride fare + fuel − ${money(tadaFee(b.normal))}` : `Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}`}</div>
       </div>`).join('')}`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
@@ -430,7 +484,7 @@ setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
 function renderArrowTest() {
   const box = lab.root && $('#lab-arrow-test', lab.root);
   if (!box) return;
-  box.hidden = !isOwnerPhone();
+  box.hidden = !isOwnerPhone() || isTada();
   if (box.hidden) return;
   const a = arrowCompare(dataset());
   const line = (label, b) => (b.n ? `<div class="r"><span>${label}</span><b>${signed(b.lift)}</b><span class="note">${b.n} job${b.n === 1 ? '' : 's'} · ${signed(b.lo)} to ${signed(b.hi)} · ${b.over15} paid 15%+ more</span></div>` : `<div class="r"><span>${label}</span><b>—</b><span class="note">none yet</span></div>`);
@@ -459,15 +513,15 @@ function renderFormula() {
   card.hidden = !isOwner();
   if (card.hidden) return;
   const w = weights();
-  const learned = w.n - BASE_TRIPS.length;
+  const learned = w.n - PLATFORMS[lab.platform].base.filter((t) => t.surge === 'normal').length;
   const others = Object.keys(lab.shared).filter((id) => !lab.trips.some((t) => t.id === id)).length;
   const basis = learned > 0
     ? `Fitted from the base trip and ${learned} normal trip${learned === 1 ? '' : 's'}${others ? ` (${others} trip${others === 1 ? '' : 's'} from other drivers in the dataset)` : ''}.`
     : 'From the base trip only (11.58 km, paid S$16.80): it sets the level, more trips sort out the split.';
   $('#lab-formula', lab.root).innerHTML = `
-    <div class="k">Grab's published formula (Standard, normal pricing)</div>
+    <div class="k">${isTada() ? 'TADA: ride fare (normal pricing)' : 'Grab\'s published formula (Standard, normal pricing)'}</div>
     <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min)</div>
-    <div class="f">You earn = max(<b>${money(MIN_DRIVER)}</b>, ${(() => { const c = commission(); return c.kind === 'percent+fixed' ? `<b>${(c.keep * 100).toFixed(1)}%</b> × paid ${c.fixed < 0 ? '−' : '+'} <b>${money(Math.abs(c.fixed))}</b>` : `<b>${(c.keep * 100).toFixed(1)}%</b> × paid`; })()})</div>
+    <div class="f">${isTada() ? `You earn = ride fare + fuel support (<b>${money(tadaFuel(10))}</b> / <b>${money(tadaFuel(30))}</b>) − fee (<b>S$0.60</b>, <b>S$0.82</b> over S$25)</div><div class="f" hidden>` : ''}You earn = max(<b>${money(MIN_DRIVER)}</b>, ${(() => { const c = commission(); return c.kind === 'percent+fixed' ? `<b>${(c.keep * 100).toFixed(1)}%</b> × paid ${c.fixed < 0 ? '−' : '+'} <b>${money(Math.abs(c.fixed))}</b>` : `<b>${(c.keep * 100).toFixed(1)}%</b> × paid`; })()})</div>
     <div class="s">${basis} Weights update every time you save a trip.</div>`;
 }
 
@@ -478,7 +532,42 @@ function readForm() {
     cardMin: num($('#lab-cardmin', r)), pickupKm: num($('#lab-pickupkm', r)), timeSplit: true,
     ts: lab.pending ? lab.pending.ts : Date.now(), // when you tapped Got a job, else when you save
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
+    ...(isTada() ? tadaParts(num($('#lab-actual', r)), num($('#lab-earned', r))) : {}),
   };
+}
+// TADA: the second box is fuel support; you earned = ride fare + fuel support − the flat fee.
+function tadaParts(fare, fuelTyped) {
+  const fuel = fuelTyped != null ? fuelTyped : fare > 0 ? tadaFuel(fare) : null;
+  return { platform: 'tada', fuel, earned: fare > 0 ? Math.round((fare + (fuel || 0) - tadaFee(fare)) * 100) / 100 : null, level: lab.level };
+}
+
+// Grab or TADA: labels, colours and boxes that differ by app.
+function applyPlatform() {
+  const r = lab.root;
+  if (!r) return;
+  const t = isTada();
+  for (const el of r.querySelectorAll('.tada-only')) el.hidden = !t;
+  for (const el of r.querySelectorAll('.grab-only')) el.hidden = t;
+  r.querySelector('label[for="lab-actual"]').textContent = t ? 'Ride fare (S$)' : 'Passenger paid (S$)';
+  r.querySelector('label[for="lab-earned"]').textContent = t ? 'Fuel support (S$)' : 'You earned (S$)';
+  $('#lab-earned', r).placeholder = t ? 'e.g. 0.90' : '';
+  r.querySelector('.log-head h2').textContent = t ? 'Log a TADA job' : 'Log a job';
+  const note = $('#lab-mode-note', r);
+  if (note) note.textContent = t ? 'From TADA\u2019s Job Details.' : 'Three numbers from Grab\u2019s trip summary.';
+  const gj = document.querySelector('#got-job');
+  if (gj) gj.textContent = t ? 'Got a TADA job' : 'Got a job';
+  for (const b of document.querySelectorAll('#plat-bar button')) b.classList.toggle('sel', b.dataset.p === lab.platform);
+  document.body.dataset.platform = lab.platform;
+}
+export function setPlatform(p) {
+  lab.platform = p === 'tada' ? 'tada' : 'grab';
+  try { localStorage.setItem(PLAT_KEY, lab.platform); } catch { /* private mode */ }
+  usePlatform(lab.platform);
+  lab.surge = 'normal'; lab.level = 0;
+  applyPlatform();
+  const qb = document.querySelector('#job-body');
+  if (qb && qb.dataset.built) applyQuickPlatform();
+  renderAll();
 }
 
 // Live: the predicted fare and earnings appear as soon as distance and time are in.
@@ -486,7 +575,9 @@ const rainNoteText = () => { const w = rainNow((lab.pending && lab.pending.preci
 const showArrow = (btn, on) => { if (!btn) return; btn.hidden = !isOwnerPhone(); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); btn.classList.toggle('on', on); };
 function update(ev) {
   const r = lab.root;
-  showArrow($('#lab-arrow', r), lab.arrow);
+  showArrow($('#lab-arrow', r), lab.arrow && !isTada());
+  if (isTada()) $('#lab-arrow', r).hidden = true;
+  for (const b of r.querySelectorAll('#lab-level button')) b.classList.toggle('on', Number(b.dataset.l) === lab.level);
   const rn = $('#lab-rain', r);
   if (rn) { const t = rainNoteText(); rn.hidden = !t; rn.textContent = t; }
   if (ev && ev.type === 'input') { const m = $('#lab-msg', r); if (m.classList.contains('err')) { m.textContent = ''; m.classList.remove('err'); } }
@@ -519,7 +610,7 @@ function update(ev) {
   const cutLabel = c.kind === 'percent+fixed' ? `Grab keeps ${pct(1 - c.keep)} + ${money(-c.fixed)}` : `Grab keeps ${pct(1 - c.keep)}${c.n < 3 ? `, from ${c.n} trip${c.n === 1 ? '' : 's'}` : ''}`;
   sub.textContent = isOwner()
     ? `${p.atMinimum ? 'Minimum fare applies. ' : ''}${f.min > 0 ? '' : `Trip time estimated: ${Math.round(mins)} min. `}Normal-price formula. ${cutLabel}.`
-    : `${p.atMinimum ? 'Minimum fare. ' : ''}Now type what Grab shows.`;
+    : `${p.atMinimum ? 'Minimum fare. ' : ''}Now type what ${isTada() ? 'TADA' : 'Grab'} shows.`;
   const surgeEl = $('#lab-surge-est', r);
   const kindName = f.surge === 'airport' ? 'airport' : 'surge';
   const startText = f.surge === 'airport' ? 'No airport trips yet, so no difference is assumed: each airport trip you save shows whether they\'re priced differently.' : 'The +20% is a starting guess: each surge trip you save adjusts it.';
@@ -556,7 +647,7 @@ function update(ev) {
     const diff = Math.abs(off) < 0.005 ? 'Exact' : `${money(Math.abs(off))} too ${off > 0 ? 'high' : 'low'} (${(rel * 100).toFixed(0)}%)`;
     rows.push(`<div class="r ${grade[0]}"><span class="l">${label}</span><span>${money(formula)}</span><span>${money(actual)}</span><span class="d ${grade[0]}">${diff}<b>${grade[1]}</b></span></div>`);
   };
-  if (f.actual > 0) row('Passenger paid', shown, f.actual);
+  if (f.actual > 0) row(isTada() ? 'Ride fare' : 'Passenger paid', shown, f.actual);
   if (f.earned > 0) row('You earned', earn, f.earned);
   if (!rows.length) { check.innerHTML = ''; return; }
   if (!isOwner()) {
@@ -566,7 +657,8 @@ function update(ev) {
       const cls = Math.abs(vs) <= 0.05 ? 'close' : Math.abs(vs) <= 0.15 ? 'off' : 'far';
       return `<div class="kept">${label}: <b class="${cls}">${Math.abs(vs) < 0.005 ? 'spot on' : `${signed(vs)} vs estimate`}</b></div>`;
     };
-    check.innerHTML = plain('Passenger paid', shown, f.actual) + plain('You earned', earn, f.earned);
+    check.innerHTML = plain(isTada() ? 'Ride fare' : 'Passenger paid', shown, f.actual) + plain('You earned', earn, f.earned);
+    if (isTada() && f.actual > 0) check.innerHTML += `<div class="kept">You earned <b>${money(f.earned)}</b> = ride fare ${money(f.actual)} + fuel ${money(f.fuel || 0)} − fee ${money(tadaFee(f.actual))}</div>`;
     if (f.actual > 0 && f.surge === 'normal' && (f.actual - p.fare) / p.fare >= SURGE_PRICE_MIN) {
       check.innerHTML += `<div class="kept">\u2191 Paid <b>${Math.round(((f.actual - p.fare) / p.fare) * 100)}% above</b> normal: counts as a <b>surge</b> job.</div>`;
     }
@@ -619,16 +711,17 @@ async function save() {
     predicted, predictedEarned, predictedNormal: normalFare, surgeLiftUsed: sl ? sl.lift : null, todLift: t.near ? t.lift : null,
     weightsBefore: { base: w.base, perKm: w.perKm, perMin: w.perMin },
     rain: rainTagNow((lab.pending && lab.pending.precise) || here(), f.ts),
-    ...(isOwnerPhone() ? { arrow: lab.arrow ? 1 : 0 } : {}),
+    ...(isOwnerPhone() && !isTada() ? { arrow: lab.arrow ? 1 : 0 } : {}),
   });
   lab.arrow = false;
+  lab.level = 0;
   await db.setKV(KEY, lab.trips);
   jobLogged(f.ts);
   syncLab();
   msg.classList.remove('err');
   msg.textContent = isOwner()
     ? `Saved. Paid: estimate ${money(predicted)} vs ${money(f.actual)} (${offText(predicted, f.actual)}).${f.earned > 0 ? ` Earned: ${money(predictedEarned)} vs ${money(f.earned)} (${offText(predictedEarned, f.earned)}).` : ''} Estimates updated.`
-    : `Saved \u2713 ${f.km} km · paid ${money(f.actual)}${f.earned > 0 ? ` · earned ${money(f.earned)}` : ''}. Thanks: estimates updated.`;
+    : `Saved \u2713 ${f.km} km · ${isTada() ? 'ride fare' : 'paid'} ${money(f.actual)}${f.earned > 0 ? ` · earned ${money(f.earned)}` : ''}. Thanks: estimates updated.`;
   lab.pending = null;
   clearForm(true);
   renderAll();
@@ -672,6 +765,7 @@ function buildQuick() {
   body.querySelector('#qj-paid').addEventListener('input', quickUpdate);
   for (const b of body.querySelectorAll('#qj-surge button')) b.addEventListener('click', () => { quick.surge = b.dataset.v; quickUpdate(); });
   body.querySelector('#qj-save').addEventListener('click', quickSave);
+  applyQuickPlatform();
   body.querySelector('#qj-arrow').addEventListener('click', () => { quick.arrow = !quick.arrow; quickUpdate(); });
 }
 
@@ -717,13 +811,23 @@ async function routeTo(text) {
   }
 }
 
+function applyQuickPlatform() {
+  const t = isTada();
+  const lp = document.querySelector('label[for="qj-paid"]'); if (lp) lp.textContent = t ? 'Ride fare (S$)' : 'Paid by passenger (S$)';
+  const le = document.querySelector('label[for="qj-earned"]'); if (le) le.textContent = t ? 'Fuel support (S$)' : 'You earned (S$)';
+  const ar = document.querySelector('#qj-arrow'); if (ar && t) ar.hidden = true;
+  const title = document.querySelector('#job-sheet .sheet-title'); if (title) title.textContent = t ? 'Got a TADA job' : 'Got a job';
+}
 function quickRead() {
   const n = (id) => { const v = parseFloat(document.querySelector(id).value); return Number.isFinite(v) ? v : null; };
   const text = document.querySelector('#qj-km').value.trim();
   const typed = kmTyped(text);
   const r = quick.route;
   const km = typed ?? (r && r.km > 0 ? r.km : null);
-  return { km, drop: typed === null && r && r.km > 0 ? r.label : null, paid: n('#qj-paid'), earned: n('#qj-earned'), surge: quick.surge };
+  const base = { km, drop: typed === null && r && r.km > 0 ? r.label : null, paid: n('#qj-paid'), earned: n('#qj-earned'), surge: quick.surge };
+  if (!isTada()) return base;
+  const tp = tadaParts(base.paid, base.earned);
+  return { ...base, fuel: tp.fuel, earned: tp.earned };
 }
 
 // Safeguard: a fare far from the estimate (60%+ above, 40%+ below) needs a second tap on Save,
@@ -750,6 +854,7 @@ function quickEstimate(f) {
 }
 function quickUpdate() {
   showArrow(document.querySelector('#qj-arrow'), quick.arrow);
+  if (isTada()) { const ar = document.querySelector('#qj-arrow'); if (ar) ar.hidden = true; }
   const rn = document.querySelector('#qj-rain');
   if (rn) { const t = rainNoteText(); rn.hidden = !t; rn.textContent = t; }
   for (const b of document.querySelectorAll('#qj-surge button')) b.classList.toggle('sel', b.dataset.v === quick.surge);
@@ -773,7 +878,7 @@ async function quickSave() {
   const f = quickRead();
   const msg = document.querySelector('#qj-msg');
   const missing = !(f.km > 0) ? (quick.route && quick.route.pending ? 'Still finding the drop-off…' : 'Add the drop-off.')
-    : !(f.paid > 0) ? 'Add what the passenger paid.' : !(f.earned > 0) ? 'Add what you earned.' : '';
+    : !(f.paid > 0) ? (isTada() ? 'Add the ride fare.' : 'Add what the passenger paid.') : !(f.earned > 0) ? 'Add what you earned.' : '';
   if (missing) { msg.textContent = missing; msg.classList.add('err'); return; }
   const sane = plausible({ km: f.km, paid: f.paid, earned: f.earned });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
@@ -790,7 +895,8 @@ async function quickSave() {
     todLift: t.near ? t.lift : null, weightsBefore: { base: e.w.base, perKm: e.w.perKm, perMin: e.w.perMin }, timeSplit: true,
     ...(f.drop ? { dropLabel: f.drop, kmSource: 'map' } : {}), // drop-off name stays on this phone
     rain: rainTagNow((lab.pending && lab.pending.precise) || here(), e.ts),
-    ...(isOwnerPhone() ? { arrow: quick.arrow ? 1 : 0 } : {}),
+    ...(isOwnerPhone() && !isTada() ? { arrow: quick.arrow ? 1 : 0 } : {}),
+    ...(isTada() ? { platform: 'tada', fuel: f.fuel, level: 0 } : {}),
   });
   quick.arrow = false;
   await db.setKV(KEY, lab.trips);
@@ -803,7 +909,7 @@ async function quickSave() {
   quick.route = null;
   closeJob();
   const note = document.querySelector('#got-job-msg');
-  if (note) note.innerHTML = `Saved ${pad(saved.getHours())}:${pad(saved.getMinutes())} · ${f.km} km${f.drop ? ` to <b>${f.drop.replace(/[<>&"]/g, '')}</b>` : ''} · paid ${money(f.paid)}, earned ${money(f.earned)}`;
+  if (note) note.innerHTML = `Saved ${pad(saved.getHours())}:${pad(saved.getMinutes())} · ${f.km} km${f.drop ? ` to <b>${f.drop.replace(/[<>&"]/g, '')}</b>` : ''} · ${isTada() ? 'ride fare' : 'paid'} ${money(f.paid)}, earned ${money(f.earned)}`;
   renderAll();
   syncLab();
 }
@@ -894,7 +1000,7 @@ function renderTimeTable() {
 
 function renderCut() {
   const box = $('#lab-cut', lab.root);
-  box.hidden = !isOwner();
+  box.hidden = !isOwner() || isTada();
   const head = $('#lab-cut-h', lab.root);
   if (head) head.hidden = box.hidden;
   if (box.hidden) return;
@@ -912,13 +1018,13 @@ function renderCut() {
   box.innerHTML = `<p class="note">${verdict}${range}</p>${low}`;
 }
 
-const surgeLabel = (t) => (t.surge === 'airport' ? ' · Airport' : isSurgeTrip(t, weights(), estimate(), commission()) ? ' · Surge (paid 15%+ more)' : '') + (t.arrow === 1 ? ' · green ↑ seen' : t.arrow === 0 ? ' · no ↑' : '');
+const surgeLabel = (t) => (t.offer ? ' · offer (not taken)' : '') + (t.surge === 'airport' ? ' · Airport' : isSurgeTrip(t, weights(), estimate(), commission()) ? ' · Surge (paid 15%+ more)' : '') + (t.arrow === 1 ? ' · green ↑ seen' : t.arrow === 0 ? ' · no ↑' : '') + (t.level === 2 ? ' · orange' : t.level === 1 ? ' · yellow' : '');
 function renderList() {
   renderCut();
   $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload so every driver\'s estimates learn from them.';
   const box = $('#lab-list', lab.root);
-  box.innerHTML = lab.trips.length ? '' : '<p class="empty">No jobs logged yet. Your first one takes 10 seconds.</p>';
-  for (const t of [...lab.trips].reverse()) {
+  box.innerHTML = lab.trips.some((x) => platformOf(x) === lab.platform) ? '' : '<p class="empty">No jobs logged yet. Your first one takes 10 seconds.</p>';
+  for (const t of [...lab.trips].filter((x) => platformOf(x) === lab.platform).reverse()) {
     const cut = cutOf(t);
     const card = document.createElement('div');
     card.className = 'card';
@@ -973,7 +1079,7 @@ function renderList() {
 
 // The built-in base trip, listed last so it's clear where the starting weights came from.
 function baseCard() {
-  const t = BASE_TRIPS[0];
+  const t = PLATFORMS[lab.platform].base[0];
   const card = document.createElement('div');
   card.className = 'card';
   card.innerHTML = `

@@ -712,3 +712,31 @@ test('fresh surge in one area does not light up another 6 km away (the "just now
   assert.ok(atRv > 0.2, `River Valley sees its surge: ${atRv}`);
   assert.ok(atTpy < 0.12, `Toa Payoh barely moves: ${atTpy}`);
 });
+
+test('apps: TADA learns on its own (its receipts, its flat-fee pay rule); Grab is untouched', async () => {
+  const F = await import('../public/formula.js');
+  const grabBefore = F.fitWeights([]);
+  F.usePlatform('tada');
+  try {
+    assert.equal(F.platformNow(), 'tada');
+    assert.equal(F.withBase([])[0].id, 'tada-base-1', 'starts from the TADA receipts');
+    const c = F.fitCommission([]);
+    assert.equal(c.kind, 'tada');
+    // the receipts: 11.60 + 0.90 − 0.60 = 11.90; 40.20 + 1.20 − 0.82 = 40.58
+    assert.equal(F.driverEarns(c, 11.6), 11.9);
+    assert.equal(F.driverEarns(c, 40.2), 40.58);
+    assert.equal(F.tadaFee(25), 0.6);
+    assert.equal(F.tadaFee(25.01), 0.82);
+    // the starting formula comes close to the non-airport receipt
+    const w = F.fitWeights([]);
+    assert.ok(Math.abs(F.passengerFare(w, 4.93, 9).fare - 11.6) < 0.05);
+    // a yellow / orange TADA job is surged: it doesn't teach the normal price
+    assert.equal(F.usable({ km: 8, actual: 20, surge: 'normal', level: 2, platform: 'tada' }), false);
+    assert.equal(F.usable({ km: 8, actual: 15, surge: 'normal', level: 0, platform: 'tada' }), true);
+  } finally {
+    F.usePlatform('grab');
+  }
+  assert.deepEqual(F.fitWeights([]), grabBefore, 'back on Grab, nothing changed');
+  assert.equal(F.platformOf({}), 'grab');
+  assert.equal(F.platformOf({ platform: 'tada' }), 'tada');
+});

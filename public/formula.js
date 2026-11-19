@@ -32,6 +32,33 @@ const B = BASE_TRIPS[0];
 const SCALE = (B.actual - B.erp) / (GENERIC.base + GENERIC.perKm * B.km + GENERIC.perMin * B.min);
 export const SEED = { base: GENERIC.base * SCALE, perKm: GENERIC.perKm * SCALE, perMin: GENERIC.perMin * SCALE };
 
+// ---- Apps (platforms) ----
+// Each app learns its own formula from its own trips; they never mix. Grab: what the passenger
+// paid, and Grab keeps a % (learned). TADA: the "ride fare" (the driver's part, before fuel support
+// and fees); the driver gets ride fare + fuel support − a flat driver platform fee (S$0.55 / S$0.75
+// + GST: S$0.60 up to a S$25 fare, S$0.82 over), no % cut. TADA starts from the owner's receipts.
+export const TADA_BASE_TRIPS = [
+  { id: 'tada-base-1', base: true, platform: 'tada', ts: Date.parse('2026-11-18T03:11:00+08:00'), km: 4.93, min: 9, erp: 0, actual: 11.6, fuel: 0.9, earned: 11.9, surge: 'normal',
+    note: 'Orchard → Balestier, AnyTADA, 03:11–03:20. Ride fare 11.60 + fuel support 0.90 − driver platform fee 0.60 = 11.90 (rider paid 13.88).' },
+  { id: 'tada-base-2', base: true, platform: 'tada', ts: Date.parse('2026-11-11T00:30:00+08:00'), km: 27.86, min: 23, erp: 0, actual: 40.2, fuel: 1.2, earned: 40.58, surge: 'airport',
+    note: 'Changi T1 / Jewel → Yishun, AnyTADA, 00:30–00:53 (airport). Ride fare 40.20 + fuel support 1.20 − fee 0.82 = 40.58 (rider paid 42.76).' },
+];
+const TB = TADA_BASE_TRIPS[0];
+const TSCALE = TB.actual / (GENERIC.base + GENERIC.perKm * TB.km + GENERIC.perMin * TB.min);
+export const TADA_SEED = { base: GENERIC.base * TSCALE, perKm: GENERIC.perKm * TSCALE, perMin: GENERIC.perMin * TSCALE };
+export const TADA_FEE_LINE = 25;
+export const tadaFee = (fare) => (fare > TADA_FEE_LINE ? 0.82 : 0.6);
+export const tadaFuel = (fare) => (fare > TADA_FEE_LINE ? 1.2 : 0.9); // from two receipts so far
+export const PLATFORMS = {
+  grab: { id: 'grab', name: 'Grab', base: BASE_TRIPS, seed: SEED, minFare: MIN_PASSENGER, minDriver: MIN_DRIVER },
+  tada: { id: 'tada', name: 'TADA', base: TADA_BASE_TRIPS, seed: TADA_SEED, minFare: 0, minDriver: 0 },
+};
+let P = PLATFORMS.grab;
+// Which app the estimates are for (the app switches it; everything below follows).
+export const usePlatform = (id) => { P = PLATFORMS[id] || PLATFORMS.grab; };
+export const platformNow = () => P.id;
+export const platformOf = (t) => (t && t.platform === 'tada' ? 'tada' : 'grab');
+
 // How far one trip's worth of evidence may move each weight: a gentle pull back toward the seed,
 // so a few trips give sensible weights instead of wild ones. It fades as trips add up.
 const PRIOR = { base: 3, perKm: 0.3, perMin: 0.16 };
@@ -42,8 +69,8 @@ const r2 = (n) => Math.round(n * 100) / 100;
 // What the passenger pays for a trip, by the formula.
 export function passengerFare(w, km, min, erp = 0) {
   const core = w.base + w.perKm * km + w.perMin * min;
-  const atMinimum = core < MIN_PASSENGER;
-  return { core: r2(core), atMinimum, fare: r2(Math.max(MIN_PASSENGER, core) + (erp || 0)) };
+  const atMinimum = core < P.minFare;
+  return { core: r2(core), atMinimum, fare: r2(Math.max(P.minFare, core) + (erp || 0)) };
 }
 
 // Solve (XᵀX) w = Xᵀy. Returns null if the terms can't be told apart.
@@ -76,12 +103,14 @@ function lsq(X, y) {
 const memo = (fn) => {
   const cache = new WeakMap();
   return (trips) => {
-    if (!cache.has(trips)) cache.set(trips, fn(trips));
-    return cache.get(trips);
+    if (!cache.has(trips)) cache.set(trips, new Map());
+    const per = cache.get(trips); // one answer per app
+    if (!per.has(P.id)) per.set(P.id, fn(trips));
+    return per.get(P.id);
   };
 };
 
-export const withBase = memo((trips) => [...BASE_TRIPS, ...trips.filter((t) => !t.base)]);
+export const withBase = memo((trips) => [...P.base, ...trips.filter((t) => !t.base)]);
 
 // ---- Trip time ----
 // The passenger is quoted before a driver is matched, so the price depends on pickup → drop-off
@@ -121,7 +150,8 @@ export function isSurgeTrip(t, w, est, c) {
 export function usable(t) {
   if (t.event || !(t.km > 0) || !(t.actual > 0)) return false;
   if (SURGE_BY_PRICE ? t.surge === 'airport' : t.surge !== 'normal') return false;
-  return t.actual - (t.erp || 0) > MIN_PASSENGER + 0.005;
+  if (t.level >= 1) return false; // TADA showed yellow or orange: surged, so not the normal price
+  return t.actual - (t.erp || 0) > P.minFare + 0.005;
 }
 
 // Best weights: least squares on what the passenger paid (minus ERP / tolls), with the gentle
@@ -133,13 +163,13 @@ export function fitWeights(trips, { includeBase = true } = {}) {
 function fitWeightsOf(trips, includeBase) {
   const pool = includeBase ? withBase(trips) : trips;
   const rows = pool.filter(usable);
-  if (!rows.length) return { ...SEED, n: 0 };
+  if (!rows.length) return { ...P.seed, n: 0 };
   const est = timeEstimator(pool);
   // Test: first the trips tagged Normal (no green arrow) set the level when there are 5 or more,
   // else all; jobs that paid SURGE_PRICE_MIN+ above it are surge jobs; the rest are fitted again.
   const plain = rows.filter((t) => t.base || t.surge === 'normal');
   const w = fitRows(SURGE_BY_PRICE && plain.length >= 6 ? plain : rows, est);
-  if (!w) return { ...SEED, n: rows.length };
+  if (!w) return { ...P.seed, n: rows.length };
   if (SURGE_BY_PRICE) {
     const keep = rows.filter((t) => t.base || (t.actual - (t.erp || 0)) / passengerFare(w, t.km, tripTime(t, est)).fare - 1 < SURGE_PRICE_MIN);
     if (keep.length < rows.length) {
@@ -156,7 +186,7 @@ function fitRows(rows, est) {
     const row = [0, 0, 0];
     row[i] = 1 / PRIOR[term];
     X.push(row);
-    y.push(SEED[term] / PRIOR[term]);
+    y.push(P.seed[term] / PRIOR[term]);
   });
   let w = lsq(X, y);
   if (!w) return null;
@@ -218,6 +248,8 @@ export const isLowCut = (t) => { const c = cutOf(t); return Boolean(c) && c.rate
 
 export const fitCommission = memo(fitCommissionOf);
 function fitCommissionOf(trips) {
+  // TADA: no % cut; the driver gets ride fare + fuel support − a flat fee (see tadaFee).
+  if (P.id === 'tada') return { kind: 'tada', keep: 1, fixed: 0, n: withBase(trips).filter((t) => t.earned > 0).length, avgRate: 0, spread: 0, lo: 0, hi: 0, low: [] };
   // Trips paid at the driver's S$6.20 floor follow the floor, not the usual rule: leave them out.
   const all = withBase(trips).filter((t) => cutOf(t) && !(Math.abs(t.earned - (t.erp || 0) - MIN_DRIVER) < 0.005));
   const low = all.filter(isLowCut);
@@ -242,6 +274,7 @@ const SEED_CUT_FALLBACK = 0.28;
 
 // What the driver would earn on a trip the passenger paid `paid` for (usual cut).
 export function driverEarns(model, paid, erp = 0) {
+  if (model.kind === 'tada') { const f = paid - (erp || 0); return r2(f + tadaFuel(f) - tadaFee(f) + (erp || 0)); }
   return r2(Math.max(MIN_DRIVER, model.keep * (paid - (erp || 0)) + model.fixed) + (erp || 0));
 }
 
