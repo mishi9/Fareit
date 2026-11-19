@@ -993,10 +993,25 @@ export function pointsFrom(days) {
   const total = Math.floor(jobs / POINTS_PER_JOBS) + active + streak * STREAK_BONUS;
   return { total, jobs, activeDays: active, streaks: streak, run: prev === sgDay(Date.now()) || prev === sgDay(Date.now() - 86400000) ? run : 0 };
 }
+// Two kept by hand: the owner is Pig#0001, and the first tester keeps his code name, Seal#0002.
+// Everyone else gets a random number from 1000 to 9999 (so these never come up again).
+export const OWNER_IDENT = { num: 1, animal: 'Pig' };
+export const FIRST_TESTER = { codeName: 'Seal', num: 2 };
 async function identOf(env, who) {
   await ensureSchema(env.DB);
   let row = await env.DB.prepare('SELECT who, num, animal, changed_at FROM ident WHERE who = ?1').bind(who).first();
   if (row) return row;
+  const keep = async (num, animal) => {
+    const taken = await env.DB.prepare('SELECT who FROM ident WHERE num = ?1').bind(num).first();
+    if (taken) return null;
+    await env.DB.prepare('INSERT INTO ident (who, num, animal) VALUES (?1, ?2, ?3)').bind(who, num, animal).run();
+    return { who, num, animal, changed_at: null };
+  };
+  if (who === 'owner') { const r = await keep(OWNER_IDENT.num, OWNER_IDENT.animal); if (r) return r; }
+  else {
+    const inv = await env.DB.prepare('SELECT animal FROM invites WHERE token = ?1').bind(who).first();
+    if (inv && inv.animal === FIRST_TESTER.codeName) { const r = await keep(FIRST_TESTER.num, FIRST_TESTER.codeName); if (r) return r; }
+  }
   for (let i = 0; i < 50; i++) {
     const num = 1000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 9000);
     try {

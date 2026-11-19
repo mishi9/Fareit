@@ -414,3 +414,19 @@ test('Animal#1234: a fixed number per driver, an animal from the list, changed a
   assert.equal(lb.players, 2, 'the owner is not ranked');
   assert.equal((await req('/api/leaderboard')).status, 401);
 });
+
+test('the owner is Pig#0001 and the tester code-named Seal keeps it as Seal#0002; nobody else gets those', async () => {
+  const { req, owner, env } = setup();
+  const okey = await owner();
+  const o = (await req('/api/me', { key: okey })).body;
+  assert.deepEqual([o.num, o.animal], [1, 'Pig']);
+  const { token } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  await env.DB.prepare('UPDATE invites SET animal = ?2 WHERE token = ?1').bind(token, 'Seal').run();
+  const sealKey = (await req('/api/access/redeem', { body: { token, device: 'seal-phone' } })).body.key;
+  const s = (await req('/api/me', { key: sealKey })).body;
+  assert.deepEqual([s.num, s.animal], [2, 'Seal']);
+  const other = (await req('/api/invites/create', { body: {}, key: okey })).body.token;
+  const k = (await req('/api/access/redeem', { body: { token: other, device: 'other-phone' } })).body.key;
+  const n = (await req('/api/me', { key: k })).body.num;
+  assert.ok(n >= 1000 && n <= 9999, `random: ${n}`);
+});

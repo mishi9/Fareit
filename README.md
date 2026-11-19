@@ -173,7 +173,7 @@ Grab's green arrow shows on most jobs, even S$6.20 ones, so it doesn't say a job
 
 ## You: Animal#1234, points and the leaderboard
 
-- **Identity:** every driver gets a fixed 4-digit number from the server and picks an animal (any with an emoji) the first time they open the app: **🐷 Pig#1726**. Many can be Pig; the number tells them apart. The animal can change once a month, the number never. It's the only identifier: no name, phone number or email. The owner's invite list shows the same Animal#1234.
+- **Identity:** the owner is **Pig#0001** and the first tester keeps his code name as **Seal#0002**; every other driver gets a random 4-digit number (1000–9999) from the server and picks an animal (any with an emoji) the first time they open the app: **🐷 Pig#1726**. Many can be Pig; the number tells them apart. The animal can change once a month, the number never. It's the only identifier: no name, phone number or email. The owner's invite list shows the same Animal#1234.
 - **Header chip:** your animal and points this month (tap: the leaderboard). The map status moved to Settings → This phone → Map, and the chip only shows it when the map isn't working.
 - **Points (this calendar month):** 1 per 5 jobs logged (TADA offers count) · +1 for each day with 3+ jobs · +3 for every 7 days in a row. Up to 30 jobs a day count; points are on hold while a driver's far-off rate is flagged. Counted on the server from the trips already stored.
 - **Leaderboard (Settings → This month):** your rank and points, the top 10 by Animal#1234 only, how points work. The top driver of the month wins a free month. The owner isn't ranked.
