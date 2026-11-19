@@ -247,7 +247,7 @@ export async function buildLab(root) {
       <p class="log-km-note">Distances in <b>km</b>: if Grab shows metres, divide by 1000. <b>800 m = 0.8</b> · 1,250 m = 1.25</p>
       <div class="log-guide-key tada-only" hidden>
         <span><span class="log-n">1</span> Trip km (TADA's Job Details, under the date)</span>
-        <span><span class="log-n">2</span> Rider's fare (what the passenger pays) · Ride fare (what the job offer showed you, before the S$0.60 / S$0.82 fee)</span>
+        <span><span class="log-n">2</span> Ride fare (what the job offer showed you, before the S$0.60 / S$0.82 fee) · Rider's fare, optional (what the passenger paid, on the receipt afterwards)</span>
         <span class="adv">The driver platform fee (S$0.60, or S$0.82 over a S$25 fare) is taken off for you.</span>
       </div>
       <div class="log-guide-key grab-only">
@@ -625,9 +625,9 @@ function applyPlatform() {
   const t = isTada();
   for (const el of r.querySelectorAll('.tada-only')) el.hidden = !t;
   for (const el of r.querySelectorAll('.grab-only')) el.hidden = t;
-  r.querySelector('label[for="lab-actual"]').textContent = t ? 'Rider\u2019s fare (S$)' : 'Passenger paid (S$)';
+  r.querySelector('label[for="lab-actual"]').textContent = t ? 'Rider\u2019s fare (optional)' : 'Passenger paid (S$)';
   r.querySelector('label[for="lab-earned"]').textContent = t ? 'Ride fare (S$)' : 'You earned (S$)';
-  $('#lab-actual', r).placeholder = t ? 'passenger pays' : '';
+  $('#lab-actual', r).placeholder = t ? 'if you know it' : '';
   $('#lab-earned', r).placeholder = t ? 'as the offer showed' : '';
   r.querySelector('.log-head h2').textContent = t ? 'Log a TADA job' : 'Log a job';
   const note = $('#lab-mode-note', r);
@@ -768,9 +768,8 @@ async function save() {
   const f = readForm();
   const msg = $('#lab-msg', lab.root);
   if (!(f.km > 0)) { msg.textContent = 'Step 1: add the trip km.'; msg.classList.add('err'); $('#lab-km', lab.root).focus(); return; }
-  if (isTada() && !(f.riderFare > 0)) { msg.textContent = 'Step 2: add the Rider\u2019s fare (what the passenger pays).'; msg.classList.add('err'); $('#lab-actual', lab.root).focus(); return; }
   if (!(f.actual > 0)) { msg.textContent = isTada() ? 'Step 2: add the Ride fare (your earnings, before the fee).' : 'Step 2: add what the passenger paid.'; msg.classList.add('err'); $(isTada() ? '#lab-earned' : '#lab-actual', lab.root).focus(); return; }
-  if (isTada() && f.riderFare < f.actual && !swapOk($('#lab-save', lab.root), msg, f.riderFare, f.actual)) return;
+  if (isTada() && f.riderFare > 0 && f.riderFare < f.actual && !swapOk($('#lab-save', lab.root), msg, f.riderFare, f.actual)) return;
   const sane = plausible({ km: f.km, min: f.min, paid: f.actual, earned: f.earned, erp: f.erp });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Predictions are recorded before this trip changes anything: an honest test each time.
@@ -900,7 +899,7 @@ async function routeTo(text) {
 
 function applyQuickPlatform() {
   const t = isTada();
-  const lp = document.querySelector('label[for="qj-paid"]'); if (lp) lp.textContent = t ? 'Rider\u2019s fare (S$)' : 'Paid by passenger (S$)';
+  const lp = document.querySelector('label[for="qj-paid"]'); if (lp) lp.textContent = t ? 'Rider\u2019s fare (optional)' : 'Paid by passenger (S$)';
   const le = document.querySelector('label[for="qj-earned"]'); if (le) le.textContent = t ? 'Ride fare (S$)' : 'You earned (S$)';
   const ar = document.querySelector('#qj-arrow'); if (ar && t) ar.hidden = true;
   const title = document.querySelector('#job-sheet .sheet-title'); if (title) title.textContent = t ? 'Got a TADA job' : 'Got a job';
@@ -985,10 +984,9 @@ async function quickSave() {
   const f = quickRead();
   const msg = document.querySelector('#qj-msg');
   const missing = !(f.km > 0) ? (quick.route && quick.route.pending ? 'Still finding the drop-off…' : 'Add the drop-off.')
-    : isTada() && !(f.riderFare > 0) ? 'Add the Rider\u2019s fare (what the passenger pays).'
     : !(f.paid > 0) ? (isTada() ? 'Add the Ride fare (your earnings, before the fee).' : 'Add what the passenger paid.') : !(f.earned > 0) ? 'Add what you earned.' : '';
   if (missing) { msg.textContent = missing; msg.classList.add('err'); return; }
-  if (isTada() && f.riderFare < f.paid && !swapOk(document.querySelector('#qj-save'), msg, f.riderFare, f.paid)) return;
+  if (isTada() && f.riderFare > 0 && f.riderFare < f.paid && !swapOk(document.querySelector('#qj-save'), msg, f.riderFare, f.paid)) return;
   const sane = plausible({ km: f.km, paid: f.paid, earned: f.earned });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Recorded before the trip changes anything (an honest test), at the job's own time and place.
@@ -1174,7 +1172,7 @@ function renderList() {
         const f = document.createElement('div');
         f.className = 'job-edit stack';
         f.innerHTML = `<div class="row2">
-            <div class="field"><label>${tada ? 'Rider\u2019s fare (S$)' : 'Passenger paid (S$)'}</label><input type="number" inputmode="decimal" step="0.01" min="0" data-k="a" value="${tada ? (t.riderFare ?? '') : (t.actual ?? '')}"></div>
+            <div class="field"><label>${tada ? 'Rider\u2019s fare (optional)' : 'Passenger paid (S$)'}</label><input type="number" inputmode="decimal" step="0.01" min="0" data-k="a" value="${tada ? (t.riderFare ?? '') : (t.actual ?? '')}"></div>
             <div class="field"><label>${tada ? 'Ride fare (S$)' : 'You earned (S$)'}</label><input type="number" inputmode="decimal" step="0.01" min="0" data-k="b" value="${tada ? (t.actual ?? '') : (t.earned ?? '')}"></div></div>
           <div class="row2"><div class="field"><label>Trip km</label><input type="number" inputmode="decimal" step="0.1" min="0" data-k="km" value="${t.km ?? ''}"></div>
             <button type="button" class="primary" data-k="save">Save changes</button></div>
@@ -1186,8 +1184,8 @@ function renderList() {
           const m = f.querySelector('.msg');
           const next = tada ? { km, ...tadaParts(b, a) } : { km, actual: a, earned: b };
           delete next.level; // keep the colour it was saved with
-          if (!(km > 0) || !(next.actual > 0) || (tada && !(a > 0))) { m.textContent = 'Fill in all three.'; m.classList.add('err'); return; }
-          if (tada && a < b) { m.textContent = 'The rider\u2019s fare is normally more than the ride fare: are they the wrong way round?'; m.classList.add('err'); if (f.dataset.ok !== '1') { f.dataset.ok = '1'; return; } }
+          if (!(km > 0) || !(next.actual > 0)) { m.textContent = tada ? 'Fill in the ride fare and km.' : 'Fill in all three.'; m.classList.add('err'); return; }
+          if (tada && a > 0 && a < b) { m.textContent = 'The rider\u2019s fare is normally more than the ride fare: are they the wrong way round?'; m.classList.add('err'); if (f.dataset.ok !== '1') { f.dataset.ok = '1'; return; } }
           const sane = plausible({ km, paid: next.actual, earned: next.earned });
           if (!sane.ok) { m.textContent = sane.reason; m.classList.add('err'); return; }
           Object.assign(t, next, { edited: Date.now() });

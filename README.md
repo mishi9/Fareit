@@ -191,7 +191,7 @@ A **Grab | TADA** switch sits above the tab bar on Radar and Log (remembered on 
 - **TADA's colours:** Log and Log an offer take TADA's colour on the job (grey normal, yellow surge, orange super surge). Yellow and orange jobs don't teach the normal price. Radar's TADA cards use the same colours: grey normal, yellow surge (10%+), orange super surge (40%+), red below.
 - **Learning:** TADA cards show "~" and "learning · n of 15" until there are 15 TADA trips.
 - **Log an offer:** a TADA offer seen but not taken (km, ride fare shown, colour) still teaches TADA's prices; it isn't an earning.
-- **Got a job** and **Log** follow the switch. TADA asks for the **Rider's fare** (what the passenger pays) and the **Ride fare** (what the job offer showed, before the S$0.60 / S$0.82 fee; fuel support is already in it). The formula learns the ride fare (what offers show as Net Fare); the rider's fare is kept with each job. Earnings shows TADA jobs under TADA. The green arrow test, the surge banner and the Grab guide screenshots are Grab only.
+- **Got a job** and **Log** follow the switch. TADA asks for the **Ride fare** (what the job offer showed, before the S$0.60 / S$0.82 fee; fuel support is already in it) and, optionally, the **Rider's fare** (what the passenger paid: only on the receipt afterwards). The formula learns the ride fare (what offers show as Net Fare); the rider's fare is kept with each job. Earnings shows TADA jobs under TADA. The green arrow test, the surge banner and the Grab guide screenshots are Grab only.
 
 ## Rain
 

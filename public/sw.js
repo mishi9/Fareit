@@ -2,7 +2,7 @@
 // Version v0.MINOR.PATCH (beta): a new feature or change goes up a minor, a bug fix a patch.
 // Phones from before v0.70.0 read the version as "agaration-v" + a number: this keeps them updating.
 // (legacy marker: agaration-v70)
-const CACHE = 'agaration-0.70.1';
+const CACHE = 'agaration-0.70.2';
 const SHELL = [
   './',
   'index.html',
