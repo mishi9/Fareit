@@ -318,6 +318,9 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS ident (who TEXT PRIMARY KEY, num INTEGER NOT NULL UNIQUE, animal TEXT, changed_at INTEGER)',
   // Shared copies of outside data (e.g. the arrivals list), so every phone shares one fetch.
   'CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, value TEXT NOT NULL)',
+  // Expressway travel times as LTA gives them (every 5 minutes), one row per expressway and
+  // direction: the history that "usual for this hour" and a traffic level will be learned from.
+  'CREATE TABLE IF NOT EXISTS travel_log (at INTEGER NOT NULL, road TEXT NOT NULL, dir INTEGER NOT NULL, min INTEGER NOT NULL, PRIMARY KEY (at, road, dir))',
   `CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, venue TEXT NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL,
     starts_at INTEGER, ends_at INTEGER NOT NULL, created_at INTEGER NOT NULL, deleted INTEGER DEFAULT 0
@@ -914,53 +917,87 @@ export function cleanFloods(rows, now = Date.now()) {
         severity: String(r.severity || ''), at: Date.parse(r.dateTime) || null };
     });
 }
-async function fetchLta(env) {
+// How often each feed changes at LTA (DataMall guide): travel times every 5 minutes, incidents
+// every 2. The server asks no more often than that, whatever the number of phones; phones get the
+// shared copy.
+export const TRAVEL_REFRESH_MIN = 5;
+export const INFO_REFRESH_MIN = 2;
+export const TRAVEL_LOG_DAYS = 35;
+async function fetchLta(env, withTravel = true, withRest = true) {
+  const none = Promise.resolve(null);
   const [inc, travel, train, flood] = await Promise.allSettled([
-    ltaGet(env, 'TrafficIncidents'), ltaGet(env, 'EstTravelTimes', 3), ltaGet(env, 'TrainServiceAlerts'), ltaGet(env, 'PubFloodAlerts'),
+    withRest ? ltaGet(env, 'TrafficIncidents') : none, withTravel ? ltaGet(env, 'EstTravelTimes', 3) : none,
+    withRest ? ltaGet(env, 'TrainServiceAlerts') : none, withRest ? ltaGet(env, 'PubFloodAlerts') : none,
   ]);
   const at = Date.now();
   const out = { at };
-  if (inc.status === 'fulfilled') out.incidents = cleanIncidents(inc.value);
-  if (travel.status === 'fulfilled') out.travel = cleanTravel(travel.value);
-  if (train.status === 'fulfilled') out.train = cleanTrain(train.value);
-  if (flood.status === 'fulfilled') out.floods = cleanFloods(flood.value);
+  if (withRest && inc.status === 'fulfilled') out.incidents = cleanIncidents(inc.value);
+  if (withTravel && travel.status === 'fulfilled') { out.travel = cleanTravel(travel.value); out.travelAt = at; }
+  if (withRest && train.status === 'fulfilled') out.train = cleanTrain(train.value);
+  if (withRest && flood.status === 'fulfilled') out.floods = cleanFloods(flood.value);
   const failed = [inc, travel, train, flood].filter((x) => x.status === 'rejected').map((x) => String(x.reason?.message || x.reason));
   if (failed.length) out.errors = failed;
   return out;
 }
 
-async function fetchLive(env = {}) {
+async function fetchLive(env = {}, withTravel = true, withRest = true) {
   const get = async (path) => {
     const res = await fetch(`https://api.data.gov.sg/v1/transport/${path}`, { headers: { accept: 'application/json' } });
     if (!res.ok) throw new Error(`data.gov.sg ${res.status}`);
     return res.json();
   };
   const out = {};
-  const [taxis] = await Promise.allSettled([get('taxi-availability')]);
+  const [taxis] = await Promise.allSettled([withRest ? get('taxi-availability') : Promise.reject(new Error('not due'))]);
   if (taxis.status === 'fulfilled') {
     const f = taxis.value.features?.[0];
     const coords = f?.geometry?.coordinates || [];
     out.taxis = { changi: changiTaxis(coords), total: coords.length, at: Date.parse(f?.properties?.timestamp) || Date.now() };
   }
   if (env.LTA_KEY) {
-    try { out.lta = await fetchLta(env); } catch { /* keep the last copy */ }
+    try { out.lta = await fetchLta(env, withTravel, withRest); } catch { /* keep the last copy */ }
   }
   return out;
 }
 
-async function getInfo(env) {
+// The shared copy, refreshed when it's due (a phone asking, or the 5-minute schedule).
+export async function refreshInfo(env, now = Date.now()) {
   await ensureSchema(env.DB);
-  const now = Date.now();
   const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'info'").first();
   let live = row ? JSON.parse(row.value) : null;
-  if (!row || now - row.at >= 2 * 60000) {
+  const last = live && live.lta ? live.lta : {};
+  // each feed when it's due: incidents, MRT, floods and taxis every 2 minutes; travel times every 5
+  const withRest = !row || now - (live.restAt || row.at) >= INFO_REFRESH_MIN * 60000;
+  const withTravel = Boolean(env.LTA_KEY) && (!last.travelAt || now - last.travelAt >= TRAVEL_REFRESH_MIN * 60000 - 15000);
+  if (withRest || withTravel) {
     try {
-      const fresh = await fetchLive(env);
-      live = { ...(live || {}), ...fresh };
+      const fresh = await fetchLive(env, withTravel, withRest);
+      if (fresh.lta && withTravel && fresh.lta.travel) fresh.lta.travelAt = now;
+      // the feeds that weren't due keep their last copy
+      if (fresh.lta) fresh.lta = { ...last, ...Object.fromEntries(Object.entries(fresh.lta).filter(([, v]) => v !== undefined)) };
+      if (!withRest) delete fresh.taxis;
+      live = { ...(live || {}), ...fresh, ...(withRest ? { restAt: now } : {}) };
       await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('info', ?1, ?2)
         ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(now, JSON.stringify(live)).run();
+      if (withTravel && fresh.lta && fresh.lta.travel) await logTravel(env, fresh.lta.travelAt, fresh.lta.travel);
     } catch { /* keep the last copy */ }
   }
+  return live;
+}
+// Record one reading: each expressway and direction's total minutes, at LTA's 5-minute mark.
+export async function logTravel(env, at, travel) {
+  const slot = Math.floor(at / 300000) * 300000;
+  const rows = (travel || []).filter((t) => t.name && Number.isFinite(t.min));
+  for (let i = 0; i < rows.length; i += 20) {
+    const part = rows.slice(i, i + 20);
+    await env.DB.prepare(`INSERT OR IGNORE INTO travel_log (at, road, dir, min) VALUES ${part.map((_, k) => `(?1, ?${k * 3 + 2}, ?${k * 3 + 3}, ?${k * 3 + 4})`).join(', ')}`)
+      .bind(slot, ...part.flatMap((t) => [String(t.name), Number(t.dir) || 0, Math.round(t.min)])).run();
+  }
+  // a day's reading, once in a while: drop what's older than TRAVEL_LOG_DAYS
+  if (slot % 86400000 < 300000) await env.DB.prepare('DELETE FROM travel_log WHERE at < ?1').bind(slot - TRAVEL_LOG_DAYS * 86400000).run();
+  return rows.length;
+}
+async function getInfo(env) {
+  const live = await refreshInfo(env);
   const lta = live && live.lta ? live.lta : {};
   return json({ ...(live || {}), lta: { ...lta, ready: Boolean(env.LTA_KEY) } });
 }
@@ -1541,6 +1578,12 @@ function inviteManifest(url) {
 }
 
 export default {
+  // Every 5 minutes (wrangler.jsonc "triggers"): keep LTA's travel times recorded even when no
+  // phone has the app open, so the history has no gaps at night.
+  async scheduled(event, env, ctx) {
+    if (!env.DB || !env.LTA_KEY) return;
+    ctx.waitUntil(refreshInfo(env).catch(() => null));
+  },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) {

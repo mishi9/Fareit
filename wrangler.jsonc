@@ -13,6 +13,8 @@
   // Shared training pool every phone contributes to (created automatically on deploy if it doesn't exist)
   "d1_databases": [{ "binding": "DB", "database_name": "fareit-pool" }],
   "observability": { "enabled": true },
+  // Every 5 minutes: refresh LTA's live info and record expressway travel times (worker/index.js scheduled).
+  "triggers": { "crons": ["*/5 * * * *"] },
   // Invite-only: every /api call needs a phone let in by a one-time invite (or the owner code).
   "vars": { "INVITE_ONLY": "1" }
   // Secrets (dashboard > Variables and Secrets, or `npx wrangler secret put NAME`):

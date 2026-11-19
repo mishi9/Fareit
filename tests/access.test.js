@@ -481,3 +481,33 @@ test('recovery code: a new phone gets back in as the same driver (number, animal
   assert.equal((await req('/api/access/recover', { body: { code, device: 'third-phone' } })).status, 403);
   assert.equal((await req('/api/access/recover', { body: { code: c2, device: 'third-phone' } })).status, 200);
 });
+
+test('LTA: travel times fetched every 5 min (incidents every 2), recorded once per 5-minute mark, also on the schedule', async (t) => {
+  const { refreshInfo } = await import('../worker/index.js');
+  const { env } = setup({ LTA_KEY: 'k' });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const u = String(url);
+    if (u.includes('datamall2.mytransport.sg')) {
+      calls.push(u.split('/').pop().split('?')[0]);
+      if (u.includes('EstTravelTimes')) return new Response(JSON.stringify({ value: [{ Name: 'CTE', Direction: 1, FarEndPoint: 'SLE', StartPoint: 'AYE', EndPoint: 'PIE', EstTime: 9 }, { Name: 'PIE', Direction: 2, FarEndPoint: 'TUAS', StartPoint: 'A', EndPoint: 'B', EstTime: 14 }] }));
+      return new Response(JSON.stringify({ value: [] }));
+    }
+    return new Response(JSON.stringify({ features: [] }));
+  });
+  const t0 = Date.parse('2026-11-20T08:00:30+08:00');
+  for (const m of [0, 1, 2, 4, 5, 6, 10]) await refreshInfo(env, t0 + m * 60000);
+  const travel = calls.filter((c) => c === 'EstTravelTimes').length;
+  const incidents = calls.filter((c) => c === 'TrafficIncidents').length;
+  assert.equal(travel, 3, `travel at 0, 5 and 10 min: ${travel}`);
+  assert.equal(incidents, 5, `incidents at 0, 2, 4, 6, 10 min: ${incidents}`);
+  const rows = (await env.DB.prepare('SELECT at, road, dir, min FROM travel_log ORDER BY at, road').all()).results;
+  assert.equal(rows.length, 6, '2 expressways x 3 readings');
+  assert.deepEqual({ ...rows[0] }, { at: Math.floor(t0 / 300000) * 300000, road: 'CTE', dir: 1, min: 9 });
+  // the 5-minute schedule records too, with no phone asking
+  const worker = (await import('../worker/index.js')).default;
+  let job;
+  await worker.scheduled({}, env, { waitUntil: (p) => { job = p; } });
+  await job;
+  assert.ok((await env.DB.prepare('SELECT COUNT(*) AS n FROM travel_log').first()).n >= 6);
+});

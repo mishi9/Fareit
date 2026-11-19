@@ -55,7 +55,8 @@ export function showInfo() {
   rain();
   loadRain(rain);
   clearInterval(info.timer);
-  info.timer = setInterval(() => { if (!info.root.closest('[hidden]')) { loadLive(); renderEvents(); loadRain(rain); } }, 60 * 1000);
+  // every 2 minutes: as often as LTA's own feeds change (the server keeps one shared copy)
+  info.timer = setInterval(() => { if (!info.root.closest('[hidden]')) { loadLive(); renderEvents(); loadRain(rain); } }, 2 * 60 * 1000);
 }
 
 // ---------- events ----------
