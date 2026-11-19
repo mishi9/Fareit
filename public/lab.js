@@ -51,6 +51,22 @@ const PLAT_KEY = 'agaration-platform';
 try { if (localStorage.getItem(PLAT_KEY) === 'tada') lab.platform = 'tada'; } catch { /* private mode */ }
 usePlatform(lab.platform);
 export const currentPlatform = () => lab.platform;
+// The apps this driver uses (Settings). One app: no switch, always that app.
+const APPS_KEY = 'agaration-apps';
+export function enabledApps() {
+  try {
+    const a = JSON.parse(localStorage.getItem(APPS_KEY) || 'null');
+    if (Array.isArray(a)) { const ok = a.filter((x) => x === 'grab' || x === 'tada'); if (ok.length) return ok; }
+  } catch { /* private mode */ }
+  return ['grab', 'tada'];
+}
+export function setEnabledApps(list) {
+  const a = list.filter((x) => x === 'grab' || x === 'tada');
+  if (!a.length) return;
+  try { localStorage.setItem(APPS_KEY, JSON.stringify(a)); } catch { /* private mode */ }
+  if (!a.includes(lab.platform)) setPlatform(a[0]); else applyPlatform();
+}
+if (!enabledApps().includes(lab.platform)) { lab.platform = enabledApps()[0]; usePlatform(lab.platform); }
 const isTada = () => lab.platform === 'tada';
 const TADA_LEARN = 15; // TADA cards show "learning" until this many TADA trips
 
@@ -558,6 +574,7 @@ function applyPlatform() {
   if (gj) gj.textContent = t ? 'Got a TADA job' : 'Got a job';
   for (const b of document.querySelectorAll('#plat-bar button')) b.classList.toggle('sel', b.dataset.p === lab.platform);
   document.body.dataset.platform = lab.platform;
+  document.body.dataset.apps = String(enabledApps().length);
 }
 export function setPlatform(p) {
   lab.platform = p === 'tada' ? 'tada' : 'grab';

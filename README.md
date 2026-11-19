@@ -164,7 +164,7 @@ Grab's green arrow shows on most jobs, even S$6.20 ones, so it doesn't say a job
 
 ## Grab and TADA
 
-A **Grab | TADA** switch sits above the tab bar on Radar and Log (remembered on the phone). Each app learns its own formula from its own trips; they never mix.
+A **Grab | TADA** switch sits above the tab bar on Radar and Log (remembered on the phone). **Settings → Apps you drive for** turns apps on or off; with one app, the switch goes away (a Grab-only driver never sees TADA). Each app learns its own formula from its own trips; they never mix.
 
 - **TADA's pay rule (known, not learned):** you earn = ride fare + fuel support − a flat driver platform fee (**S$0.60** up to a S$25 fare, **S$0.82** over: S$0.55 / S$0.75 + GST). The CPF reserve then comes out of cash out (40% of earnings × your CPF %).
 - **TADA starts from the owner's two receipts** (4.93 km at S$11.60; the 27.86 km Changi trip is kept as airport).

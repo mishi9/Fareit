@@ -5,7 +5,7 @@ const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
-import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv, setPlatform } from './lab.js';
+import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv, setPlatform, enabledApps, setEnabledApps } from './lab.js';
 import { clearMyQueue } from './queue.js';
 import { buildEarnings, renderEarnings } from './earnings.js';
 import { locationState, onMove } from './where.js';
@@ -752,6 +752,16 @@ function settingsMsg(text, isError = false) {
 
 function buildSettings() {
   $('#settings-form').addEventListener('submit', (e) => e.preventDefault());
+  // Apps you drive for: tap to turn one on or off (at least one stays on).
+  const showApps = () => { const on = enabledApps(); for (const b of $$('#st-apps [data-app]')) b.classList.toggle('on', on.includes(b.dataset.app)); };
+  for (const b of $$('#st-apps [data-app]')) b.addEventListener('click', () => {
+    const on = enabledApps();
+    const next = on.includes(b.dataset.app) ? on.filter((x) => x !== b.dataset.app) : [...on, b.dataset.app];
+    if (!next.length) { settingsMsg('Keep at least one app on.', true); return; }
+    setEnabledApps(['grab', 'tada'].filter((x) => next.includes(x)));
+    showApps();
+  });
+  showApps();
   buildOwner();
   // This phone
   const owner = isOwnerPhone();
