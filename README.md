@@ -65,7 +65,7 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
-**Tap a card** (▾) to open it in place: what you'd earn **now** and at normal price at each distance in its range (< 10 km: 2, 4, 6, 8 · 10–20 km: 10 to 18 · > 20 km: 20 to 40), with the card's own adjustment, and which km the card's price is at (the middle of jobs logged in that range, once there are 3). Tap again to close; it stays open across the minute refresh.
+**Tap a card** (▾ see more) to open it in place (▴ see less to close): what you'd earn **now** and at normal price at each distance in its range (< 10 km: 2, 4, 6, 8 · 10–20 km: 10 to 18 · > 20 km: 20 to 40), with the card's own adjustment, and which km the card's price is at (the middle of jobs logged in that range, once there are 3). Tap again to close; it stays open across the minute refresh.
 
 **Each card says how many jobs back it** (right of the price): jobs of its distance within 3 km and 1½ h of this time of day (any day), e.g. "7 jobs nearby · 2 in the last hour", or "no jobs nearby yet" (then it's the general price). Without location: "at this time".
 

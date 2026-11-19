@@ -514,7 +514,7 @@ export function renderBands() {
     ${tada ? '' : latestLine(now)}
     ${bands.map((b) => `
       <div class="band-card ${b.state}${learning ? ' learning' : ''}${lab.openBand === b.id ? ' open' : ''}" data-band="${b.id}" role="button" tabindex="0" aria-expanded="${lab.openBand === b.id}">
-        <div class="band-top"><span class="band-name">${b.label} <span class="band-chev" aria-hidden="true">${lab.openBand === b.id ? '▴' : '▾'}</span></span><span class="band-pills">${rainPill}${learning ? `<span class="learn">learning · ${tadaN} of ${TADA_LEARN}</span>` : `<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : !['normal', 'tgrey'].includes(b.state) ? ` ${signed(b.vs)}` : ''}</span>`}</span></div>
+        <div class="band-top"><span class="band-name">${b.label} <span class="band-chev" aria-hidden="true">${lab.openBand === b.id ? '▴ see less' : '▾ see more'}</span></span><span class="band-pills">${rainPill}${learning ? `<span class="learn">learning · ${tadaN} of ${TADA_LEARN}</span>` : `<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : !['normal', 'tgrey'].includes(b.state) ? ` ${signed(b.vs)}` : ''}</span>`}</span></div>
         <div class="band-mid"><div class="band-now">${learning ? '~' : ''}${money(b.now)}</div>${learning ? '' : reportsLine(b, Boolean(loc))}</div>
         <div class="band-sub">${tada ? `Normal ${money(b.normal)} · you keep it − ${money(tadaFee(b.normal))}` : `Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}`}</div>
         ${lab.openBand === b.id ? detailHtml(b, learning) : ''}
