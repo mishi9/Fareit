@@ -120,6 +120,7 @@ The old Trips view (reconciled jobs from the slider era, the old shared pool) is
 
 - **Big surges aren't blocked.** Over 3× a normal fare for the distance asks for a second tap ("a big surge?"); only over 6× (e.g. 10 km at S$99) is refused. Log and Got a job alike; the server accepts the same.
 - **Unusually high jobs (60%+ above normal) are saved, used and flagged.** Until another job backs them (within 3 km, a similar distance, within 2 hours, itself 25%+ above normal), they count a quarter in "now" and stay out of the surge range. Backed, they count fully. The owner's stats show how many are waiting.
+- **Postal code not found (Got a job):** its first two digits give the postal district, so the app asks "Is it around **Novena / Thomson**?" Yes: the distance is worked out to that district (marked approx.). No, or no such district: type the km or an area name.
 - **Best-formula bookmark (owner):** from 10 trips, the formula with the lowest "off with today's estimate" is bookmarked (rates, cut, date). If the formula later drifts 2+ points further off, the owner card says so and shows the bookmarked rates.
 
 The data is shared by every driver, so a typo or a troll mustn't skew everyone's estimates.

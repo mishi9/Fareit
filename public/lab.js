@@ -15,7 +15,7 @@ import { loadSurge, surgeNow, surgeBanner } from './surge.js';
 import { loadRain, rainNow, rainBanner, rainTagNow, isThunder } from './rain.js';
 import { loadAlerts, alertsHtml } from './alerts.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
-import { findArea, isPostal } from './places.js';
+import { findArea, isPostal, postalDistrict } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN, arrowCompare,
   markEvents, eventLift, eventFor, eventNear, rainLift, highJobs, HIGH_FLAG, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
@@ -840,6 +840,7 @@ const kmTyped = (text) => {
 
 function onTripInput() {
   const text = document.querySelector('#qj-km').value.trim();
+  quick.useDistrict = false;
   clearTimeout(quick.timer);
   quick.route = null;
   if (!text || kmTyped(text) !== null || text.length < 3) { quickUpdate(); return; }
@@ -859,8 +860,13 @@ async function routeTo(text) {
       const res = await fetch(`/api/search?q=${encodeURIComponent(text)}`);
       const data = res.ok ? await res.json() : null;
       const r = data && data.results && data.results[0];
-      if (!r) { done({ error: `Couldn't find “${text}”. Try a postal code or an area name.` }); return; }
-      dest = { label: r.label, lat: r.lat, lng: r.lng };
+      if (!r) {
+        // A postal code OneMap doesn't know: ask whether it's in the district its first two digits say.
+        const area = postalDistrict(text);
+        if (area && !quick.useDistrict) { done({ ask: area }); return; }
+        if (!area) { done({ error: `Couldn't find “${text}”. Type the km or an area name instead.` }); return; }
+        dest = { label: `${area.label} (approx.)`, lat: area.lat, lng: area.lng };
+      } else dest = { label: r.label, lat: r.lat, lng: r.lng };
     }
     const res = await fetch(`/api/route?from=${from.lat.toFixed(5)},${from.lng.toFixed(5)}&to=${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}`);
     const route = res.ok ? await res.json() : null;
@@ -924,9 +930,17 @@ function quickUpdate() {
   const box = document.querySelector('#qj-check');
   const r = quick.route;
   const routeLine = r
-    ? `<div class="kept">${r.pending ? `Finding “${r.text}” on the map…` : r.error ? r.error : `→ <b>${r.label}</b> · <b>${r.km} km</b> by road from where you got the job.`}</div>`
+    ? r.ask
+      ? `<div class="kept qj-ask">Postal code not found. Is it around <b>${r.ask.label}</b>?
+          <span class="qj-ask-b"><button type="button" class="ghost small" data-ask="yes">Yes, use that area</button><button type="button" class="ghost small" data-ask="no">No</button></span></div>`
+      : `<div class="kept">${r.pending ? `Finding “${r.text}” on the map…` : r.error ? r.error : `→ <b>${r.label}</b> · <b>${r.km} km</b> by road from where you got the job.`}</div>`
     : '';
-  if (!(f.km > 0)) { box.innerHTML = routeLine; return; }
+  const wireAsk = () => {
+    for (const b of box.querySelectorAll('[data-ask]')) b.addEventListener('click', () => {
+      if (b.dataset.ask === 'yes') { quick.useDistrict = true; routeTo(r.text); } else { quick.route = { text: r.text, error: 'Then type the km (from Grab) or an area name instead.' }; quickUpdate(); }
+    });
+  };
+  if (!(f.km > 0)) { box.innerHTML = routeLine; wireAsk(); return; }
   const e = quickEstimate(f);
   const line = (label, est, actual) => {
     if (!(actual > 0)) return `<div class="kept">${label}: estimate <b>${money(est)}</b></div>`;
@@ -955,7 +969,7 @@ async function quickSave() {
     ...((lab.pending && lab.pending.loc) || rounded(here()) || {}),
     predicted: e.predicted, predictedEarned: e.predictedEarned, predictedNormal: e.normalFare, surgeLiftUsed: e.sl ? e.sl.lift : null,
     todLift: t.near ? t.lift : null, weightsBefore: { base: e.w.base, perKm: e.w.perKm, perMin: e.w.perMin }, timeSplit: true,
-    ...(f.drop ? { dropLabel: f.drop, kmSource: 'map' } : {}), // drop-off name stays on this phone
+    ...(f.drop ? { dropLabel: f.drop, kmSource: /\(approx\.\)$/.test(f.drop) ? 'district' : 'map' } : {}), // drop-off name stays on this phone
     rain: rainTagNow((lab.pending && lab.pending.precise) || here(), e.ts),
     ...(isOwnerPhone() && !isTada() ? { arrow: quick.arrow ? 1 : 0 } : {}),
     ...(isTada() ? { platform: 'tada', fuel: f.fuel, level: 0 } : {}),

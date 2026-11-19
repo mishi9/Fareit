@@ -658,3 +658,5 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 
 .bookmark { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--line); font-size: 13px; display: grid; gap: 4px; }
 .bookmark.drift { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--surface)); }
+.qj-ask { display: grid; gap: 6px; }
+.qj-ask-b { display: flex; gap: 8px; flex-wrap: wrap; }

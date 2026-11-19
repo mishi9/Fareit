@@ -780,3 +780,12 @@ test('an unusually high job counts a quarter until another job nearby (similar d
   assert.equal(highJobs(far).unbacked.size, 2, 'too far apart to back each other');
   assert.ok(timeOfDay(backed, now, here).lift > timeOfDay(lone, now, here).lift, 'backed, they move "now" more');
 });
+
+test('a postal code OneMap does not know: its first two digits give the district to ask about', async () => {
+  const { postalDistrict } = await import('../public/places.js');
+  assert.equal(postalDistrict('307953').label, 'Novena / Thomson');
+  assert.equal(postalDistrict('529889').label, 'Tampines / Pasir Ris');
+  assert.equal(postalDistrict('018956').label, 'Raffles Place / Marina');
+  assert.equal(postalDistrict('999999'), null, 'not a district: ask for km instead');
+  assert.equal(postalDistrict('Orchard'), null);
+});

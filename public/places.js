@@ -72,6 +72,46 @@ export function findArea(text) {
   return hit ? { label: hit.label, lat: hit.lat, lng: hit.lng, precision: 'area' } : null;
 }
 
+// Singapore postal districts by the first two digits of a postal code: when OneMap can't find a
+// code (new blocks, some private estates), the district still says roughly where it is.
+// [first two digits, name, lat, lng] — district centres, good to a couple of km.
+const SECTOR_ROWS = [
+  [[1, 2, 3, 4, 5, 6], 'Raffles Place / Marina', 1.2830, 103.8510],
+  [[7, 8], 'Tanjong Pagar / Chinatown', 1.2765, 103.8445],
+  [[9, 10], 'Telok Blangah / HarbourFront', 1.2700, 103.8200],
+  [[11, 12, 13], 'Pasir Panjang / West Coast', 1.2990, 103.7820],
+  [[14, 15, 16], 'Queenstown / Tiong Bahru', 1.2890, 103.8180],
+  [[17], 'Beach Road / High Street', 1.2930, 103.8510],
+  [[18, 19], 'Bugis / Golden Mile', 1.3000, 103.8590],
+  [[20, 21], 'Little India / Farrer Park', 1.3100, 103.8520],
+  [[22, 23], 'Orchard / River Valley', 1.3030, 103.8320],
+  [[24, 25, 26, 27], 'Tanglin / Holland / Bukit Timah', 1.3150, 103.8000],
+  [[28, 29, 30], 'Novena / Thomson', 1.3250, 103.8380],
+  [[31, 32, 33], 'Balestier / Toa Payoh', 1.3300, 103.8550],
+  [[34, 35, 36, 37], 'Macpherson / Braddell', 1.3330, 103.8800],
+  [[38, 39, 40, 41], 'Geylang / Eunos', 1.3180, 103.8930],
+  [[42, 43, 44, 45], 'Katong / Joo Chiat', 1.3050, 103.9050],
+  [[46, 47, 48], 'Bedok / Upper East Coast', 1.3240, 103.9300],
+  [[49, 50, 81], 'Loyang / Changi', 1.3600, 103.9750],
+  [[51, 52], 'Tampines / Pasir Ris', 1.3550, 103.9450],
+  [[53, 54, 55, 82], 'Hougang / Sengkang / Punggol', 1.3700, 103.8900],
+  [[56, 57], 'Bishan / Ang Mo Kio', 1.3600, 103.8450],
+  [[58, 59], 'Upper Bukit Timah', 1.3400, 103.7750],
+  [[60, 61, 62, 63, 64], 'Jurong / Boon Lay', 1.3400, 103.7200],
+  [[65, 66, 67, 68], 'Bukit Panjang / Choa Chu Kang', 1.3750, 103.7600],
+  [[69, 70, 71], 'Lim Chu Kang / Tengah', 1.4100, 103.7200],
+  [[72, 73], 'Woodlands / Kranji', 1.4350, 103.7800],
+  [[75, 76], 'Yishun / Sembawang', 1.4300, 103.8300],
+  [[77, 78], 'Upper Thomson / Springleaf', 1.3950, 103.8200],
+  [[79, 80], 'Seletar', 1.3950, 103.8700],
+];
+const SECTORS = new Map(SECTOR_ROWS.flatMap(([codes, name, lat, lng]) => codes.map((c) => [c, { label: name, lat, lng, precision: 'district' }])));
+// The district for a 6-digit postal code, or null when the first two digits aren't a district.
+export function postalDistrict(text) {
+  if (!isPostal(text)) return null;
+  return SECTORS.get(Number(String(text).trim().slice(0, 2))) || null;
+}
+
 export function isPostal(text) {
   return /^\d{6}$/.test(String(text || '').trim());
 }
