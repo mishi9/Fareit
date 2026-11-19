@@ -370,3 +370,47 @@ test('a tester can remove everything they sent (and keeps access); the owner can
   assert.ok(after.some((t) => t.id === 'owner-0001' && !t.deleted), "the owner's trips stay");
   assert.equal((await req('/api/access', { key })).status, 200, 'still let in');
 });
+
+// ---------- identity, points, leaderboard ----------
+import { pointsFrom } from '../worker/index.js';
+test('points: 5 jobs = 1, a day with 3+ jobs +1, 7 days in a row +3, at most 30 jobs a day', () => {
+  assert.equal(pointsFrom({ '2026-11-02': 2 }).total, 0);
+  assert.equal(pointsFrom({ '2026-11-02': 5 }).total, 2, '5 jobs (1) and an active day (1)');
+  assert.equal(pointsFrom({ '2026-11-02': 100 }).jobs, 30, 'daily cap');
+  const week = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`2026-11-0${i + 1}`, 3]));
+  const p = pointsFrom(week);
+  assert.equal(p.streaks, 1);
+  assert.equal(p.total, Math.floor(21 / 5) + 7 + 3);
+  const gap = { ...week }; delete gap['2026-11-04'];
+  assert.equal(pointsFrom(gap).streaks, 0, 'a missed day breaks the run');
+});
+
+test('Animal#1234: a fixed number per driver, an animal from the list, changed at most once a month; leaderboard by name only', async () => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const join = async (device) => {
+    const { token } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+    return (await req('/api/access/redeem', { body: { token, device } })).body.key;
+  };
+  const a = await join('driver-phone-a'); const b = await join('driver-phone-b');
+  const me = (await req('/api/me', { key: a })).body;
+  assert.ok(me.num >= 1000 && me.num <= 9999);
+  assert.equal(me.animal, null);
+  assert.equal((await req('/api/me', { key: a })).body.num, me.num, 'the number never changes');
+  assert.equal((await req('/api/me/animal', { body: { animal: 'Dragonfly-ish' }, key: a })).status, 400);
+  assert.equal((await req('/api/me/animal', { body: { animal: 'Pig' }, key: a })).body.animal, 'Pig');
+  assert.equal((await req('/api/me/animal', { body: { animal: 'Fox' }, key: a })).body.animal, 'Fox', 'the first pick can still be changed once');
+  assert.equal((await req('/api/me/animal', { body: { animal: 'Owl' }, key: a })).status, 429, 'then once a month');
+  // jobs -> points
+  const trip = (id, mins) => ({ id, ts: Date.now() - mins * 60000, km: 8, min: 15, erp: 0, paid: 15, earned: 11, surge: 'normal', predicted: 15.1, lat: 1.3, lng: 103.83 });
+  await req('/api/formula', { body: { device: 'app-dev-a-0001', trips: Array.from({ length: 6 }, (_, i) => trip(`pa-trip-${i}000`, i + 1)) }, key: a });
+  await req('/api/formula', { body: { device: 'app-dev-b-0001', trips: [trip('pb-trip-0000', 2)] }, key: b });
+  await req('/api/formula', { body: { device: 'app-dev-o-0001', trips: Array.from({ length: 10 }, (_, i) => trip(`po-trip-${i}000`, i + 1)) }, key: okey });
+  const lb = (await req('/api/leaderboard', { key: b })).body;
+  assert.equal(lb.top[0].animal, 'Fox');
+  assert.equal(lb.top[0].points, 2, '6 jobs (1) + an active day (1)');
+  assert.equal(lb.me.rank, 2);
+  assert.ok(lb.top.every((r) => Object.keys(r).sort().join() === 'animal,num,points'), 'nothing but animal, number and points');
+  assert.equal(lb.players, 2, 'the owner is not ranked');
+  assert.equal((await req('/api/leaderboard')).status, 401);
+});

@@ -5,6 +5,8 @@ const KM_MAX = 50; // the top of the slider means 50 km or more
 import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
+import { loadMe, chipOk, renderBoard } from './me.js';
+import { tagOf } from './animals.js';
 import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv, setPlatform, enabledApps, setEnabledApps } from './lab.js';
 import { clearMyQueue } from './queue.js';
 import { buildEarnings, renderEarnings } from './earnings.js';
@@ -107,8 +109,10 @@ async function checkStatus() {
   try {
     const s = await api('/api/status');
     if (s.keyRequired && !s.authorized) { chip.textContent = chipText('Access key needed', 'Key needed'); chip.className = 'chip warn'; }
-    else if (!s.map) { chip.textContent = chipText('Map not set up', 'No map'); chip.className = 'chip warn'; }
-    else { chip.innerHTML = '<span class="live-dot" aria-hidden="true"></span>OneMap'; chip.setAttribute('aria-label', 'OneMap ready'); chip.className = 'chip ok'; }
+    else if (!s.map) { chip.textContent = chipText('Map not set up', 'No map'); chip.className = 'chip warn'; chipOk(false); }
+    else { chip.innerHTML = '<span class="live-dot" aria-hidden="true"></span>OneMap'; chip.setAttribute('aria-label', 'OneMap ready'); chip.className = 'chip ok'; chipOk(true); }
+    const sm = document.querySelector('#st-map');
+    if (sm) sm.textContent = s.map ? 'OneMap \u2713' : 'Not set up';
   } catch {
     chip.textContent = chipText('Server unreachable', 'No server');
     chip.className = 'chip warn';
@@ -878,6 +882,8 @@ function screenReadout() {
 
 function renderSettingsLive() {
   screenReadout();
+  renderBoard();
+  loadMe();
   const st = locationState();
   $('#st-loc').textContent = st === 'ok' ? 'On' : st === 'denied' ? 'Off' : 'Waiting…';
   const help = $('#st-loc-help');
@@ -975,7 +981,7 @@ function buildOwner() {
           inv.last_at ? `last sent ${when(inv.last_at)} ${new Date(inv.last_at).toLocaleTimeString('en-SG', { hour: 'numeric', minute: '2-digit' })}` : 'nothing sent yet',
         ].filter(Boolean).join(' · ') : '';
         row.innerHTML = `<div><b></b><div class="note"></div><div class="note sent"></div></div>`;
-        row.querySelector('b').textContent = `${inv.animal || inv.token}${inv.label ? ` · ${inv.label}` : ''}`;
+        row.querySelector('b').textContent = `${inv.ident_num ? tagOf(inv.ident_animal, inv.ident_num) : inv.animal || inv.token}${inv.label ? ` · ${inv.label}` : ''}`;
         row.querySelector('.note').textContent = `${inv.token} · ${status}`;
         row.querySelector('.sent').textContent = sent;
         row.querySelector('.sent').hidden = !sent;
@@ -1104,6 +1110,7 @@ async function boot() {
   setInterval(renderToday, 60 * 1000);
   buildWindow();
   buildLab($('#view-lab'));
+  loadMe();
   for (const b of $$('#plat-bar button')) b.addEventListener('click', () => setPlatform(b.dataset.p));
   buildInfo($('#view-info'));
   buildEarnings($('#view-trips'));

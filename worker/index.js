@@ -50,6 +50,7 @@
 
 import { inAirportZone } from '../public/airport-zone.js';
 import { rainAt } from '../public/rain.js';
+import { isAnimal } from '../public/animals.js';
 import { SURGE_PRICE_MIN } from '../public/formula.js';
 import { plausible } from '../public/sanity.js';
 
@@ -313,6 +314,8 @@ const SCHEMA = [
   // Which invite each sending phone came in on (by the device id its trips carry), so anything
   // odd in the data can be traced to a tester's code name. Only the owner ever sees this.
   'CREATE TABLE IF NOT EXISTS phones (device TEXT PRIMARY KEY, who TEXT NOT NULL, last_at INTEGER)',
+  // Each driver (an invite, or 'owner') is an animal and a 4-digit number, e.g. Pig#1726.
+  'CREATE TABLE IF NOT EXISTS ident (who TEXT PRIMARY KEY, num INTEGER NOT NULL UNIQUE, animal TEXT, changed_at INTEGER)',
   // Shared copies of outside data (e.g. the arrivals list), so every phone shares one fetch.
   'CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, value TEXT NOT NULL)',
   `CREATE TABLE IF NOT EXISTS events (
@@ -953,6 +956,118 @@ async function getInfo(env) {
   return json({ ...(live || {}), lta: { ...lta, ready: Boolean(env.LTA_KEY) } });
 }
 
+// ---------- Identity, points and the monthly leaderboard ----------
+// Points, this calendar month (Singapore time), from the trips each driver's phones sent:
+//   every 5 accepted jobs (TADA offers count as jobs)  1 point
+//   a day with 3+ jobs                                   +1
+//   every 7 days in a row with 3+ jobs                   +3
+// At most POINTS_DAY_CAP jobs a day count. A driver whose far-off rate is flagged (25%+ of 5+
+// checked fares) earns nothing until it's back under. The owner isn't ranked (it's their giveaway).
+export const POINTS_PER_JOBS = 5;
+export const POINTS_DAY_MIN = 3;
+export const POINTS_DAY_CAP = 30;
+export const STREAK_DAYS = 7;
+export const STREAK_BONUS = 3;
+export const ANIMAL_CHANGE_DAYS = 30;
+const sgDay = (ms) => new Date(ms + 8 * 3600000).toISOString().slice(0, 10);
+const monthStart = (now) => { const d = new Date(now + 8 * 3600000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - 8 * 3600000; };
+// Pure: per-day job counts -> points.
+export function pointsFrom(days) {
+  const keys = Object.keys(days).sort();
+  let jobs = 0;
+  let active = 0;
+  let streak = 0;
+  let run = 0;
+  let prev = null;
+  for (const k of keys) {
+    const n = Math.min(POINTS_DAY_CAP, days[k]);
+    jobs += n;
+    if (n >= POINTS_DAY_MIN) {
+      active++;
+      const consecutive = prev && Date.parse(k) - Date.parse(prev) === 86400000;
+      run = consecutive ? run + 1 : 1;
+      if (run % STREAK_DAYS === 0) streak++;
+      prev = k;
+    }
+  }
+  const total = Math.floor(jobs / POINTS_PER_JOBS) + active + streak * STREAK_BONUS;
+  return { total, jobs, activeDays: active, streaks: streak, run: prev === sgDay(Date.now()) || prev === sgDay(Date.now() - 86400000) ? run : 0 };
+}
+async function identOf(env, who) {
+  await ensureSchema(env.DB);
+  let row = await env.DB.prepare('SELECT who, num, animal, changed_at FROM ident WHERE who = ?1').bind(who).first();
+  if (row) return row;
+  for (let i = 0; i < 50; i++) {
+    const num = 1000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 9000);
+    try {
+      await env.DB.prepare('INSERT INTO ident (who, num) VALUES (?1, ?2)').bind(who, num).run();
+      return { who, num, animal: null, changed_at: null };
+    } catch { /* number taken: try another */ }
+  }
+  throw new Error('no number left');
+}
+async function monthPoints(env, now = Date.now()) {
+  const since = monthStart(now);
+  const { results } = await env.DB.prepare(`SELECT p.who AS who, t.ts AS ts FROM formula_trips t JOIN phones p ON p.device = t.device
+      WHERE t.deleted IS NOT 1 AND t.ts >= ?1 AND (t.earned > 0 OR t.offer = 1)`).bind(since).all();
+  const per = new Map();
+  for (const r of results) {
+    const d = per.get(r.who) || {};
+    const k = sgDay(r.ts);
+    d[k] = (d[k] || 0) + 1;
+    per.set(r.who, d);
+  }
+  // flagged: far-off rate 25%+ over 5+ checked fares (as on the owner's list)
+  const { results: rel } = await env.DB.prepare(`SELECT p.who AS who, COUNT(*) AS checked,
+      SUM(CASE WHEN t.paid / t.predicted > 1.6 OR t.paid / t.predicted < 0.6 THEN 1 ELSE 0 END) AS far
+      FROM formula_trips t JOIN phones p ON p.device = t.device WHERE t.deleted IS NOT 1 AND t.predicted > 0 AND t.paid > 0 GROUP BY p.who`).all();
+  const flagged = new Set(rel.filter((r) => r.checked >= 5 && r.far / r.checked >= 0.25).map((r) => r.who));
+  const out = new Map();
+  for (const [who, days] of per) out.set(who, { ...pointsFrom(days), flagged: flagged.has(who) });
+  return out;
+}
+async function meOut(env, who) {
+  const id = await identOf(env, who);
+  const lb = await leaderboard(env, who);
+  const next = id.changed_at ? id.changed_at + ANIMAL_CHANGE_DAYS * 86400000 : null;
+  return { num: id.num, animal: id.animal, owner: who === 'owner', canChangeAt: next && next > Date.now() ? next : null, points: lb.me.points, rank: lb.me.rank, month: lb.month };
+}
+async function leaderboard(env, me) {
+  const pts = await monthPoints(env);
+  const { results: ids } = await env.DB.prepare('SELECT who, num, animal FROM ident').all();
+  const byWho = new Map(ids.map((r) => [r.who, r]));
+  const rows = [];
+  for (const [who, p] of pts) {
+    if (who === 'owner') continue;
+    const id = byWho.get(who) || await identOf(env, who);
+    rows.push({ who, num: id.num, animal: id.animal || null, points: p.flagged ? 0 : p.total, held: p.flagged });
+  }
+  rows.sort((a, b) => b.points - a.points || a.num - b.num);
+  const mine = pts.get(me) || { total: 0, jobs: 0, activeDays: 0, streaks: 0, run: 0, flagged: false };
+  const at = rows.findIndex((r) => r.who === me);
+  const d = new Date(Date.now() + 8 * 3600000);
+  return {
+    month: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`,
+    top: rows.slice(0, 10).map(({ num, animal, points }) => ({ num, animal, points })),
+    players: rows.length,
+    me: { rank: me === 'owner' ? null : at >= 0 ? at + 1 : null, points: { ...mine, total: mine.flagged ? 0 : mine.total }, ahead: at > 0 ? rows[at - 1].points : null },
+  };
+}
+async function setAnimal(request, env, who) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const animal = String(body.animal || '');
+  if (!isAnimal(animal)) return json({ error: 'Pick an animal from the list.' }, 400);
+  const id = await identOf(env, who);
+  const now = Date.now();
+  // the first pick is free; after that, once every ANIMAL_CHANGE_DAYS days (the number never changes)
+  if (id.animal && id.animal !== animal && id.changed_at && now - id.changed_at < ANIMAL_CHANGE_DAYS * 86400000) {
+    return json({ error: 'You can change your animal once a month.', canChangeAt: id.changed_at + ANIMAL_CHANGE_DAYS * 86400000 }, 429);
+  }
+  await env.DB.prepare('UPDATE ident SET animal = ?2, changed_at = ?3 WHERE who = ?1').bind(who, animal, id.animal ? now : null).run();
+  return json({ num: id.num, animal });
+}
+
 // ---------- Rain (NEA via data.gov.sg, free, no key) ----------
 // Rain gauges (about 60-90 stations, 5-minute totals in mm) and the 2-hour forecast per town
 // (47 areas). Fetched at most every RAIN_REFRESH_MIN minutes and shared by every phone.
@@ -1277,6 +1392,7 @@ async function listInvites(env) {
   const count = (table) => `(SELECT COUNT(*) FROM ${table} WHERE deleted IS NOT 1 AND device IN (SELECT device FROM phones WHERE who = invites.token))`;
   const { results } = await env.DB.prepare(
     `SELECT token, label, animal, created_at, opened_at, used_at, revoked,
+       (SELECT animal FROM ident WHERE who = invites.token) AS ident_animal, (SELECT num FROM ident WHERE who = invites.token) AS ident_num,
        ${count('jobs')} AS jobs, ${count('formula_trips')} AS trips, ${count('airport_queue')} AS queue,
        (SELECT COUNT(*) FROM formula_trips WHERE deleted IS NOT 1 AND predicted > 0 AND paid > 0
           AND device IN (SELECT device FROM phones WHERE who = invites.token)) AS checked,
@@ -1352,7 +1468,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/access/purge-mine', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/access/purge-mine', '/api/me/animal', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -1394,6 +1510,18 @@ export default {
         return json({ error: 'The database couldn’t be reached.' }, 502);
       }
       return json({ error: 'Not found' }, 404);
+    }
+    if (url.pathname === '/api/me' || url.pathname === '/api/me/animal' || url.pathname === '/api/leaderboard') {
+      if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
+      try {
+        if (!who) who = await whoIs(request, env);
+        if (!who) return json({ error: 'Not let in.', locked: true }, 401);
+        const me = who.kind === 'owner' ? 'owner' : who.invite;
+        if (!me) return json({ error: 'No identity for this phone.' }, 400);
+        if (url.pathname === '/api/me/animal') return await setAnimal(request, env, me);
+        if (url.pathname === '/api/me') return json(await meOut(env, me));
+        return json(await leaderboard(env, me));
+      } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
     }
     if (url.pathname === '/api/rain') {
       if (!env.DB) return json({ at: null, wet: [], stations: 0, areas: [] });

@@ -171,6 +171,13 @@ Grab's green arrow shows on most jobs, even S$6.20 ones, so it doesn't say a job
 - **Green arrow test** (owner's phone): a "Green ↑ on the job" switch in Log and Got a job records whether the arrow was seen (saved with the trip; it doesn't change any price). Log shows jobs **with ↑** vs **no ↑**, each as the average vs the normal price, the range, and how many paid 15%+ more; older Surge / Normal tags are shown apart. A saved job's arrow can be fixed in Log → Your jobs (**Mark green ↑** / **Green ↑ seen ✓**); it re-uploads.
 - **Far off** (layer 6 and trust) is now over +60% or under −40% of the estimate, so a real surge job doesn't count against a driver.
 
+## You: Animal#1234, points and the leaderboard
+
+- **Identity:** every driver gets a fixed 4-digit number from the server and picks an animal (any with an emoji) the first time they open the app: **🐷 Pig#1726**. Many can be Pig; the number tells them apart. The animal can change once a month, the number never. It's the only identifier: no name, phone number or email. The owner's invite list shows the same Animal#1234.
+- **Header chip:** your animal and points this month (tap: the leaderboard). The map status moved to Settings → This phone → Map, and the chip only shows it when the map isn't working.
+- **Points (this calendar month):** 1 per 5 jobs logged (TADA offers count) · +1 for each day with 3+ jobs · +3 for every 7 days in a row. Up to 30 jobs a day count; points are on hold while a driver's far-off rate is flagged. Counted on the server from the trips already stored.
+- **Leaderboard (Settings → This month):** your rank and points, the top 10 by Animal#1234 only, how points work. The top driver of the month wins a free month. The owner isn't ranked.
+
 ## Grab and TADA
 
 A **Grab | TADA** switch sits above the tab bar on Radar and Log (remembered on the phone). **Settings → Apps you drive for** turns apps on or off; with one app, the switch goes away (a Grab-only driver never sees TADA). Each app learns its own formula from its own trips; they never mix.
