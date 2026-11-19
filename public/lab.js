@@ -18,7 +18,7 @@ import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal, postalDistrict } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN, arrowCompare,
-  markEvents, eventLift, eventFor, eventNear, rainLift, highJobs, HIGH_FLAG, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
+  markEvents, eventLift, eventFor, eventNear, rainLift, bandDetail, highJobs, HIGH_FLAG, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -513,11 +513,27 @@ export function renderBands() {
     <div class="band-head">Earn now · ${place ? `<b>${place}</b>` : 'all areas'} · ${at}${tada ? ' · TADA' : ''}</div>
     ${tada ? '' : latestLine(now)}
     ${bands.map((b) => `
-      <div class="band-card ${b.state}${learning ? ' learning' : ''}">
-        <div class="band-top"><span class="band-name">${b.label}</span><span class="band-pills">${rainPill}${learning ? `<span class="learn">learning · ${tadaN} of ${TADA_LEARN}</span>` : `<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : !['normal', 'tgrey'].includes(b.state) ? ` ${signed(b.vs)}` : ''}</span>`}</span></div>
+      <div class="band-card ${b.state}${learning ? ' learning' : ''}${lab.openBand === b.id ? ' open' : ''}" data-band="${b.id}" role="button" tabindex="0" aria-expanded="${lab.openBand === b.id}">
+        <div class="band-top"><span class="band-name">${b.label} <span class="band-chev" aria-hidden="true">${lab.openBand === b.id ? '▴' : '▾'}</span></span><span class="band-pills">${rainPill}${learning ? `<span class="learn">learning · ${tadaN} of ${TADA_LEARN}</span>` : `<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : !['normal', 'tgrey'].includes(b.state) ? ` ${signed(b.vs)}` : ''}</span>`}</span></div>
         <div class="band-mid"><div class="band-now">${learning ? '~' : ''}${money(b.now)}</div>${learning ? '' : reportsLine(b, Boolean(loc))}</div>
         <div class="band-sub">${tada ? `Normal ${money(b.normal)} · you keep it − ${money(tadaFee(b.normal))}` : `Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}`}</div>
+        ${lab.openBand === b.id ? detailHtml(b, learning) : ''}
       </div>`).join('')}`;
+  for (const el of box.querySelectorAll('[data-band]')) {
+    const toggle = () => { lab.openBand = lab.openBand === el.dataset.band ? null : el.dataset.band; renderBands(); };
+    el.addEventListener('click', toggle);
+    el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } });
+  }
+}
+// The open card: what you'd earn now at each distance in its range (same adjustment as the card).
+function detailHtml(b, learning) {
+  const rows = bandDetail(dataset(), b);
+  const tada = isTada();
+  return `<div class="band-detail">
+    <div class="bd-row bd-h"><span>Trip</span><span>Now</span><span>Normal</span></div>
+    ${rows.map((x) => `<div class="bd-row"><span>${x.km} km</span><b>${learning ? '~' : ''}${money(x.now)}</b><span>${money(x.normal)}</span></div>`).join('')}
+    <p class="note">The card's price is at <b>${Math.round(b.km * 10) / 10} km</b>${b.kmFromTrips ? ', the middle of jobs logged in this range' : ''}. What you'd earn, after ${tada ? 'TADA\u2019s fee' : 'Grab\u2019s cut'}. Tap to close.</p>
+  </div>`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
 // How well a card is backed here and now: jobs of its distance within 3 km and 1½ h of this time

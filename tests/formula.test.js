@@ -807,3 +807,16 @@ test('CPF: 40% of earnings is net; the rate by birth year, opt-in and age (CPF 2
   assert.equal(cpfRate({ on: true, custom: 10 }, y).rate, 10, 'your own % wins');
   assert.equal(cpfRate({ on: false, birthYear: 1990 }, y), null);
 });
+
+test('a Radar card opens to each distance in its range, at the same "now" adjustment as the card', async () => {
+  const { bandOutlook, bandDetail, BAND_STEPS } = await import('../public/formula.js');
+  const now = Date.parse('2026-11-20T22:00:00+08:00');
+  const trips = [[5, 12], [9, 15], [14, 30], [20, 26], [28, 45], [7, 20], [33, 40], [12, 14]].map(([km, min], i) => make(km, min, { ts: now - (i + 1) * 86400000 }));
+  const bands = bandOutlook(trips, now);
+  for (const b of bands) {
+    const rows = bandDetail(trips, b);
+    assert.deepEqual(rows.map((r) => r.km), BAND_STEPS[b.id]);
+    for (let i = 1; i < rows.length; i++) assert.ok(rows[i].now >= rows[i - 1].now, 'longer trips pay more');
+    rows.forEach((r) => assert.ok(Math.abs(r.now / r.normal - (1 + b.nowLift)) < 0.12, 'same lift as the card'));
+  }
+});

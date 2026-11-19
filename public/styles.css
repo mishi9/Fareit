@@ -693,3 +693,14 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .ea-cpf { font-size: 14px; color: var(--muted); }
 .ea-cpf b { color: var(--ink); }
 .ea-cpf-box { padding: 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); }
+
+/* Radar cards open in place: what you'd earn at each distance */
+.band-card[data-band] { cursor: pointer; }
+.band-hint { font-size: 11px; color: var(--muted); opacity: .75; text-align: right; margin-top: -2px; }
+.band-detail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); display: grid; gap: 4px; }
+.bd-row { display: grid; grid-template-columns: 64px 1fr 1fr; gap: 6px; align-items: baseline; font-variant-numeric: tabular-nums; font-size: 15px; }
+.bd-row b { font-family: var(--mono); font-size: 17px; }
+.bd-row span { color: var(--muted); }
+.bd-h span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.band-detail .note { margin: 4px 0 0; font-size: 12px; }
+.band-chev { font-size: 13px; color: var(--muted); font-weight: 600; }

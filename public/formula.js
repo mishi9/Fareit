@@ -549,6 +549,21 @@ export const SURGE_HINT = 0.15;
 // 25 km): what you'd earn at normal price, with surge, and "now" — normal adjusted by how fares
 // around this hour have been running. The state compares now with normal: good (10% or more
 // above), bad (10% or more below), or normal.
+// Tapping a card shows these distances (km) at "now", with the card's own adjustment.
+export const BAND_STEPS = { short: [2, 4, 6, 8], mid: [10, 12, 14, 16, 18], long: [20, 25, 30, 35, 40] };
+// What you'd earn at each distance: normal (formula) and now (normal x the card's lift).
+export function bandDetail(trips, band) {
+  const w = fitWeights(trips);
+  const est = timeEstimator(withBase(trips));
+  const c = fitCommission(trips);
+  return (BAND_STEPS[band.id] || []).map((km) => {
+    const paid = passengerFare(w, km, est(km)).fare;
+    const normal = driverEarns(c, paid);
+    const now = driverEarns(c, paid * (1 + (band.nowLift || 0)));
+    const surge = band.surgeRange ? [driverEarns(c, paid * (1 + band.surgeRange.lo)), driverEarns(c, paid * (1 + band.surgeRange.hi))] : null;
+    return { km, normal, now, surge };
+  });
+}
 export const EARN_BANDS = [
   { id: 'short', label: '< 10 km', lo: 0, hi: 10, km: 5 },
   { id: 'mid', label: '10–20 km', lo: 10, hi: 20, km: 15 },
@@ -587,7 +602,7 @@ export function bandOutlook(trips, ts, loc = null, opts = {}) {
     const surgeHi = surge.range ? driverEarns(c, normalPaid * (1 + surge.range.hi)) : withSurge;
     const vs = now / normal - 1;
     const state = ev ? 'event' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, surgeLo, surgeHi, vs, state, eventTrips: ev ? ev.n : null, raining: Boolean(wet), rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear, inBandRecent: own.inBandRecent };
+    return { ...b, km, kmFromTrips: inBand.length >= 3, nowLift, surgeRange: surge.range, normal, now, surge: withSurge, surgeLo, surgeHi, vs, state, eventTrips: ev ? ev.n : null, raining: Boolean(wet), rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear, inBandRecent: own.inBandRecent };
   });
 }
 
