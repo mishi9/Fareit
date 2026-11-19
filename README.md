@@ -118,6 +118,10 @@ The old Trips view (reconciled jobs from the slider era, the old shared pool) is
 
 ## Safeguards against wrong or made-up data
 
+- **Big surges aren't blocked.** Over 3× a normal fare for the distance asks for a second tap ("a big surge?"); only over 6× (e.g. 10 km at S$99) is refused. Log and Got a job alike; the server accepts the same.
+- **Unusually high jobs (60%+ above normal) are saved, used and flagged.** Until another job backs them (within 3 km, a similar distance, within 2 hours, itself 25%+ above normal), they count a quarter in "now" and stay out of the surge range. Backed, they count fully. The owner's stats show how many are waiting.
+- **Best-formula bookmark (owner):** from 10 trips, the formula with the lowest "off with today's estimate" is bookmarked (rates, cut, date). If the formula later drifts 2+ points further off, the owner card says so and shows the bookmarked rates.
+
 The data is shared by every driver, so a typo or a troll mustn't skew everyone's estimates.
 
 1. **Impossible trips are refused** (`public/sanity.js`, checked by the app and the server): far more than any trip of that distance pays (over 3× a rough normal fare), too little, earning more than the passenger paid, Grab keeping most of the fare, or faster than the roads allow. "10 km at S$99" never gets in.

@@ -6,13 +6,16 @@
 export const roughFare = (km) => 3 + 0.65 * km + 0.25 * (3 + 1.1 * km);
 
 export const LIMITS = {
-  maxVsNormal: 3, // surge rarely goes past about 2x
+  maxVsNormal: 3, // above this: unusual, saved after a second tap (real surge can reach ~3.3x at night)
+  hardMaxVsNormal: 6, // above this: no real trip (e.g. 10 km at S$99), refused
   minVsNormal: 0.3, // promos and short-trip quirks
   maxKmPerMin: 2, // 120 km/h
   minCutShare: 0.35, // a driver keeps at least ~35% of the fare (Grab's cut is usually ~25%)
 };
 
 // { ok, reason } for a trip: km, optional min, paid (passenger), earned (driver), erp.
+// { ok: true, unusual } when it's very high but possible (a big surge): the app asks for a second
+// tap instead of refusing it, and the server accepts it.
 export function plausible({ km, min = null, paid = null, earned = null, erp = 0 } = {}) {
   const e = Number(erp) || 0;
   if (!(km > 0)) return { ok: false, reason: 'Add the trip distance.' };
@@ -20,14 +23,16 @@ export function plausible({ km, min = null, paid = null, earned = null, erp = 0 
   const n = roughFare(km);
   if (paid > 0) {
     const p = paid - e;
-    if (p > n * LIMITS.maxVsNormal) return { ok: false, reason: `S$${paid.toFixed(2)} is far more than any ${km} km trip pays. Check the numbers.` };
+    if (p > n * LIMITS.hardMaxVsNormal) return { ok: false, reason: `S$${paid.toFixed(2)} is far more than any ${km} km trip pays. Check the numbers.` };
     if (p < n * LIMITS.minVsNormal && p < 8.1) return { ok: false, reason: `S$${paid.toFixed(2)} is too little for ${km} km. Check the numbers.` };
     if (earned > 0 && earned > paid + 0.5) return { ok: false, reason: 'You can\'t earn more than the passenger paid.' };
     if (earned > 0 && earned - e < Math.min(6.2, (p) * LIMITS.minCutShare)) return { ok: false, reason: `Earning S$${earned.toFixed(2)} of S$${paid.toFixed(2)} would mean Grab kept most of it. Check the numbers.` };
   } else if (earned > 0) {
     const d = earned - e;
-    if (d > n * 0.8 * LIMITS.maxVsNormal) return { ok: false, reason: `S$${earned.toFixed(2)} is far more than any ${km} km trip pays. Check the numbers.` };
+    if (d > n * 0.8 * LIMITS.hardMaxVsNormal) return { ok: false, reason: `S$${earned.toFixed(2)} is far more than any ${km} km trip pays. Check the numbers.` };
   }
+  const v = paid > 0 ? (paid - e) / n : earned > 0 ? (earned - e) / (n * 0.8) : 0;
+  if (v > LIMITS.maxVsNormal) return { ok: true, unusual: `S$${(paid > 0 ? paid : earned).toFixed(2)} for ${km} km is about <b>${v.toFixed(1)}×</b> a normal fare: a big surge?` };
   return { ok: true };
 }
 

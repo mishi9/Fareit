@@ -306,6 +306,33 @@ const hourGap = (a, b) => { const g = Math.abs(a - b) % 24; return Math.min(g, 2
 // Safeguard: no single trip counts as more than +60% or -40% (a typo or a troll can't swing it).
 export const PULL_HIGH = Math.log(1.6);
 export const PULL_LOW = Math.log(0.6);
+
+// Unusually high jobs (60%+ above the normal price) are saved and used, but flagged: until another
+// job backs them (within BACKED_KM, a similar distance, within BACKED_H hours either side, and
+// itself BACKED_ABOVE or more above normal), they count UNBACKED_WEIGHT as much in "now" and the
+// surge range. Backed, they count fully. Pure, from the trips: nothing is stored or deleted.
+export const HIGH_FLAG = 0.6;
+export const BACKED_KM = 3;
+export const BACKED_H = 2;
+export const BACKED_ABOVE = 0.25;
+export const UNBACKED_WEIGHT = 0.25;
+const similarKm = (a, b) => Math.abs(a - b) <= Math.max(5, 0.5 * Math.max(a, b));
+export const highJobs = memo((trips) => {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const est = timeEstimator(all);
+  const c = fitCommission(trips);
+  const r = new Map();
+  for (const t of all) if (!t.base && Number.isFinite(t.ts) && t.surge !== 'airport') { const x = ratioToFormula(t, w, est, c); if (x !== null) r.set(t, x); }
+  const flagged = [...r].filter(([, x]) => x >= Math.log(1 + HIGH_FLAG) - 1e-9).map(([t]) => t);
+  const unbacked = new Set();
+  for (const t of flagged) {
+    const backed = [...r].some(([o, x]) => o !== t && x >= Math.log(1 + BACKED_ABOVE) && Math.abs(o.ts - t.ts) <= BACKED_H * 3600000
+      && similarKm(o.km, t.km) && (t.lat && o.lat ? kmApart(t, o) <= BACKED_KM : false));
+    if (!backed) unbacked.add(t);
+  }
+  return { flagged, unbacked };
+});
 function ratioToFormula(t, w, est, c) {
   if (!(t.km > 0)) return null;
   const p = passengerFare(w, t.km, tripTime(t, est)).fare; // without ERP: compare like with like
@@ -410,6 +437,8 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
   // one job alone (one driver, or one typo) counts like any other job and can't flip Radar.
   const fresh = items.filter((it) => !it.t.base && it.d <= NEAR_KM && it.ageMin >= 0 && it.ageMin <= FRESH_MIN).length;
   for (const it of items) it.x *= fresh >= TUNE.freshNeeded ? it.boost : 1;
+  const lone = highJobs(trips).unbacked;
+  for (const it of items) if (lone.has(it.t)) it.x *= UNBACKED_WEIGHT;
   // No other single driver outweighs everyone else combined (at least DRIVER_CAP trips' worth is
   // always allowed). Your own trips and the base trip aren't capped on your phone.
   // Drivers with a good track record (e.g. on a shift, 3-4 jobs an hour in one zone) may count up
@@ -482,14 +511,14 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
     if (t.event || !Number.isFinite(t.ts)) continue;
     if (kind === 'surge' ? !isSurgeTrip(t, w, est, c) : t.surge !== kind) continue;
     const r = ratioToFormula(t, w, est, c);
-    if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h) });
+    if (r !== null) rs.push({ r, g: hourGap(hourOf(t.ts), h), k: kind === 'surge' && highJobs(trips).unbacked.has(t) ? UNBACKED_WEIGHT : 1 });
   }
   const start = Math.log(1 + startLift);
   // The range surge jobs have paid (middle 80% once there are 5, else lowest to highest).
   const range = (() => {
     if (kind !== 'surge') return null;
     if (!rs.length) return { lo: SURGE_PRICE_MIN, hi: 0.4, guess: true };
-    const xs = rs.map((x) => Math.exp(x.r) - 1).sort((a, b) => a - b);
+    const xs = (rs.some((x) => x.k === 1) ? rs.filter((x) => x.k === 1) : rs).map((x) => Math.exp(x.r) - 1).sort((a, b) => a - b);
     const q = (p) => xs[Math.min(xs.length - 1, Math.max(0, Math.round(p * (xs.length - 1))))];
     const got = xs.length >= 5 ? { lo: q(0.1), hi: q(0.9) } : { lo: xs[0], hi: xs[xs.length - 1] };
     // Until there are TUNE.rangeBlendUntil surge jobs, blend with the starting range (+15% to +40%),
@@ -498,12 +527,12 @@ export function surgeLift(trips, ts, kind = 'surge', startLift = SURGE_START) {
     return { lo: SURGE_PRICE_MIN * (1 - k) + got.lo * k, hi: 0.4 * (1 - k) + got.hi * k };
   })();
   if (!rs.length) return { lift: startLift, n: 0, near: 0, guess: true, range };
-  const overall = rs.reduce((s, x) => s + x.r, 0) / rs.length;
+  const overall = rs.reduce((s, x) => s + x.k * x.r, 0) / rs.reduce((s, x) => s + x.k, 0);
   let sw = 0;
   let swr = 0;
   let near = 0;
   for (const x of rs) {
-    const k = Math.exp(-(x.g * x.g) / (2 * HOUR_SD * HOUR_SD));
+    const k = x.k * Math.exp(-(x.g * x.g) / (2 * HOUR_SD * HOUR_SD));
     sw += k;
     swr += k * x.r;
     if (x.g <= 1.5) near++;

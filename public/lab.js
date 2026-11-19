@@ -18,7 +18,7 @@ import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN, arrowCompare,
-  markEvents, eventLift, eventFor, eventNear, rainLift, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
+  markEvents, eventLift, eventFor, eventNear, rainLift, highJobs, HIGH_FLAG, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -68,6 +68,15 @@ export function setEnabledApps(list) {
 }
 if (!enabledApps().includes(lab.platform)) { lab.platform = enabledApps()[0]; usePlatform(lab.platform); }
 const isTada = () => lab.platform === 'tada';
+// Two real jobs a tester tried to save that the old high-fare check refused outright (big surges in
+// the rain, 19 Nov). Put back by hand from their screenshots: area about 1 km, as the app saves.
+// They're everyone's data like any shared trip (not a phone's own jobs, not in anyone's Earnings).
+export const RECOVERED_TRIPS = [
+  { id: 'recovered-1937', ts: Date.parse('2026-11-19T21:37:00+08:00'), km: 3.35, min: null, erp: 0, actual: 21.9, earned: 15.9, surge: 'normal', lat: 1.30, lng: 103.85,
+    rain: 1, predicted: 12.17, predictedEarned: 8.52, shared: true, d: 'recovered', note: 'Rochor → Zenith (247785), Got a job; refused at the time' },
+  { id: 'recovered-1953', ts: Date.parse('2026-11-19T21:53:00+08:00'), km: 5.38, min: null, erp: 0, actual: 29, earned: 22, surge: 'normal', lat: 1.29, lng: 103.85,
+    rain: 1, predicted: 13.33, predictedEarned: 9.44, shared: true, d: 'recovered', note: 'Singapore River → Boon Keng Ville (380015), Got a job; refused at the time' },
+];
 const TADA_LEARN = 15; // TADA cards show "learning" until this many TADA trips
 
 // Everyone's trips: yours (on this phone) plus other testers' (from the server). The same array is
@@ -79,7 +88,7 @@ const dataset = () => {
     const mine = new Set(lab.trips.map((t) => t.id));
     // Trips around a listed event are marked, so they're kept apart from normal (formula.js).
     // Only this app's trips: Grab and TADA each learn their own formula.
-    const all = [...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id))].filter((t) => platformOf(t) === lab.platform);
+    const all = [...lab.trips, ...Object.values(lab.shared).filter((t) => !mine.has(t.id)), ...RECOVERED_TRIPS].filter((t) => platformOf(t) === lab.platform);
     lab.cache = { version: lab.version, platform: lab.platform, trips: markEvents(all, eventsList()) };
   }
   return lab.cache.trips;
@@ -532,6 +541,31 @@ function renderAll() {
   renderList();
 }
 
+// The best formula so far (owner's phone): whenever the honest test (each trip estimated from all
+// the others) is the closest yet, with 10+ trips, it's bookmarked. If the formula later drifts
+// clearly further off, it says so, with the bookmarked rates to compare against or go back to.
+export const BOOKMARK_MIN_TRIPS = 10;
+export const BOOKMARK_DRIFT = 0.02; // 2 points worse than the best: flagged
+const bmKey = () => `agaration-best-formula-${lab.platform}`;
+export function readBookmark() { try { return JSON.parse(localStorage.getItem(bmKey()) || 'null'); } catch { return null; } }
+function bookmarkHtml(w) {
+  const loo = looError(dataset());
+  if (!loo || loo.of < BOOKMARK_MIN_TRIPS) return `<div class="s">Best-formula bookmark: starts at ${BOOKMARK_MIN_TRIPS} trips.</div>`;
+  let best = readBookmark();
+  if (!best || loo.pct < best.pct - 0.0005) {
+    const c = commission();
+    best = { pct: loo.pct, avg: loo.avg, n: loo.of, at: Date.now(), w: { base: w.base, perKm: w.perKm, perMin: w.perMin }, cut: { kind: c.kind, keep: c.keep, fixed: c.fixed } };
+    try { localStorage.setItem(bmKey(), JSON.stringify(best)); } catch { /* private mode */ }
+  }
+  const d = new Date(best.at).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  const drift = loo.pct - best.pct;
+  const rates = (x) => `${money(x.base)} + ${money(x.perKm)}/km + ${money(x.perMin)}/min`;
+  return `<div class="bookmark${drift >= BOOKMARK_DRIFT ? ' drift' : ''}">
+    <div><b>Best so far:</b> ${(best.pct * 100).toFixed(1)}% off (${best.n} trips, ${d}) · <b>now ${(loo.pct * 100).toFixed(1)}%</b></div>
+    ${drift >= BOOKMARK_DRIFT ? `<div><b>Drifted ${(drift * 100).toFixed(1)} points.</b> Bookmarked: ${rates(best.w)} · now: ${rates(w)}. Check the jobs added since ${d}.</div>` : `<div class="s">Bookmarked rates: ${rates(best.w)}</div>`}
+  </div>`;
+}
+
 function renderFormula() {
   const card = $('#lab-formula', lab.root);
   card.hidden = !isOwner();
@@ -546,7 +580,8 @@ function renderFormula() {
     <div class="k">${isTada() ? 'TADA: ride fare (normal pricing)' : 'Grab\'s published formula (Standard, normal pricing)'}</div>
     <div class="f">Paid by passenger = max(<b>${money(MIN_PASSENGER)}</b>, <b>${money(w.base)}</b> + <b>${money(w.perKm)}</b> × km + <b>${money(w.perMin)}</b> × min)</div>
     <div class="f">${isTada() ? `You earn = ride fare + fuel support (<b>${money(tadaFuel(10))}</b> / <b>${money(tadaFuel(30))}</b>) − fee (<b>S$0.60</b>, <b>S$0.82</b> over S$25)</div><div class="f" hidden>` : ''}You earn = max(<b>${money(MIN_DRIVER)}</b>, ${(() => { const c = commission(); return c.kind === 'percent+fixed' ? `<b>${(c.keep * 100).toFixed(1)}%</b> × paid ${c.fixed < 0 ? '−' : '+'} <b>${money(Math.abs(c.fixed))}</b>` : `<b>${(c.keep * 100).toFixed(1)}%</b> × paid`; })()})</div>
-    <div class="s">${basis} Weights update every time you save a trip.</div>`;
+    <div class="s">${basis} Weights update every time you save a trip.</div>
+    ${bookmarkHtml(w)}`;
 }
 
 function readForm() {
@@ -726,7 +761,7 @@ async function save() {
   const predicted = sl ? Math.round(normalFare * (1 + sl.lift) * 100) / 100 : normalFare;
   const c = commission();
   const predictedEarned = driverEarns(c, predicted, f.erp);
-  if (!confirmOutlier(msg, $('#lab-save', lab.root), f.actual, predicted)) return;
+  if (!confirmOutlier(msg, $('#lab-save', lab.root), f.actual, predicted, sane.unusual)) return;
   const t = timeOfDay(dataset(), f.ts);
   changed();
   lab.trips.push({
@@ -857,14 +892,16 @@ function quickRead() {
 
 // Safeguard: a fare far from the estimate (60%+ above, 40%+ below) needs a second tap on Save,
 // so a typo (S$150 for S$15.00) is caught; once confirmed it's saved (and still can't swing "now").
-function confirmOutlier(msg, btn, actual, estimate) {
-  if (!isOutlier(actual, estimate)) { if (btn) btn.removeAttribute('data-confirm'); return true; }
+function confirmOutlier(msg, btn, actual, estimate, unusual = null) {
+  if (!isOutlier(actual, estimate) && !unusual) { if (btn) btn.removeAttribute('data-confirm'); return true; }
   const key = `${actual}|${Math.round(estimate * 100)}`;
   if (btn && btn.getAttribute('data-confirm') === key) { btn.removeAttribute('data-confirm'); return true; }
   if (btn) btn.setAttribute('data-confirm', key);
   const vs = actual / estimate - 1;
   msg.classList.add('err');
-  msg.innerHTML = `S$${actual.toFixed(2)} is <b>${Math.abs(Math.round(vs * 100))}% ${vs > 0 ? 'above' : 'below'}</b> the estimate (S$${estimate.toFixed(2)}). Typo? If it's right, tap <b>Save</b> again.`;
+  msg.innerHTML = unusual && vs > 0
+    ? `${unusual} If it's right, tap <b>Save</b> again: it's saved and checked against the next jobs nearby.`
+    : `S$${actual.toFixed(2)} is <b>${Math.abs(Math.round(vs * 100))}% ${vs > 0 ? 'above' : 'below'}</b> the estimate (S$${estimate.toFixed(2)}). Typo? If it's right, tap <b>Save</b> again.`;
   return false;
 }
 
@@ -909,7 +946,7 @@ async function quickSave() {
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Recorded before the trip changes anything (an honest test), at the job's own time and place.
   const e = quickEstimate(f);
-  if (!confirmOutlier(msg, document.querySelector('#qj-save'), f.paid, e.predicted)) return;
+  if (!confirmOutlier(msg, document.querySelector('#qj-save'), f.paid, e.predicted, sane.unusual)) return;
   const t = timeOfDay(dataset(), e.ts);
   changed();
   lab.trips.push({
@@ -1008,6 +1045,7 @@ function renderStats() {
     <p class="note">${(() => { const q = dataset().filter((t) => t.quick).length; const full = dataset().filter((t) => t.actual > 0).length; return `${full} trip${full === 1 ? '' : 's'} with the passenger fare (they sharpen the estimates)${q ? `, ${q} quick Got a job entr${q === 1 ? 'y' : 'ies'} (earnings only: they feed "now" on Radar)` : ''}.`; })()}</p>
     <p class="note">"Off with today's estimate" estimates each trip from all the others: the honest test of the estimates as they stand. Normal trips from every driver.</p>
     <p class="note"><b>Surge (test: by price, ${SURGE_PRICE_MIN * 100}%+ above normal):</b> ${surgeTrips.length} surge job${surgeTrips.length === 1 ? '' : 's'}${surgeNow.range && !surgeNow.range.guess ? `, paying ${signed(surgeNow.range.lo)} to ${signed(surgeNow.range.hi)} above normal` : ' (range is a starting guess)'}; average ${signed(surgeNow.lift)}.${arrowNormal ? ` ${arrowNormal} trip${arrowNormal === 1 ? '' : 's'} tagged Surge (green arrow) paid normal, so they teach the normal price.` : ''}</p>
+    <p class="note"><b>Unusually high jobs</b> (${HIGH_FLAG * 100}%+ above normal): ${(() => { const h = highJobs(dataset()); return h.flagged.length ? `${h.flagged.length}, ${h.unbacked.size ? `<b>${h.unbacked.size} waiting for a second job nearby</b> (counting a quarter until then)` : 'all backed by another job nearby'}.` : 'none.'; })()}</p>
     <p class="note"><b>Rain:</b> ${(() => { const r = rainLift(dataset()); return r.guess ? 'no trips saved in the rain yet.' : `trips saved in the rain ran ${signed(r.lift)} vs normal, from ${r.n} trip${r.n === 1 ? '' : 's'} (observed, not a rule).`; })()}</p>
     <p class="note"><b>Airport:</b> ${airportNow.guess ? 'no airport trips yet.' : `airport trips ran ${signed(airportNow.lift)} vs normal, from ${airportNow.n} trip${airportNow.n === 1 ? '' : 's'}${airportOffs.length ? `; off by ${money(avg(airportOffs))} on the last ${airportOffs.length}` : ''}.`}</p>`;
 }

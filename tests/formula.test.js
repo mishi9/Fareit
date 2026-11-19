@@ -554,6 +554,13 @@ test('layer 1: impossible trips are refused, real ones (surge, low cut) are not'
   assert.equal(plausible({ km: 10, paid: 99, earned: 72 }).ok, false, '10 km at S$99');
   assert.equal(plausible({ km: 10, paid: 14, earned: 10.2 }).ok, true);
   assert.equal(plausible({ km: 10, paid: 28, earned: 20.4 }).ok, true, '2x surge');
+  // big surges: saved after a second tap (the two real jobs that were blocked), never refused
+  for (const [km, paid, earned] of [[5.38, 29, 22], [3.35, 21.9, 15.9]]) {
+    const r = plausible({ km, paid, earned });
+    assert.equal(r.ok, true, `${km} km at S$${paid}`);
+    assert.ok(r.unusual, 'asks for a second tap');
+  }
+  assert.equal(plausible({ km: 10, paid: 14, earned: 10.2 }).unusual, undefined);
   assert.equal(plausible({ km: 10, paid: 23.9, earned: 23.8 }).ok, true, 'low-cut job');
   assert.equal(plausible({ km: 10, paid: 14, earned: 15 }).ok, false, 'earned more than paid');
   assert.equal(plausible({ km: 10, paid: 20, earned: 4 }).ok, false, 'below the driver minimum');
@@ -755,4 +762,21 @@ test('each Radar card says how many jobs back it: its distance, within 3 km and 
   ];
   const b = bandOutlook(trips, now, here);
   assert.deepEqual(b.map((x) => [x.inBandNear, x.inBandRecent]), [[1, 0], [4, 1], [0, 0]]);
+});
+
+test('an unusually high job counts a quarter until another job nearby (similar distance, within 2 h) backs it', async () => {
+  const { timeOfDay, highJobs } = await import('../public/formula.js');
+  const now = Date.parse('2026-11-19T22:00:00+08:00');
+  const here = { lat: 1.2937, lng: 103.8486 };
+  const plain = Array.from({ length: 8 }, (_, i) => make(5 + i, 15, { ts: now - (i + 1) * 86400000, lat: here.lat, lng: here.lng }));
+  const big = (km, mins, x, where = here) => { const t = make(km, 12, { ts: now - mins * 60000, lat: where.lat, lng: where.lng }); return { ...t, actual: Math.round(t.actual * x * 100) / 100 }; };
+  const lone = [...plain, big(5.4, 10, 2.2)];
+  const h1 = highJobs(lone);
+  assert.equal(h1.flagged.length, 1);
+  assert.equal(h1.unbacked.size, 1, 'nothing backs it yet');
+  const backed = [...plain, big(5.4, 10, 2.2), big(3.4, 25, 1.8, { lat: 1.300, lng: 103.855 })]; // a second high job ~1 km away, 15 min apart
+  assert.equal(highJobs(backed).unbacked.size, 0, 'two high jobs back each other');
+  const far = [...plain, big(5.4, 10, 2.2), big(5, 25, 1.8, { lat: 1.40, lng: 103.90 })];
+  assert.equal(highJobs(far).unbacked.size, 2, 'too far apart to back each other');
+  assert.ok(timeOfDay(backed, now, here).lift > timeOfDay(lone, now, here).lift, 'backed, they move "now" more');
 });
