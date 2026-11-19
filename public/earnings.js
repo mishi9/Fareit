@@ -23,7 +23,7 @@ export const FEES = [
   { id: 'cancel', name: 'Cancellation fee' }, { id: 'late', name: 'Late / waiting fee' }, { id: 'tip', name: 'Tip' }, { id: 'other', name: 'Other' },
 ];
 const KEY = 'earnings';
-const e = { root: null, data: { entries: [], shifts: [], goal: null, last: 'grab' }, mode: 'job', timer: null };
+const e = { root: null, data: { entries: [], shifts: [], goal: null, last: 'grab', cancelled: [] }, mode: 'job', timer: null };
 const pad = (n) => String(n).padStart(2, '0');
 const hm = (ts) => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const money = (n) => `S$${(Math.round(n * 100) / 100).toFixed(2)}`;
@@ -37,7 +37,10 @@ const dayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${pa
 // Everything earned: what was typed here, plus Grab jobs logged with Got a job / Log
 export function allJobs() {
   const typed = e.data.entries.filter((x) => x.kind === 'job');
-  const grab = myLabTrips().filter((t) => t.earned > 0 && Number.isFinite(t.ts))
+  // A job logged in Log or Got a job that was then cancelled: still real price data (it stays in
+  // the estimates), but it's not money you made, so Earnings leaves it out (undo any time).
+  const gone = new Set(e.data.cancelled || []);
+  const grab = myLabTrips().filter((t) => t.earned > 0 && Number.isFinite(t.ts) && !gone.has(`lab-${t.id}`))
     .map((t) => ({ id: `lab-${t.id}`, ts: t.ts, platform: t.platform === 'tada' ? 'tada' : 'grab', amount: t.earned, km: t.km || null, auto: true, note: t.dropLabel || '' }));
   return [...typed, ...grab].sort((a, b) => b.ts - a.ts);
 }
@@ -231,8 +234,14 @@ export function renderEarnings() {
       ? `<div class="ea-row"><span class="ea-time">${hm(x.ts)}</span><span class="ea-what">${esc((COSTS.find((c) => c.id === x.cat) || COSTS[3]).name)}</span><span class="ea-amt cost">−${money(x.amount)}</span>${del(x)}</div>`
       : x.kind === 'fee'
       ? `<div class="ea-row"><span class="ea-time">${hm(x.ts)}</span><span class="ea-what"><span class="ea-dot" style="background:${platform(x.platform).color}"></span>${platform(x.platform).name} · ${esc(feeName(x.cat))}</span><span class="ea-amt">${money(x.amount)}</span>${del(x)}</div>`
-      : `<div class="ea-row"><span class="ea-time">${hm(x.ts)}</span><span class="ea-what"><span class="ea-dot" style="background:${platform(x.platform).color}"></span>${platform(x.platform).name}${x.km ? ` · ${x.km} km` : ''}${x.auto ? ' <span class="note">· Got a job</span>' : ''}</span><span class="ea-amt">${money(x.amount)}</span>${x.auto ? '<span></span>' : del(x)}</div>`).join('')
+      : `<div class="ea-row"><span class="ea-time">${hm(x.ts)}</span><span class="ea-what"><span class="ea-dot" style="background:${platform(x.platform).color}"></span>${platform(x.platform).name}${x.km ? ` · ${x.km} km` : ''}${x.auto ? ' <span class="note">· logged job</span>' : ''}</span><span class="ea-amt">${money(x.amount)}</span>${x.auto ? `<button type="button" class="ghost small" data-cancel="${esc(x.id)}" aria-label="Job was cancelled">✕</button>` : del(x)}</div>`).join('')
       : '<p class="note">Nothing yet today. Add earnings as you go; Grab jobs from Got a job appear here on their own.</p>'}
+
+    ${(() => {
+      // Cancelled today (taken out of Earnings): shown so it can be undone.
+      const today = myLabTrips().filter((t) => (e.data.cancelled || []).includes(`lab-${t.id}`) && t.ts >= d0 && t.ts < d1);
+      return today.length ? `<p class="note ea-cancelled">${today.map((t) => `${hm(t.ts)} · ${t.km} km · ${money(t.earned || 0)} cancelled, not counted <button type="button" class="ghost small" data-undo="lab-${esc(t.id)}">Undo</button>`).join('<br>')}</p>` : '';
+    })()}
 
     <h2>This week and month</h2>
     <div class="tiles">
@@ -269,6 +278,16 @@ async function onClick(ev) {
     e.root.querySelector('#ea-amt')?.focus();
     if (b.dataset.plat) save();
     return;
+  }
+  if (b.dataset.cancel) {
+    // Two taps: the first asks, the second takes it out of Earnings (not out of the estimates).
+    if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Cancelled?'; b.classList.add('danger'); setTimeout(() => { if (b.isConnected) { b.dataset.armed = ''; b.textContent = '✕'; b.classList.remove('danger'); } }, 3000); return; }
+    e.data.cancelled = [...new Set([...(e.data.cancelled || []), b.dataset.cancel])].slice(-500);
+    await save(); renderEarnings(); return;
+  }
+  if (b.dataset.undo) {
+    e.data.cancelled = (e.data.cancelled || []).filter((id) => id !== b.dataset.undo);
+    await save(); renderEarnings(); return;
   }
   if (b.dataset.del) {
     if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Delete?'; setTimeout(() => { if (b.isConnected) { b.dataset.armed = ''; b.textContent = '✕'; } }, 3000); return; }
