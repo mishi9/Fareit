@@ -684,3 +684,7 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .me-top li.you { border-color: var(--accent); }
 .me-top li b { font-family: var(--mono); }
 .me-how summary { color: var(--accent); font-weight: 600; cursor: pointer; padding: 4px 0; }
+
+.me-code { font-family: var(--mono); font-size: 26px; font-weight: 800; letter-spacing: 2px; text-align: center; padding: 12px; border-radius: 12px; border: 2px dashed var(--accent); user-select: all; }
+.me-code.sm { font-size: 14px; letter-spacing: 1px; padding: 2px 6px; border-width: 1px; }
+.st-rec #st-recovery { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }

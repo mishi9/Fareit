@@ -165,6 +165,14 @@ export function syncLab() {
             // The server tagged one of your trips with rain from NEA's past readings: keep it.
             const own = (r.rain === 0 || r.rain === 1) && lab.trips.find((t) => t.id === r.id && t.rain == null);
             if (own) { own.rain = r.rain; ownTagged = true; }
+            // One of your own trips from your old phone (you moved with a recovery code): yours again.
+            if (r.m === 1 && !lab.trips.some((t) => t.id === r.id)) {
+              const t = { ...fromRow(r), shared: false, timeSplit: true };
+              delete t.d;
+              t.uploaded = printOf(t);
+              lab.trips.push(t);
+              ownTagged = true;
+            }
           }
           changed();
         }

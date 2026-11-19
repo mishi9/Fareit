@@ -342,6 +342,7 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'offer INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'level INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'fuel REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'recovery_hash TEXT', 'ident'))
       .then(() => addColumn(db, 'animal TEXT', 'invites'))
       .then(() => addColumn(db, 'opened_at INTEGER', 'invites'))
       .catch((e) => {
@@ -631,7 +632,7 @@ async function postFormula(request, env) {
 
 export const TRUST_MIN_CHECKED = 10;
 export const TRUST_MAX_FAR_OFF = 0.1;
-async function getFormula(url, env) {
+async function getFormula(url, env, who = null) {
   const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
@@ -640,6 +641,9 @@ async function getFormula(url, env) {
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
+  // this driver's own phones (same invite, or the owner): their trips come back marked m: 1
+  const me = who ? (who.kind === 'owner' ? 'owner' : who.invite) : null;
+  const mine = new Set(me ? (await env.DB.prepare('SELECT device FROM phones WHERE who = ?1').bind(me).all()).results.map((r) => r.device) : []);
   // d: an opaque tag per phone, so one phone's trips can be capped together; never the device id.
   // tr: the phone has earned trust (TRUST_MIN_CHECKED+ fares checked, under TRUST_MAX_FAR_OFF far
   // off the estimate), so its trips may count more in an area (e.g. a driver on a shift).
@@ -659,12 +663,12 @@ async function getFormula(url, env) {
   for (const r of results.slice(0, limit)) {
     if (r.deleted === 1) { trips.push({ rev: r.rev, id: r.id, deleted: 1 }); continue; }
     const { deleted, device, ...rest } = r;
-    trips.push({ ...rest, d: await tag(device), ...(trusted.has(device) ? { tr: 1 } : {}) });
+    trips.push({ ...rest, d: await tag(device), ...(trusted.has(device) ? { tr: 1 } : {}), ...(mine.has(device) ? { m: 1 } : {}) });
   }
   return json({ trips, next: trips.length ? trips[trips.length - 1].rev : since, more });
 }
 
-async function deleteFormula(request, env) {
+async function deleteFormula(request, env, who = null) {
   const { body, error } = await readJson(request);
   if (error) return error;
   const device = String(body.device || '');
@@ -674,10 +678,13 @@ async function deleteFormula(request, env) {
   const deleted = [];
   const missing = [];
   const known = await owners(env.DB, 'formula_trips', ids);
+  // the same driver's other phones count as theirs (after moving phone with a recovery code)
+  const me = who ? (who.kind === 'owner' ? 'owner' : who.invite) : null;
+  const mine = new Set(me ? (await env.DB.prepare('SELECT device FROM phones WHERE who = ?1').bind(me).all()).results.map((r) => r.device) : []);
   const writes = [];
   for (const id of new Set(ids)) {
     const row = known.get(id);
-    if (!row || row.device !== device) { missing.push(id); continue; }
+    if (!row || (row.device !== device && !mine.has(row.device))) { missing.push(id); continue; }
     writes.push(env.DB.prepare(`UPDATE formula_trips SET deleted = 1, updated_at = ?2, rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips),
         km = NULL, min = NULL, erp = NULL, paid = NULL, earned = NULL, surge = NULL, predicted = NULL, predicted_earned = NULL,
         card_min = NULL, pickup_km = NULL, lat = NULL, lng = NULL
@@ -1069,6 +1076,42 @@ async function leaderboard(env, me) {
     me: { rank: at >= 0 ? at + 1 : null, points: { ...mine, total: mine.flagged ? 0 : mine.total }, ahead: at > 0 ? rows[at - 1].points : null },
   };
 }
+// Recovery code: a driver's own way back on a new phone (or after clearing the app). The server
+// keeps only its hash; the phone keeps the code to show in Settings. Making a new one replaces the
+// old. Using it lets the new phone in as the same driver (same Animal#1234, points and jobs) and
+// turns the old phone's access off: one phone per driver.
+const RECOVERY_RE = /^R[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+async function newRecovery(env, who) {
+  await identOf(env, who);
+  const t = randomToken();
+  const code = `R${t.slice(1)}`;
+  await env.DB.prepare('UPDATE ident SET recovery_hash = ?2 WHERE who = ?1').bind(who, await sha256(`recover:${code}`)).run();
+  return json({ code });
+}
+async function recoverAccess(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const device = String(body.device || '');
+  if (!ID_RE.test(device)) return json({ error: 'Missing device id.' }, 400);
+  await ensureSchema(env.DB);
+  const ipHash = await hashIp(request, env);
+  const now = Date.now();
+  const tries = await env.DB.prepare('SELECT COUNT(*) AS n FROM owner_attempts WHERE ip_hash = ?1 AND at > ?2').bind(ipHash, now - 3600 * 1000).first();
+  if (Number((tries && tries.n) || 0) >= OWNER_TRIES_PER_HOUR) return json({ error: 'Too many tries. Wait an hour.' }, 429);
+  await env.DB.prepare('INSERT INTO owner_attempts (ip_hash, at) VALUES (?1, ?2)').bind(ipHash, now).run();
+  const raw = String(body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const code = raw.length === 12 ? `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8)}` : '';
+  if (!RECOVERY_RE.test(code)) return json({ error: 'That isn’t a recovery code. It starts with R and has 12 letters and numbers.' }, 400);
+  const id = await env.DB.prepare('SELECT who FROM ident WHERE recovery_hash = ?1').bind(await sha256(`recover:${code}`)).first();
+  if (!id) return json({ error: 'That recovery code isn’t right (or a newer one replaced it).' }, 403);
+  if (id.who === 'owner') return json({ error: 'The owner gets back in with the owner code.' }, 403);
+  const inv = await env.DB.prepare('SELECT revoked FROM invites WHERE token = ?1').bind(id.who).first();
+  if (!inv || inv.revoked === 1) return json({ error: 'This driver’s access was turned off.' }, 403);
+  // one phone per driver: the old phone's key stops working
+  await env.DB.prepare('UPDATE access_keys SET revoked = 1 WHERE invite = ?1').bind(id.who).run();
+  return json({ key: await issueKey(env, device, 'driver', id.who), kind: 'driver' });
+}
+
 async function setAnimal(request, env, who) {
   const { body, error } = await readJson(request);
   if (error) return error;
@@ -1270,7 +1313,7 @@ async function getFlights(env) {
 }
 
 // ---------- invite-only access ----------
-const OPEN_PATHS = new Set(['/api/status', '/api/access/open', '/api/access/redeem', '/api/owner/claim', '/api/manifest']);
+const OPEN_PATHS = new Set(['/api/status', '/api/access/open', '/api/access/redeem', '/api/owner/claim', '/api/manifest', '/api/access/recover']);
 // An invite link works for this long after it's first opened, then never again.
 export const INVITE_WINDOW_MS = 60 * 60 * 1000;
 const TOKEN_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L: easy to read out
@@ -1504,7 +1547,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/invites/delete', '/api/access/purge-mine', '/api/me/animal', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/invites/delete', '/api/access/purge-mine', '/api/me/animal', '/api/me/recovery', '/api/access/recover', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -1530,6 +1573,7 @@ export default {
         if (url.pathname === '/api/access/redeem') return await redeemInvite(request, env);
         if (url.pathname === '/api/access/open') return await startInvite(request, env);
         if (url.pathname === '/api/owner/claim') return await claimOwner(request, env);
+        if (url.pathname === '/api/access/recover') return await recoverAccess(request, env);
         if (!who) who = await whoIs(request, env);
         if (url.pathname === '/api/access') return who ? json({ ok: true, kind: who.kind }) : json({ error: 'Not let in.', locked: true }, 401);
         // A tester takes out everything their phone(s) sent; the owner's data stays (use Remove trips per invite).
@@ -1548,7 +1592,7 @@ export default {
       }
       return json({ error: 'Not found' }, 404);
     }
-    if (url.pathname === '/api/me' || url.pathname === '/api/me/animal' || url.pathname === '/api/leaderboard') {
+    if (url.pathname === '/api/me' || url.pathname === '/api/me/animal' || url.pathname === '/api/leaderboard' || url.pathname === '/api/me/recovery') {
       if (!env.DB) return json({ error: 'The server isn’t set up yet.' }, 503);
       try {
         if (!who) who = await whoIs(request, env);
@@ -1556,6 +1600,7 @@ export default {
         const me = who.kind === 'owner' ? 'owner' : who.invite;
         if (!me) return json({ error: 'No identity for this phone.' }, 400);
         if (url.pathname === '/api/me/animal') return await setAnimal(request, env, me);
+        if (url.pathname === '/api/me/recovery') return await newRecovery(env, me);
         if (url.pathname === '/api/me') return json(await meOut(env, me));
         return json(await leaderboard(env, me));
       } catch { return json({ error: 'The database couldn’t be reached.' }, 502); }
@@ -1598,8 +1643,9 @@ export default {
     if (url.pathname === '/api/formula' || url.pathname === '/api/formula/delete') {
       if (!env.DB) return json({ error: 'The database isn’t set up on the server yet.' }, 503);
       try {
-        if (url.pathname === '/api/formula/delete') return await deleteFormula(request, env);
-        return request.method === 'POST' ? await postFormula(request, env) : await getFormula(url, env);
+        if (url.pathname === '/api/formula/delete') return await deleteFormula(request, env, who || await whoIs(request, env));
+        if (request.method !== 'POST' && !who) who = await whoIs(request, env);
+        return request.method === 'POST' ? await postFormula(request, env) : await getFormula(url, env, who);
       } catch {
         return json({ error: 'The database couldn’t be reached.' }, 502);
       }

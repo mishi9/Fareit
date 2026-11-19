@@ -454,3 +454,30 @@ test('a turned-off invite can be deleted completely: its trips (for everyone), k
     assert.equal((await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${col} = ?1`).bind(token).first()).n, 0, table);
   }
 });
+
+test('recovery code: a new phone gets back in as the same driver (number, animal, own trips); the old phone is turned off', async () => {
+  const { req, owner } = setup();
+  const okey = await owner();
+  const { token } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  const oldKey = (await req('/api/access/redeem', { body: { token, device: 'old-phone' } })).body.key;
+  await req('/api/me/animal', { body: { animal: 'Seal' }, key: oldKey });
+  const before = (await req('/api/me', { key: oldKey })).body;
+  const trip = (id) => ({ id, ts: Date.now() - 60000, km: 8, min: 15, erp: 0, paid: 15, earned: 11, surge: 'normal', lat: 1.3, lng: 103.83 });
+  await req('/api/formula', { body: { device: 'old-app-dev-01', trips: [trip('old-trip-0001')] }, key: oldKey });
+  const { code } = (await req('/api/me/recovery', { body: {}, key: oldKey })).body;
+  assert.match(code, /^R[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+  assert.equal((await req('/api/access/recover', { body: { code: 'RAAA-BBBB-CCCC', device: 'new-phone' } })).status, 403, 'wrong code');
+  const back = (await req('/api/access/recover', { body: { code: code.toLowerCase().replace(/-/g, ' '), device: 'new-phone' } })).body;
+  assert.equal(back.kind, 'driver');
+  const after = (await req('/api/me', { key: back.key })).body;
+  assert.deepEqual([after.num, after.animal], [before.num, before.animal], 'same Animal#1234');
+  assert.equal((await req('/api/me', { key: oldKey })).status, 401, 'the old phone is turned off');
+  const rows = (await req('/api/formula?since=0', { key: back.key })).body.trips;
+  assert.equal(rows.find((t) => t.id === 'old-trip-0001').m, 1, 'its own trips come back marked as its own');
+  const del = (await req('/api/formula/delete', { body: { device: 'new-app-dev-01', ids: ['old-trip-0001'] }, key: back.key })).body;
+  assert.deepEqual(del.deleted, ['old-trip-0001'], 'and it can delete them');
+  // a new code replaces the old one
+  const { code: c2 } = (await req('/api/me/recovery', { body: {}, key: back.key })).body;
+  assert.equal((await req('/api/access/recover', { body: { code, device: 'third-phone' } })).status, 403);
+  assert.equal((await req('/api/access/recover', { body: { code: c2, device: 'third-phone' } })).status, 200);
+});

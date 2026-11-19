@@ -18,8 +18,56 @@ export async function loadMe() {
     renderChip();
     renderBoard();
     if (me.data && !me.data.animal) openPicker();
+    else if (me.data && !me.data.owner && !(() => { try { return localStorage.getItem('agaration-recovery-saved'); } catch { return '1'; } })()) showRecoveryCard();
+    renderRecoveryRow();
   })();
   return me.loading;
+}
+// The recovery code: kept on this phone (to show in Settings); the server keeps only its hash.
+const REC_KEY = 'agaration-recovery';
+const recoveryCode = () => { try { return localStorage.getItem(REC_KEY) || ''; } catch { return ''; } };
+async function makeRecovery() {
+  const res = await fetch('/api/me/recovery', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.code) throw new Error(body.error || 'Couldn’t make a code. Try again.');
+  try { localStorage.setItem(REC_KEY, body.code); } catch { /* private mode */ }
+  return body.code;
+}
+// Shown once after picking an animal (and once for drivers who picked before codes existed).
+let cardOpening = false;
+async function showRecoveryCard() {
+  if (cardOpening || document.querySelector('#me-recovery') || (me.data && me.data.owner)) return;
+  cardOpening = true; // set before any wait, so two callers can't open two cards (or make two codes)
+  let code = recoveryCode();
+  try { if (!code) code = await makeRecovery(); } catch { cardOpening = false; return; }
+  const box = document.createElement('div');
+  box.id = 'me-recovery';
+  box.className = 'me-picker';
+  box.innerHTML = `<div class="me-card stack">
+    <h2>Save your recovery code 🔑</h2>
+    <p>If you change phone or clear the app, this brings you back as <b>${esc(myTag())}</b>, with your points and jobs. Nobody else can do it for you.</p>
+    <div class="me-code" id="me-code">${esc(code)}</div>
+    <p class="note">Take a screenshot or save it in your notes. It's also in Settings → This phone. Using it on a new phone turns this phone off.</p>
+    <div class="row2"><button type="button" class="ghost" id="me-copy">Copy</button><button type="button" class="primary" id="me-done">I've saved it</button></div>
+  </div>`;
+  document.body.append(box);
+  box.querySelector('#me-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(code); box.querySelector('#me-copy').textContent = 'Copied \u2713'; } catch { /* press and hold instead */ } });
+  box.querySelector('#me-done').addEventListener('click', () => { try { localStorage.setItem('agaration-recovery-saved', '1'); } catch { /* */ } box.remove(); cardOpening = false; renderRecoveryRow(); });
+}
+export function renderRecoveryRow() {
+  const el = document.querySelector('#st-recovery');
+  if (!el) return;
+  if (me.data && me.data.owner) { el.innerHTML = '<span class="note">The owner gets back in with the owner code.</span>'; return; }
+  const code = recoveryCode();
+  el.innerHTML = code
+    ? `<b class="me-code sm">${esc(code)}</b> <button type="button" class="ghost small" id="st-rec-new">Make a new one</button>`
+    : '<button type="button" class="ghost small" id="st-rec-new">Make my code</button>';
+  let armed = false;
+  el.querySelector('#st-rec-new').addEventListener('click', async (ev) => {
+    const b = ev.currentTarget;
+    if (code && !armed) { armed = true; b.textContent = 'The old code stops working. Tap again'; setTimeout(() => { armed = false; if (b.isConnected) b.textContent = 'Make a new one'; }, 4000); return; }
+    try { await makeRecovery(); try { localStorage.removeItem('agaration-recovery-saved'); } catch { /* */ } showRecoveryCard(); renderRecoveryRow(); } catch (e) { el.insertAdjacentHTML('beforeend', `<span class="msg err">${esc(e.message)}</span>`); }
+  });
 }
 export const myTag = () => (me.data ? tagOf(me.data.animal, me.data.num) : null);
 
@@ -68,7 +116,7 @@ function openPicker() {
   const sel = box.querySelector('#me-animal');
   sel.addEventListener('change', () => { box.querySelector('#me-tag').textContent = tagOf(sel.value, me.data.num); });
   box.querySelector('#me-save').addEventListener('click', async () => {
-    try { await saveAnimal(sel.value); box.remove(); } catch (e) { box.querySelector('#me-msg').textContent = e.message; box.querySelector('#me-msg').classList.add('err'); }
+    try { await saveAnimal(sel.value); box.remove(); showRecoveryCard(); } catch (e) { box.querySelector('#me-msg').textContent = e.message; box.querySelector('#me-msg').classList.add('err'); }
   });
 }
 

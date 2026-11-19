@@ -63,6 +63,14 @@ export async function claimOwner(code) {
   letIn(await post('/api/owner/claim', { code: String(code || '').trim(), device: device() }));
 }
 
+// A new phone (or a cleared app): back in as the same driver with the recovery code.
+export async function recover(code) {
+  const c = String(code || '').trim();
+  letIn(await post('/api/access/recover', { code: c, device: device() }));
+  set('agaration-recovery', c.toUpperCase());
+  set('agaration-recovery-saved', '1'); // they just used it, so they have it
+}
+
 async function redeem(token) {
   letIn(await post('/api/access/redeem', { token, device: device() }));
 }
@@ -114,6 +122,14 @@ function gate({ token, mode, error }) {
           <div class="field"><label for="gate-token">Invite link or code</label>
             <input id="gate-token" type="text" autocomplete="off" autocapitalize="characters" placeholder="ABCD-EFGH-JKMN"></div>
           <button type="button" class="primary" id="gate-go">Let me in</button>
+          <details class="gate-owner" id="gate-recover-box"><summary>New phone? I have a recovery code</summary>
+            <div class="row2">
+              <div class="field"><label for="gate-recover">Recovery code</label>
+                <input id="gate-recover" type="text" autocomplete="off" autocapitalize="characters" placeholder="RXXX-XXXX-XXXX"></div>
+              <button type="button" class="ghost" id="gate-recover-go">Get back in</button>
+            </div>
+            <p class="note">The code from Settings → This phone on your old phone. You'll be the same animal, with your points and jobs.</p>
+          </details>
           <details class="gate-owner"><summary>I’m the owner</summary>
             <div class="row2">
               <div class="field"><label for="gate-code">Owner code</label>
@@ -157,6 +173,7 @@ function gate({ token, mode, error }) {
       attempt(() => redeem(t), 'Letting you in…');
     });
     el.querySelector('#gate-owner').addEventListener('click', () => attempt(() => claimOwner(el.querySelector('#gate-code').value), 'Checking…'));
+    el.querySelector('#gate-recover-go').addEventListener('click', () => attempt(() => recover(el.querySelector('#gate-recover').value), 'Checking…'));
   });
 }
 
@@ -166,7 +183,7 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 function lockOut() {
   set(KEY, '');
   set(KIND, '');
-  gate({ error: 'This phone’s access was turned off. Ask for a new invite.' }).then(() => location.reload());
+  gate({ error: 'This phone’s access was turned off: either you moved to a new phone with your recovery code, or the owner turned it off.' }).then(() => location.reload());
 }
 
 // Resolves once this phone may use the app. Call before the app starts.
