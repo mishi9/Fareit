@@ -688,3 +688,4 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .me-code { font-family: var(--mono); font-size: 26px; font-weight: 800; letter-spacing: 2px; text-align: center; padding: 12px; border-radius: 12px; border: 2px dashed var(--accent); user-select: all; }
 .me-code.sm { font-size: 14px; letter-spacing: 1px; padding: 2px 6px; border-width: 1px; }
 .st-rec #st-recovery { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.job-edit { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }

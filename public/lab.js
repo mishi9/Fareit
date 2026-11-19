@@ -764,6 +764,7 @@ async function save() {
   if (!(f.km > 0)) { msg.textContent = 'Step 1: add the trip km.'; msg.classList.add('err'); $('#lab-km', lab.root).focus(); return; }
   if (isTada() && !(f.riderFare > 0)) { msg.textContent = 'Step 2: add the Rider\u2019s fare (what the passenger pays).'; msg.classList.add('err'); $('#lab-actual', lab.root).focus(); return; }
   if (!(f.actual > 0)) { msg.textContent = isTada() ? 'Step 2: add the Ride fare (your earnings, before the fee).' : 'Step 2: add what the passenger paid.'; msg.classList.add('err'); $(isTada() ? '#lab-earned' : '#lab-actual', lab.root).focus(); return; }
+  if (isTada() && f.riderFare < f.actual && !swapOk($('#lab-save', lab.root), msg, f.riderFare, f.actual)) return;
   const sane = plausible({ km: f.km, min: f.min, paid: f.actual, earned: f.earned, erp: f.erp });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Predictions are recorded before this trip changes anything: an honest test each time.
@@ -912,6 +913,16 @@ function quickRead() {
 
 // Safeguard: a fare far from the estimate (60%+ above, 40%+ below) needs a second tap on Save,
 // so a typo (S$150 for S$15.00) is caught; once confirmed it's saved (and still can't swing "now").
+// TADA: the rider's fare is what the passenger pays, so it's normally more than the ride fare.
+// Less looks like the two boxes the wrong way round: ask once, then save if it's right.
+function swapOk(btn, msg, rider, ride) {
+  const key = `swap|${rider}|${ride}`;
+  if (btn && btn.getAttribute('data-confirm') === key) { btn.removeAttribute('data-confirm'); return true; }
+  if (btn) btn.setAttribute('data-confirm', key);
+  msg.classList.add('err');
+  msg.innerHTML = `The <b>Rider\u2019s fare</b> (S$${rider.toFixed(2)}) is normally more than the <b>Ride fare</b> (S$${ride.toFixed(2)}). The wrong way round? If it's right, tap <b>Save</b> again.`;
+  return false;
+}
 function confirmOutlier(msg, btn, actual, estimate, unusual = null) {
   if (!isOutlier(actual, estimate) && !unusual) { if (btn) btn.removeAttribute('data-confirm'); return true; }
   const key = `${actual}|${Math.round(estimate * 100)}`;
@@ -971,6 +982,7 @@ async function quickSave() {
     : isTada() && !(f.riderFare > 0) ? 'Add the Rider\u2019s fare (what the passenger pays).'
     : !(f.paid > 0) ? (isTada() ? 'Add the Ride fare (your earnings, before the fee).' : 'Add what the passenger paid.') : !(f.earned > 0) ? 'Add what you earned.' : '';
   if (missing) { msg.textContent = missing; msg.classList.add('err'); return; }
+  if (isTada() && f.riderFare < f.paid && !swapOk(document.querySelector('#qj-save'), msg, f.riderFare, f.paid)) return;
   const sane = plausible({ km: f.km, paid: f.paid, earned: f.earned });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Recorded before the trip changes anything (an honest test), at the job's own time and place.
@@ -1145,6 +1157,43 @@ function renderList() {
       syncLab();
     });
     acts.append(del);
+    if (!t.offer && !t.base) {
+      const ed = document.createElement('button');
+      ed.type = 'button';
+      ed.className = 'ghost small';
+      ed.textContent = 'Edit';
+      ed.addEventListener('click', () => {
+        if (card.querySelector('.job-edit')) return;
+        const tada = t.platform === 'tada';
+        const f = document.createElement('div');
+        f.className = 'job-edit stack';
+        f.innerHTML = `<div class="row2">
+            <div class="field"><label>${tada ? 'Rider\u2019s fare (S$)' : 'Passenger paid (S$)'}</label><input type="number" inputmode="decimal" step="0.01" min="0" data-k="a" value="${tada ? (t.riderFare ?? '') : (t.actual ?? '')}"></div>
+            <div class="field"><label>${tada ? 'Ride fare (S$)' : 'You earned (S$)'}</label><input type="number" inputmode="decimal" step="0.01" min="0" data-k="b" value="${tada ? (t.actual ?? '') : (t.earned ?? '')}"></div></div>
+          <div class="row2"><div class="field"><label>Trip km</label><input type="number" inputmode="decimal" step="0.1" min="0" data-k="km" value="${t.km ?? ''}"></div>
+            <button type="button" class="primary" data-k="save">Save changes</button></div>
+          <p class="msg" role="status"></p>`;
+        card.append(f);
+        f.querySelector('[data-k="save"]').addEventListener('click', async () => {
+          const v = (k) => { const x = parseFloat(f.querySelector(`[data-k="${k}"]`).value); return Number.isFinite(x) ? x : null; };
+          const a = v('a'); const b = v('b'); const km = v('km');
+          const m = f.querySelector('.msg');
+          const next = tada ? { km, ...tadaParts(b, a) } : { km, actual: a, earned: b };
+          delete next.level; // keep the colour it was saved with
+          if (!(km > 0) || !(next.actual > 0) || (tada && !(a > 0))) { m.textContent = 'Fill in all three.'; m.classList.add('err'); return; }
+          if (tada && a < b) { m.textContent = 'The rider\u2019s fare is normally more than the ride fare: are they the wrong way round?'; m.classList.add('err'); if (f.dataset.ok !== '1') { f.dataset.ok = '1'; return; } }
+          const sane = plausible({ km, paid: next.actual, earned: next.earned });
+          if (!sane.ok) { m.textContent = sane.reason; m.classList.add('err'); return; }
+          Object.assign(t, next, { edited: Date.now() });
+          changed();
+          await db.setKV(KEY, lab.trips);
+          window.dispatchEvent(new CustomEvent('agaration:edited'));
+          renderAll();
+          syncLab();
+        });
+      });
+      acts.prepend(ed);
+    }
     // Green arrow test (owner's phone): fix the arrow on a saved job with one tap. It re-uploads,
     // so the server copy changes too.
     if (isOwnerPhone()) {

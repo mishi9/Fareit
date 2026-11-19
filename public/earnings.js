@@ -134,6 +134,7 @@ export function suggestions(now = Date.now()) {
 // ---------- the page ----------
 export async function buildEarnings(root) {
   e.root = root;
+  window.addEventListener('agaration:edited', () => renderEarnings()); // a logged job's fares were fixed
   const saved = await db.getKV(KEY);
   if (saved) e.data = { ...e.data, ...saved };
   root.addEventListener('click', onClick);

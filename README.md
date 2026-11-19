@@ -104,6 +104,8 @@ A private notebook for drivers on several platforms (Grab, TADA, Gojek, Zig, Ryd
 
 The old Trips view (reconciled jobs from the slider era, the old shared pool) is under **Settings → Older jobs**.
 
+**Fixing a job:** Log → Your jobs → **Edit** changes a saved job's fares and km (TADA: Rider's fare, Ride fare; Grab: passenger paid, you earned), keeping its time, place and the estimate made before saving. Earnings and the server copy follow. TADA also asks once if the Rider's fare is less than the Ride fare (the two boxes swapped).
+
 **Cancelled jobs:** a job logged in Log or Got a job that was then cancelled can be taken out of Earnings with ✕ (two taps: "Cancelled?", then again), with Undo underneath. It stays in the estimates: its fare was still real. A cancellation fee goes in with + Fee.
 
 **Fees** (+ Fee): money from a platform that isn't a fare: cancellation fee, late / waiting fee, tip, other. They count in today's total, the week and month and S$/hour, and per platform, but not as a job, not in per-job or per-km figures, and never in the fare estimates (Earnings stays on the phone).
