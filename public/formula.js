@@ -34,14 +34,15 @@ export const SEED = { base: GENERIC.base * SCALE, perKm: GENERIC.perKm * SCALE, 
 
 // ---- Apps (platforms) ----
 // Each app learns its own formula from its own trips; they never mix. Grab: what the passenger
-// paid, and Grab keeps a % (learned). TADA: the "ride fare" (the driver's part, before fuel support
-// and fees); the driver gets ride fare + fuel support − a flat driver platform fee (S$0.55 / S$0.75
-// + GST: S$0.60 up to a S$25 fare, S$0.82 over), no % cut. TADA starts from the owner's receipts.
+// paid, and Grab keeps a % (learned). TADA: the amount the job offer shows (its Net Fare; on the
+// receipt it's Ride Fare + Fuel Support, "Sub Total 1"); the driver gets that minus a flat driver
+// platform fee (S$0.55 / S$0.75 + GST: S$0.60 up to a S$25 fare, S$0.82 over), no % cut. TADA
+// starts from the owner's receipts.
 export const TADA_BASE_TRIPS = [
-  { id: 'tada-base-1', base: true, platform: 'tada', ts: Date.parse('2026-11-18T03:11:00+08:00'), km: 4.93, min: 9, erp: 0, actual: 11.6, fuel: 0.9, earned: 11.9, surge: 'normal',
-    note: 'Orchard → Balestier, AnyTADA, 03:11–03:20. Ride fare 11.60 + fuel support 0.90 − driver platform fee 0.60 = 11.90 (rider paid 13.88).' },
-  { id: 'tada-base-2', base: true, platform: 'tada', ts: Date.parse('2026-11-11T00:30:00+08:00'), km: 27.86, min: 23, erp: 0, actual: 40.2, fuel: 1.2, earned: 40.58, surge: 'airport',
-    note: 'Changi T1 / Jewel → Yishun, AnyTADA, 00:30–00:53 (airport). Ride fare 40.20 + fuel support 1.20 − fee 0.82 = 40.58 (rider paid 42.76).' },
+  { id: 'tada-base-1', base: true, platform: 'tada', ts: Date.parse('2026-11-18T03:11:00+08:00'), km: 4.93, min: 9, erp: 0, actual: 12.5, earned: 11.9, surge: 'normal',
+    note: 'Orchard → Balestier, AnyTADA, 03:11–03:20. Ride fare 11.60 + fuel support 0.90 = 12.50 − driver platform fee 0.60 = 11.90 (rider paid 13.88).' },
+  { id: 'tada-base-2', base: true, platform: 'tada', ts: Date.parse('2026-11-11T00:30:00+08:00'), km: 27.86, min: 23, erp: 0, actual: 41.4, earned: 40.58, surge: 'airport',
+    note: 'Changi T1 / Jewel → Yishun, AnyTADA, 00:30–00:53 (airport). Ride fare 40.20 + fuel support 1.20 = 41.40 − fee 0.82 = 40.58 (rider paid 42.76).' },
 ];
 const TB = TADA_BASE_TRIPS[0];
 const TSCALE = TB.actual / (GENERIC.base + GENERIC.perKm * TB.km + GENERIC.perMin * TB.min);
@@ -248,7 +249,7 @@ export const isLowCut = (t) => { const c = cutOf(t); return Boolean(c) && c.rate
 
 export const fitCommission = memo(fitCommissionOf);
 function fitCommissionOf(trips) {
-  // TADA: no % cut; the driver gets ride fare + fuel support − a flat fee (see tadaFee).
+  // TADA: no % cut; the driver gets the offer's amount − a flat fee (see tadaFee).
   if (P.id === 'tada') return { kind: 'tada', keep: 1, fixed: 0, n: withBase(trips).filter((t) => t.earned > 0).length, avgRate: 0, spread: 0, lo: 0, hi: 0, low: [] };
   // Trips paid at the driver's S$6.20 floor follow the floor, not the usual rule: leave them out.
   const all = withBase(trips).filter((t) => cutOf(t) && !(Math.abs(t.earned - (t.erp || 0) - MIN_DRIVER) < 0.005));
@@ -274,7 +275,7 @@ const SEED_CUT_FALLBACK = 0.28;
 
 // What the driver would earn on a trip the passenger paid `paid` for (usual cut).
 export function driverEarns(model, paid, erp = 0) {
-  if (model.kind === 'tada') { const f = paid - (erp || 0); return r2(f + tadaFuel(f) - tadaFee(f) + (erp || 0)); }
+  if (model.kind === 'tada') { const f = paid - (erp || 0); return r2(f - tadaFee(f) + (erp || 0)); }
   return r2(Math.max(MIN_DRIVER, model.keep * (paid - (erp || 0)) + model.fixed) + (erp || 0));
 }
 

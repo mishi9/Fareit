@@ -729,14 +729,15 @@ test('apps: TADA learns on its own (its receipts, its flat-fee pay rule); Grab i
     assert.equal(F.withBase([])[0].id, 'tada-base-1', 'starts from the TADA receipts');
     const c = F.fitCommission([]);
     assert.equal(c.kind, 'tada');
-    // the receipts: 11.60 + 0.90 − 0.60 = 11.90; 40.20 + 1.20 − 0.82 = 40.58
-    assert.equal(F.driverEarns(c, 11.6), 11.9);
-    assert.equal(F.driverEarns(c, 40.2), 40.58);
+    // the receipts: the offer shows ride fare + fuel support (12.50, 41.40); minus the fee: 11.90, 40.58
+    assert.equal(F.driverEarns(c, 12.5), 11.9);
+    assert.equal(F.driverEarns(c, 41.4), 40.58);
+    assert.equal(F.driverEarns(c, 26.5), 25.68, 'the job offered at S$26.50: you net S$25.68');
     assert.equal(F.tadaFee(25), 0.6);
     assert.equal(F.tadaFee(25.01), 0.82);
     // the starting formula comes close to the non-airport receipt
     const w = F.fitWeights([]);
-    assert.ok(Math.abs(F.passengerFare(w, 4.93, 9).fare - 11.6) < 0.05);
+    assert.ok(Math.abs(F.passengerFare(w, 4.93, 9).fare - 12.5) < 0.05);
     // a yellow / orange TADA job is surged: it doesn't teach the normal price
     assert.equal(F.usable({ km: 8, actual: 20, surge: 'normal', level: 2, platform: 'tada' }), false);
     assert.equal(F.usable({ km: 8, actual: 15, surge: 'normal', level: 0, platform: 'tada' }), true);
