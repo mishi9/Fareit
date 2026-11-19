@@ -256,6 +256,10 @@ Open the Worker URL in Safari, then **Share → Add to Home Screen**. Open Farei
 - **Settings → Export trips** saves everything as a JSON file. Do this every week or so. **Import trips** merges a file back in, so it also moves your data to a new phone.
 - Passenger names are never asked for or stored.
 
+## Versions
+
+**v0.MINOR.PATCH (beta)**, shown in Settings as e.g. "v0.70.0 (beta)"; **v1.0.0** is the full roll-out. A new feature or change goes up a minor (v0.71.0), a bug fix a patch (v0.70.1). The version is the offline cache's name in `public/sw.js` (`agaration-0.70.0`); phones from before v0.70.0 read a legacy marker there so their Check for update still works.
+
 ## Develop
 
 ```

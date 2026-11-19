@@ -771,7 +771,7 @@ function buildSettings() {
   const owner = isOwnerPhone();
   $('#st-access').textContent = owner ? 'Owner' : accessKind() === 'driver' ? 'Tester (invited)' : 'Open';
   // Version this screen is running, and a button to check for (and install) a newer one.
-  loadedVersion.then((v) => { $('#st-ver').textContent = v ? `v${v}` : '—'; });
+  loadedVersion.then((v) => { $('#st-ver').textContent = v ? showVersion(v) : '—'; });
   $('#st-update').addEventListener('click', checkForUpdate);
   // Your trips
   $('#st-download').addEventListener('click', downloadMine);
@@ -805,12 +805,21 @@ function buildSettings() {
 }
 
 // ---------- app updates ----------
-// The version the page was loaded with: the app's offline copy is stored under "agaration-vN".
-const versionOf = (text) => { const m = /agaration-v(\d+)/.exec(text || ''); return m ? Number(m[1]) : null; };
+// Versions: v0.MINOR.PATCH while in beta (shown "v0.70.0 (beta)"), v1.0.0 at full roll-out.
+// A new feature or change goes up a minor (0.71.0), a bug fix a patch (0.70.1). The app's offline
+// copy is stored under "agaration-0.70.0"; before that it was "agaration-v69", read as 0.69.0.
+const versionOf = (text) => {
+  const m = /agaration-(\d+)\.(\d+)\.(\d+)/.exec(text || '');
+  if (m) return `${Number(m[1])}.${Number(m[2])}.${Number(m[3])}`;
+  const old = /agaration-v(\d+)/.exec(text || '');
+  return old ? `0.${Number(old[1])}.0` : null;
+};
+export const compareVersions = (a, b) => { const x = a.split('.').map(Number); const y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
+const showVersion = (v) => `v${v}${v.startsWith('0.') ? ' (beta)' : ''}`;
 const loadedVersion = (async () => {
   try {
     const ks = await caches.keys();
-    const v = ks.map(versionOf).filter(Boolean).sort((a, b) => b - a)[0];
+    const v = ks.map(versionOf).filter(Boolean).sort((a, b) => compareVersions(b, a))[0];
     if (v) return v;
   } catch { /* no offline copy */ }
   try { return versionOf(await (await fetch(`sw.js?v=${Date.now()}`, { cache: 'no-store' })).text()); } catch { return null; }
@@ -829,10 +838,10 @@ async function checkForUpdate() {
   label('Checking…');
   try {
     const [have, latest] = await Promise.all([loadedVersion, latestVersion()]);
-    if (latest && have && latest > have) {
-      btn.dataset.ready = String(latest);
+    if (latest && have && compareVersions(latest, have) > 0) {
+      btn.dataset.ready = latest;
       label(`Update to v${latest}`, 'primary');
-      settingsMsg(`A new version (v${latest}) is ready. Tap Update; the app reloads in a second.`);
+      settingsMsg(`A new version, ${showVersion(latest)}, is ready. Tap Update; the app reloads in a second.`);
     } else {
       label('Up to date \u2713');
       setTimeout(() => label('Check for update'), 4000);
