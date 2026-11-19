@@ -740,3 +740,19 @@ test('apps: TADA learns on its own (its receipts, its flat-fee pay rule); Grab i
   assert.equal(F.platformOf({}), 'grab');
   assert.equal(F.platformOf({ platform: 'tada' }), 'tada');
 });
+
+test('each Radar card says how many jobs back it: its distance, within 3 km and 1½ h of this time, and how many in the last hour', async () => {
+  const { bandOutlook } = await import('../public/formula.js');
+  const now = Date.parse('2026-11-19T22:00:00+08:00');
+  const here = { lat: 1.3204, lng: 103.8438 };
+  const at = (km, ts, where = here) => make(km, 18, { ts, lat: where.lat, lng: where.lng });
+  const trips = [
+    ...[1, 2, 3].map((d) => at(13, now - d * 86400000 - 20 * 60000)), // 10-20 km, this time, past days
+    at(12, now - 15 * 60000), // in the last hour
+    at(14, now - 5 * 3600000), // too far from this time of day
+    at(13, now - 10 * 60000, { lat: 1.40, lng: 103.90 }), // too far away
+    at(6, now - 86400000),
+  ];
+  const b = bandOutlook(trips, now, here);
+  assert.deepEqual(b.map((x) => [x.inBandNear, x.inBandRecent]), [[1, 0], [4, 1], [0, 0]]);
+});

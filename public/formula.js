@@ -375,6 +375,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
   const priorW = exp ? EXPERIENCE_WEIGHT : 1;
   const kind = dayType(ts);
   let inBandNear = 0;
+  let inBandRecent = 0; // of those, in the last hour
   const all = withBase(trips);
   const w = fitWeights(trips);
   const est = timeEstimator(all);
@@ -430,7 +431,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
   for (const it of items) {
     const x = it.t.base ? it.x : it.x * factor.get(driverOf(it.t));
     const { t, d, r, g, ageMin } = it;
-    if (band && t.km >= band.lo && t.km < band.hi && g <= 1.5 && d <= NEAR_KM) inBandNear++;
+    if (!t.base && band && t.km >= band.lo && t.km < band.hi && g <= 1.5 && d <= NEAR_KM) { inBandNear++; if (ageMin >= 0 && ageMin <= 60) inBandRecent++; }
     sw += x;
     swr += x * r;
     if (!closest || x > closest.x) closest = { x, ts: t.ts, km: Number.isFinite(d) ? d : null, gapH: g };
@@ -438,7 +439,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
     if (ageMin >= 0 && ageMin <= 90 && d <= NEAR_KM) recent++;
   }
   const m = (swr + priorW * priorLog) / (sw + priorW);
-  return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw, closest, inBandNear };
+  return { lift: Math.exp(m) - 1, near, surgeNear, recent, weight: sw, closest, inBandNear, inBandRecent };
 }
 
 // Fares vs the formula in 3-hour blocks, for the "By time of day" table.
@@ -556,7 +557,7 @@ export function bandOutlook(trips, ts, loc = null, opts = {}) {
     const surgeHi = surge.range ? driverEarns(c, normalPaid * (1 + surge.range.hi)) : withSurge;
     const vs = now / normal - 1;
     const state = ev ? 'event' : vs >= 0.1 ? 'good' : vs <= -0.1 ? 'bad' : 'normal';
-    return { ...b, km, normal, now, surge: withSurge, surgeLo, surgeHi, vs, state, eventTrips: ev ? ev.n : null, raining: Boolean(wet), rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear };
+    return { ...b, km, normal, now, surge: withSurge, surgeLo, surgeHi, vs, state, eventTrips: ev ? ev.n : null, raining: Boolean(wet), rainTrips: wet ? wet.n : null, rainLift: wet ? wet.lift : null, trips: inBand.length, nearHour: tod.near, recent: tod.recent, scope, closest: tod.closest, weight: tod.weight, inBandNear: own.inBandNear, inBandRecent: own.inBandRecent };
   });
 }
 

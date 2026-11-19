@@ -490,11 +490,19 @@ export function renderBands() {
     ${bands.map((b) => `
       <div class="band-card ${b.state}${learning ? ' learning' : ''}">
         <div class="band-top"><span class="band-name">${b.label}</span><span class="band-pills">${rainPill}${learning ? `<span class="learn">learning · ${tadaN} of ${TADA_LEARN}</span>` : `<span class="band-tag">${word[b.state]}${b.state === 'event' ? (b.eventTrips ? ` ${signed(b.vs)}` : '') : !['normal', 'tgrey'].includes(b.state) ? ` ${signed(b.vs)}` : ''}</span>`}</span></div>
-        <div class="band-now">${learning ? '~' : ''}${money(b.now)}</div>
+        <div class="band-mid"><div class="band-now">${learning ? '~' : ''}${money(b.now)}</div>${learning ? '' : reportsLine(b, Boolean(loc))}</div>
         <div class="band-sub">${tada ? `Normal ${money(b.normal)} · you keep ride fare + fuel − ${money(tadaFee(b.normal))}` : `Normal ${money(b.normal)} · Surge ${money(b.surgeLo)}–${money(b.surgeHi).replace('S$', '')}`}</div>
       </div>`).join('')}`;
 }
 setInterval(() => { if (lab.root) renderBands(); }, 60 * 1000);
+// How well a card is backed here and now: jobs of its distance within 3 km and 1½ h of this time
+// of day (any day), and how many of those were in the last hour. Without location: all areas.
+function reportsLine(b, located) {
+  const n = b.inBandNear || 0;
+  const where = located ? 'nearby' : 'at this time';
+  if (!n) return `<div class="band-n">no jobs ${where} yet</div>`;
+  return `<div class="band-n"><b>${n}</b> job${n === 1 ? '' : 's'} ${where}${b.inBandRecent ? `<br>${b.inBandRecent} in the last hour` : ''}</div>`;
+}
 
 // Green-arrow test (owner's phone): do jobs with the arrow pay more than jobs without?
 function renderArrowTest() {

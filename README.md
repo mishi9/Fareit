@@ -65,6 +65,8 @@ chance(c)   = (Σ votes for c + prior c) ÷ (Σ all votes + 4)              prio
 - Everyone is assumed to drive Standard 4-seater for now.
 - **Deleting a job** (Trips → Delete, tap twice) removes it from your phone and from the pool. Only the phone that sent a job can delete it. Other phones drop their copy on their next sync. "Delete all trips" in Settings only clears this phone.
 
+**Each card says how many jobs back it** (right of the price): jobs of its distance within 3 km and 1½ h of this time of day (any day), e.g. "7 jobs nearby · 2 in the last hour", or "no jobs nearby yet" (then it's the general price). Without location: "at this time".
+
 **One job can't flip Radar.** The "just now" boost needs 2+ jobs within 3 km in the last hour; a single job counts like any other. The surge range blends with its starting +15% to +40% until there are 3 surge jobs. (`research/sim-surge-drivers.mjs` runs 5 simulated drivers through it, before and after.)
 
 **Fresh jobs are local.** A job from the last few minutes counts up to 3× more, but only within 3 km of you. Jobs further away still count by distance (about a fifth at 6 km), without the boost, so a surge in River Valley doesn't show as surge in Toa Payoh.
