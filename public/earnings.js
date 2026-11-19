@@ -4,6 +4,7 @@
 // stays on this phone (days run 00:00-23:59). Grab jobs saved with Got a job or Log show up here automatically.
 import * as db from './db.js';
 import { myLabTrips, labReady } from './lab.js';
+import { cpfRate, cpfOf, CPF_NET_SHARE, CPF_MONTH_MIN } from './cpf.js';
 
 export const PLATFORMS = [
   { id: 'grab', name: 'Grab', color: '#2fbf6a' },
@@ -22,6 +23,7 @@ export const COSTS = [
 export const FEES = [
   { id: 'cancel', name: 'Cancellation fee' }, { id: 'late', name: 'Late / waiting fee' }, { id: 'tip', name: 'Tip' }, { id: 'other', name: 'Other' },
 ];
+
 const KEY = 'earnings';
 const e = { root: null, data: { entries: [], shifts: [], goal: null, last: 'grab', cancelled: [] }, mode: 'job', timer: null };
 const pad = (n) => String(n).padStart(2, '0');
@@ -41,7 +43,7 @@ export function allJobs() {
   // the estimates), but it's not money you made, so Earnings leaves it out (undo any time).
   const gone = new Set(e.data.cancelled || []);
   const grab = myLabTrips().filter((t) => t.earned > 0 && Number.isFinite(t.ts) && !gone.has(`lab-${t.id}`))
-    .map((t) => ({ id: `lab-${t.id}`, ts: t.ts, platform: t.platform === 'tada' ? 'tada' : 'grab', amount: t.earned, km: t.km || null, auto: true, note: t.dropLabel || '' }));
+    .map((t) => ({ id: `lab-${t.id}`, ts: t.ts, platform: t.platform === 'tada' ? 'tada' : 'grab', amount: t.earned, cpfBase: t.platform === 'tada' && t.actual > 0 ? t.actual : t.earned, km: t.km || null, auto: true, note: t.dropLabel || '' }));
   return [...typed, ...grab].sort((a, b) => b.ts - a.ts);
 }
 const costs = () => e.data.entries.filter((x) => x.kind === 'cost');
@@ -76,7 +78,9 @@ export function summary(fromTs, toTs, now = Date.now()) {
     const withKm = js.filter((j) => j.km > 0);
     return { ...p, jobs: js.length, fee, sum, perJob: js.length ? fare / js.length : null, perKm: withKm.length ? withKm.reduce((s, j) => s + j.amount, 0) / withKm.reduce((s, j) => s + j.km, 0) : null };
   }).filter((p) => p.jobs || p.fee);
-  return { jobs, fees: feeList, feeSum, gross, spent, net: gross - spent, hours, perHour: hours >= 1 ? (gross - spent) / hours : null, by };
+  const r = cpfRate(e.data.cpf);
+  const cpf = r ? jobs.reduce((s, j) => s + cpfOf(j.cpfBase ?? j.amount, r), 0) + feeList.reduce((s, f) => s + cpfOf(f.amount, r), 0) : 0;
+  return { jobs, fees: feeList, feeSum, gross, spent, net: gross - spent, hours, perHour: hours >= 1 ? (gross - spent) / hours : null, by, cpf: Math.round(cpf * 100) / 100 };
 }
 
 // The day's span: the calendar day, 00:00 to 23:59 (a shift past midnight is split across the two days).
@@ -198,6 +202,7 @@ export function renderEarnings() {
       <div class="band-head">Today · <b>${day}</b></div>
       <div class="ea-total">${money(t.net)}</div>
       <div class="ea-sub">${t.jobs.length} job${t.jobs.length === 1 ? '' : 's'} · ${t.hours ? `${t.hours.toFixed(1)} h on shift` : 'no shift timed'} · <b>${t.perHour != null ? `${money(t.perHour)}/h` : t.hours ? 'S$/h after 1 h' : '—/h'}</b>${t.feeSum ? ` · fees ${money(t.feeSum)}` : ''}${t.spent ? ` · costs ${money(t.spent)}` : ''}</div>
+      ${t.cpf ? `<div class="ea-cpf">CPF held <b>${money(t.cpf)}</b> · cash out <b>${money(t.net - t.cpf)}</b></div>` : ''}
       ${goal ? `<div class="ea-goal"><div class="ea-bar"><span style="width:${Math.min(100, (t.net / goal) * 100).toFixed(1)}%"></span></div>
         <div class="note">${t.net >= goal ? `<b>Goal reached</b> (${money(goal)})` : `<b>${money(toGo)}</b> to your ${money(goal)} goal${t.perHour ? ` · about <b>${(toGo / t.perHour).toFixed(1)} h</b> at today's pace` : ''}`}</div></div>` : ''}
       ${sh ? (() => {
@@ -251,6 +256,9 @@ export function renderEarnings() {
     </div>
     ${month.by.length ? `<div class="ea-plats">${month.by.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">${p.perJob != null ? `${money(p.perJob)}/job` : 'fees only'}${p.perKm ? ` · ${money(p.perKm)}/km` : ''}${p.fee ? ` · fees ${money(p.fee)}` : ''}</span><span class="ea-amt">${money(p.sum)}</span></div>`).join('')}</div>` : ''}
 
+    <h2>CPF</h2>
+    ${cpfHtml(m0, now)}
+
     <div class="row2">
       <div class="field"><label for="ea-goal">Daily goal (S$)</label><input id="ea-goal" type="number" inputmode="decimal" step="1" min="0" value="${goal || ''}" placeholder="e.g. 200"></div>
       <button type="button" class="ghost" data-act="csv">Download (CSV)</button>
@@ -260,10 +268,46 @@ export function renderEarnings() {
   if (focused) r.querySelector(`#${focused}`)?.focus();
   const goalIn = r.querySelector('#ea-goal');
   goalIn.addEventListener('change', async () => { const v = parseFloat(goalIn.value); e.data.goal = v > 0 ? v : null; await save(); renderEarnings(); });
+  const born = r.querySelector('#ea-born');
+  born.addEventListener('change', async () => { const v = parseInt(born.value, 10); e.data.cpf = { ...(e.data.cpf || {}), birthYear: v > 1900 ? v : null, on: true }; await save(); renderEarnings(); });
+  const own = r.querySelector('#ea-cpfrate');
+  own.addEventListener('change', async () => { const v = parseFloat(own.value); e.data.cpf = { ...(e.data.cpf || {}), custom: v > 0 ? v : null, on: true }; await save(); renderEarnings(); });
   clearInterval(e.timer);
   if (sh) e.timer = setInterval(() => { if (!r.closest('[hidden]') && r.querySelector('[data-act="shift"]')?.dataset.armed !== '1') renderEarnings(); }, 60000);
 }
 const addLabel = () => (e.mode === 'job' ? `Add ${platform(e.data.last).name} earning` : e.mode === 'fee' ? `Add ${platform(e.data.last).name} ${feeName(e.feeCat || 'cancel').toLowerCase()}` : 'Add cost');
+// The CPF section: this month per platform (into CPF, or given back under S$500 net), and settings.
+function cpfHtml(m0, now) {
+  const c = e.data.cpf || {};
+  const r = cpfRate(c);
+  const year = new Date(now).getFullYear();
+  const pre = c.birthYear && c.birthYear < 1995;
+  const kindText = r ? ({
+    full: `Born 1995 or later: <b>full CPF</b>. Your share is <b>${r.rate}%</b> of net (age ${r.age}); the platform adds ${r.operator}%.`,
+    optin: `Born before 1995, <b>opted in</b>: full CPF. Your share is <b>${r.rate}%</b> of net (age ${r.age}); the platform adds ${r.operator}%.`,
+    medisave: `Born before 1995, <b>not opted in</b>: <b>MediSave only</b>, <b>${r.rate}%</b> of net (age ${r.age}); no platform share.`,
+    custom: `Your own rate: <b>${r.rate}%</b> of net.`,
+  })[r.kind] : '';
+  let month = '';
+  if (r) {
+    const span = summary(m0, now + 1, now);
+    const per = PLATFORMS.map((p) => {
+      const base = span.jobs.filter((j) => j.platform === p.id).reduce((s, j) => s + (j.cpfBase ?? j.amount), 0) + span.fees.filter((f) => f.platform === p.id).reduce((s, f) => s + f.amount, 0);
+      return { ...p, base, net: base * CPF_NET_SHARE, held: cpfOf(base, r) };
+    }).filter((p) => p.base > 0);
+    month = per.length ? `<div class="ea-plats">${per.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">net ${money(p.net)} · ${p.net >= CPF_MONTH_MIN ? 'over S$500: <b>goes into CPF</b>' : `under S$500 so far: <b>given back</b> at month end if it stays under`}</span><span class="ea-amt">${money(p.held)}</span></div>`).join('')}</div>` : '<p class="note">No earnings this month yet.</p>';
+  }
+  return `<div class="ea-cpf-box stack">
+    ${r ? `<p class="note">${kindText} Net = 40% of what you earn on each app (the 60% expense deduction for cars).</p>${month}
+      <p class="note">Each app holds it back on every job and settles it per app each month: under S$500 net it's given back, otherwise it goes into CPF. Estimates from CPF's 2026 rates; your statements have the exact amounts.</p>` : '<p class="note">Set up CPF to see what each job leaves you after CPF (cash out). It\u2019s worked out on this phone only.</p>'}
+    <div class="row2">
+      <div class="field"><label for="ea-born">Year you were born</label><input id="ea-born" type="number" inputmode="numeric" min="1940" max="${year - 16}" value="${c.birthYear || ''}" placeholder="e.g. 1992"></div>
+      <div class="field"><label for="ea-cpfrate">Or your own % (optional)</label><input id="ea-cpfrate" type="number" inputmode="decimal" step="0.5" min="0" max="25" value="${c.custom || ''}" placeholder="e.g. 8"></div>
+    </div>
+    ${pre ? `<div class="field"><span class="flabel">Born before 1995: did you opt in to full CPF?</span><div class="seg g2" id="ea-optin"><button type="button" data-optin="no" class="${c.optIn ? '' : 'sel'}">No (MediSave only)</button><button type="button" data-optin="yes" class="${c.optIn ? 'sel' : ''}">Yes, opted in</button></div></div>` : ''}
+    ${r ? '<button type="button" class="ghost small" data-act="cpf-off">Turn CPF off</button>' : ''}
+  </div>`;
+}
 const del = (x) => `<button type="button" class="ghost small" data-del="${esc(x.id)}">✕</button>`;
 
 async function onClick(ev) {
@@ -286,6 +330,8 @@ async function onClick(ev) {
     e.data.cancelled = [...new Set([...(e.data.cancelled || []), b.dataset.cancel])].slice(-500);
     await save(); renderEarnings(); return;
   }
+  if (b.dataset.optin) { e.data.cpf = { ...(e.data.cpf || {}), optIn: b.dataset.optin === 'yes', on: true }; await save(); renderEarnings(); return; }
+  if (b.dataset.act === 'cpf-off') { e.data.cpf = { ...(e.data.cpf || {}), on: false }; await save(); renderEarnings(); return; }
   if (b.dataset.undo) {
     e.data.cancelled = (e.data.cancelled || []).filter((id) => id !== b.dataset.undo);
     await save(); renderEarnings(); return;

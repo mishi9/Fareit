@@ -689,3 +689,7 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .me-code.sm { font-size: 14px; letter-spacing: 1px; padding: 2px 6px; border-width: 1px; }
 .st-rec #st-recovery { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
 .job-edit { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+
+.ea-cpf { font-size: 14px; color: var(--muted); }
+.ea-cpf b { color: var(--ink); }
+.ea-cpf-box { padding: 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); }

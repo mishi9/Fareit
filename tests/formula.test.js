@@ -790,3 +790,20 @@ test('a postal code OneMap does not know: its first two digits give the district
   assert.equal(postalDistrict('999999'), null, 'not a district: ask for km instead');
   assert.equal(postalDistrict('Orchard'), null);
 });
+
+test('CPF: 40% of earnings is net; the rate by birth year, opt-in and age (CPF 2026); matches the TADA receipts', async () => {
+  const { cpfRate, cpfOf } = await import('../public/cpf.js');
+  const y = 2026;
+  // the TADA receipts: born before 1995, not opted in, 35 or under: MediSave 8% -> 41.40 -> 1.32, 12.50 -> 0.40
+  const ms = cpfRate({ on: true, birthYear: 1992, optIn: false }, y);
+  assert.deepEqual([ms.kind, ms.rate, ms.operator], ['medisave', 8, 0]);
+  assert.equal(cpfOf(41.4, ms), 1.32);
+  assert.equal(cpfOf(12.5, ms), 0.4);
+  assert.equal(cpfRate({ on: true, birthYear: 1985 }, y).rate, 9, 'not opted in, 41: MediSave 9%');
+  assert.deepEqual([cpfRate({ on: true, birthYear: 1985, optIn: true }, y).kind, cpfRate({ on: true, birthYear: 1985, optIn: true }, y).rate], ['optin', 14]);
+  const young = cpfRate({ on: true, birthYear: 1998 }, y);
+  assert.deepEqual([young.kind, young.rate, young.operator], ['full', 13, 7], 'born 1995+: full CPF, no choice');
+  assert.equal(cpfRate({ on: true, birthYear: 1950, optIn: true }, y).rate, 5.5);
+  assert.equal(cpfRate({ on: true, custom: 10 }, y).rate, 10, 'your own % wins');
+  assert.equal(cpfRate({ on: false, birthYear: 1990 }, y), null);
+});

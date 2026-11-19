@@ -106,6 +106,8 @@ The old Trips view (reconciled jobs from the slider era, the old shared pool) is
 
 **Fixing a job:** Log → Your jobs → **Edit** changes a saved job's fares and km (TADA: Rider's fare, Ride fare; Grab: passenger paid, you earned), keeping its time, place and the estimate made before saving. Earnings and the server copy follow. TADA also asks once if the Rider's fare is less than the Ride fare (the two boxes swapped).
 
+**CPF (Earnings → CPF):** set your year of birth (and, if born before 1995, whether you opted in), or type your own %. Net = 40% of what you earn on each app; your share by CPF's 2026 rates: born 1995+ or opted in, full CPF by age (13% to 35, 14% to 45, 15% to 50, 15.5% to 60, 12.5% to 65, 9.5% to 70, 5.5% after; the platform adds 7%); born before 1995 and not opted in, MediSave only (8% to 35, 9% to 45, 10% to 50, 10.5% after). Today shows **CPF held** and **cash out**; this month shows each app's CPF and whether it's over S$500 net (goes into CPF) or under (given back at month end). TADA's is worked out on the offer amount, before its fee (as its receipts do). The rules are in `public/cpf.js`.
+
 **Cancelled jobs:** a job logged in Log or Got a job that was then cancelled can be taken out of Earnings with ✕ (two taps: "Cancelled?", then again), with Undo underneath. It stays in the estimates: its fare was still real. A cancellation fee goes in with + Fee.
 
 **Fees** (+ Fee): money from a platform that isn't a fare: cancellation fee, late / waiting fee, tip, other. They count in today's total, the week and month and S$/hour, and per platform, but not as a job, not in per-job or per-km figures, and never in the fare estimates (Earnings stays on the phone).
