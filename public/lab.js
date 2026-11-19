@@ -270,9 +270,9 @@ export async function buildLab(root) {
     <button type="button" class="ghost small log-clear" id="lab-clear">Clear the form</button>
     <div class="offer tada-only" id="lab-offer" hidden>
       <b>⚡ Log an offer</b>
-      <span class="note">A TADA offer you saw but didn't take still teaches TADA's prices. The ride fare shown on the offer, before the S$0.60 / S$0.82 fee.</span>
-      <div class="row2"><div class="field"><label for="of-km">Km</label><input id="of-km" type="number" inputmode="decimal" step="0.1" min="0"></div>
-        <div class="field"><label for="of-fare">Ride fare shown (S$)</label><input id="of-fare" type="number" inputmode="decimal" step="0.01" min="0"></div></div>
+      <span class="note">A TADA offer you saw but didn't take still teaches TADA's prices: the <b>Net Fare</b> and <b>Trip Distance</b> at the top of the offer, and its colour (grey, or yellow / orange when surging).</span>
+      <div class="row2"><div class="field"><label for="of-km">Trip distance (km)</label><input id="of-km" type="number" inputmode="decimal" step="0.1" min="0"></div>
+        <div class="field"><label for="of-fare">Net Fare (S$)</label><input id="of-fare" type="number" inputmode="decimal" step="0.01" min="0"></div></div>
       <div class="lv" id="of-level"><button type="button" class="g" data-l="0">Grey</button><button type="button" class="y" data-l="1">Yellow</button><button type="button" class="o" data-l="2">Orange</button></div>
       <p class="msg" id="of-msg" role="status"></p>
       <button type="button" class="ghost wide" id="of-save">Save offer</button>
@@ -309,7 +309,7 @@ export async function buildLab(root) {
   showOfferLevel();
   $('#of-save', root).addEventListener('click', async () => {
     const km = num($('#of-km', root)); const fare = num($('#of-fare', root)); const m = $('#of-msg', root);
-    if (!(km > 0) || !(fare > 0)) { m.textContent = 'Add the km and the ride fare shown.'; m.classList.add('err'); return; }
+    if (!(km > 0) || !(fare > 0)) { m.textContent = 'Add the trip distance and the Net Fare.'; m.classList.add('err'); return; }
     const sane = plausible({ km, paid: fare });
     if (!sane.ok) { m.textContent = sane.reason; m.classList.add('err'); return; }
     const w = weights();
