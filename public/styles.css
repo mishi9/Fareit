@@ -676,8 +676,10 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .me-big { font-family: var(--display); font-weight: 800; font-size: 22px; }
 .me-h3 { margin: 6px 0 0; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .me-top { margin: 0; padding: 0; list-style: none; counter-reset: r; display: grid; gap: 4px; }
-.me-top li { counter-increment: r; display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 6px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
-.me-top li::before { content: counter(r); color: var(--muted); font-weight: 700; }
+.me-top li { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; padding: 6px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.me-top .rk { color: var(--muted); font-weight: 700; }
+.me-top li.gap { margin-top: 10px; position: relative; }
+.me-top li.gap::before { content: "⋮"; position: absolute; top: -14px; left: 14px; color: var(--muted); line-height: 1; }
 .me-top li:first-child { border-color: var(--warn); }
 .me-top li.you { border-color: var(--accent); }
 .me-top li b { font-family: var(--mono); }

@@ -81,16 +81,16 @@ export function renderBoard() {
   const b = me.board || { top: [], me: {}, players: 0 };
   const month = new Date(`${(b.month || '') }-01T00:00:00+08:00`);
   const monthName = Number.isFinite(month.getTime()) ? month.toLocaleDateString('en-SG', { month: 'long' }) : 'this month';
-  const rank = me.data.owner ? 'not ranked (owner)' : b.me.rank ? `#${b.me.rank} of ${b.players}` : 'not on the board yet';
+  const rank = b.me.rank ? `#${b.me.rank} of ${b.players}` : 'not on the board yet';
   const gap = b.me.ahead != null && b.me.rank > 1 ? `<span class="note"> · ${b.me.ahead - p.total + 1} point${b.me.ahead - p.total + 1 === 1 ? '' : 's'} to #${b.me.rank - 1}</span>` : '';
   const can = me.data.canChangeAt ? `Next change from ${new Date(me.data.canChangeAt).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}.` : 'You can change it now.';
   el.innerHTML = `
     <div class="me-head"><span class="me-big">${esc(myTag())}</span><span><b>${p.total}</b> points · ${rank}${gap}</span></div>
     ${p.held ? '<p class="note">Points are on hold while many of your fares are far from the estimate.</p>' : ''}
     <p class="note">${p.jobs} job${p.jobs === 1 ? '' : 's'} · ${p.activeDays} active day${p.activeDays === 1 ? '' : 's'}${p.run ? ` · on a <b>${p.run}-day</b> streak` : ''}${p.streaks ? ` · ${p.streaks} full week${p.streaks === 1 ? '' : 's'}` : ''}</p>
-    <h3 class="me-h3">Top 10 · ${esc(monthName)}</h3>
-    ${b.top.length ? `<ol class="me-top">${b.top.map((r) => `<li${me.data && r.num === me.data.num ? ' class="you"' : ''}><span>${esc(tagOf(r.animal, r.num))}</span><b>${r.points}</b></li>`).join('')}</ol>` : '<p class="note">Nobody has points yet this month: be the first.</p>'}
-    <p class="note">The top driver this month wins a <b>free month</b>.</p>
+    <h3 class="me-h3">Top 3 · ${esc(monthName)}</h3>
+    ${b.top.length ? `<ol class="me-top">${b.top.map((r, i) => `<li class="${me.data && r.num === me.data.num ? 'you' : ''}"><span class="rk">${i + 1}</span><span>${esc(tagOf(r.animal, r.num))}${r.owner ? ' <span class="note">(owner)</span>' : ''}</span><b>${r.points}</b></li>`).join('')}${!b.me.rank || b.me.rank > b.top.length ? `<li class="you gap"><span class="rk">${b.me.rank || "–"}</span><span>${esc(myTag())}</span><b>${p.total}</b></li>` : ''}</ol>` : '<p class="note">Nobody has points yet this month: be the first.</p>'}
+    <p class="note">The top driver this month wins a <b>free month</b> (the owner doesn't count).</p>
     <details class="me-how"><summary>How points work</summary><ul class="st-list">
       <li><b>1 point</b> for every 5 jobs logged (TADA offers count).</li>
       <li><b>+1</b> for each day you log 3 or more jobs.</li>

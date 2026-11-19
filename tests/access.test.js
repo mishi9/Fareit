@@ -407,11 +407,14 @@ test('Animal#1234: a fixed number per driver, an animal from the list, changed a
   await req('/api/formula', { body: { device: 'app-dev-b-0001', trips: [trip('pb-trip-0000', 2)] }, key: b });
   await req('/api/formula', { body: { device: 'app-dev-o-0001', trips: Array.from({ length: 10 }, (_, i) => trip(`po-trip-${i}000`, i + 1)) }, key: okey });
   const lb = (await req('/api/leaderboard', { key: b })).body;
-  assert.equal(lb.top[0].animal, 'Fox');
-  assert.equal(lb.top[0].points, 2, '6 jobs (1) + an active day (1)');
-  assert.equal(lb.me.rank, 2);
-  assert.ok(lb.top.every((r) => Object.keys(r).sort().join() === 'animal,num,points'), 'nothing but animal, number and points');
-  assert.equal(lb.players, 2, 'the owner is not ranked');
+  assert.equal(lb.top[0].animal, 'Pig', 'the owner is on the board (10 jobs: 2 + 1)');
+  assert.equal(lb.top[0].owner, true);
+  assert.equal(lb.top[1].animal, 'Fox');
+  assert.equal(lb.top[1].points, 2, '6 jobs (1) + an active day (1)');
+  assert.equal(lb.me.rank, 3);
+  assert.ok(lb.top.length <= 3, 'top 3 only');
+  assert.ok(lb.top.every((r) => Object.keys(r).filter((k) => k !== 'owner').sort().join() === 'animal,num,points'), 'nothing but animal, number and points');
+  assert.equal(lb.players, 3);
   assert.equal((await req('/api/leaderboard')).status, 401);
 });
 
@@ -429,4 +432,25 @@ test('the owner is Pig#0001 and the tester code-named Seal keeps it as Seal#0002
   const k = (await req('/api/access/redeem', { body: { token: other, device: 'other-phone' } })).body.key;
   const n = (await req('/api/me', { key: k })).body.num;
   assert.ok(n >= 1000 && n <= 9999, `random: ${n}`);
+});
+
+test('a turned-off invite can be deleted completely: its trips (for everyone), keys, phones, Animal#1234 and the invite', async () => {
+  const { req, owner, env } = setup();
+  const okey = await owner();
+  const { token } = (await req('/api/invites/create', { body: {}, key: okey })).body;
+  const k = (await req('/api/access/redeem', { body: { token, device: 'zebra-phone' } })).body.key;
+  await req('/api/me', { key: k });
+  const trip = (id) => ({ id, ts: Date.now() - 60000, km: 8, min: 15, erp: 0, paid: 15, earned: 11, surge: 'normal', lat: 1.3, lng: 103.83 });
+  await req('/api/formula', { body: { device: 'zebra-app-0001', trips: [trip('zebra-trip-01'), trip('zebra-trip-02')] }, key: k });
+  assert.equal((await req('/api/invites/delete', { body: { token }, key: okey })).status, 409, 'turn it off first');
+  assert.equal((await req('/api/invites/delete', { body: { token }, key: k })).status, 403, 'owner only');
+  await req('/api/invites/revoke', { body: { token }, key: okey });
+  const r = (await req('/api/invites/delete', { body: { token }, key: okey })).body;
+  assert.equal(r.removed.trips, 2);
+  const trips = (await req('/api/formula?since=0', { key: okey })).body.trips;
+  assert.ok(trips.every((t) => t.deleted === 1), 'tombstones: other phones drop them');
+  assert.equal((await req('/api/invites', { key: okey })).body.invites.length, 0);
+  for (const [table, col] of [['ident', 'who'], ['phones', 'who'], ['access_keys', 'invite']]) {
+    assert.equal((await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${col} = ?1`).bind(token).first()).n, 0, table);
+  }
 });

@@ -962,13 +962,15 @@ async function getInfo(env) {
 //   a day with 3+ jobs                                   +1
 //   every 7 days in a row with 3+ jobs                   +3
 // At most POINTS_DAY_CAP jobs a day count. A driver whose far-off rate is flagged (25%+ of 5+
-// checked fares) earns nothing until it's back under. The owner isn't ranked (it's their giveaway).
+// checked fares) earns nothing until it's back under. The owner is on the board, but the prize goes
+// to the top driver who isn't the owner.
 export const POINTS_PER_JOBS = 5;
 export const POINTS_DAY_MIN = 3;
 export const POINTS_DAY_CAP = 30;
 export const STREAK_DAYS = 7;
 export const STREAK_BONUS = 3;
 export const ANIMAL_CHANGE_DAYS = 30;
+export const LEADERBOARD_TOP = 3; // the top 3, then you
 const sgDay = (ms) => new Date(ms + 8 * 3600000).toISOString().slice(0, 10);
 const monthStart = (now) => { const d = new Date(now + 8 * 3600000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - 8 * 3600000; };
 // Pure: per-day job counts -> points.
@@ -1053,9 +1055,8 @@ async function leaderboard(env, me) {
   const byWho = new Map(ids.map((r) => [r.who, r]));
   const rows = [];
   for (const [who, p] of pts) {
-    if (who === 'owner') continue;
     const id = byWho.get(who) || await identOf(env, who);
-    rows.push({ who, num: id.num, animal: id.animal || null, points: p.flagged ? 0 : p.total, held: p.flagged });
+    rows.push({ who, num: id.num, animal: id.animal || null, points: p.flagged ? 0 : p.total, held: p.flagged, owner: who === 'owner' });
   }
   rows.sort((a, b) => b.points - a.points || a.num - b.num);
   const mine = pts.get(me) || { total: 0, jobs: 0, activeDays: 0, streaks: 0, run: 0, flagged: false };
@@ -1063,9 +1064,9 @@ async function leaderboard(env, me) {
   const d = new Date(Date.now() + 8 * 3600000);
   return {
     month: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`,
-    top: rows.slice(0, 10).map(({ num, animal, points }) => ({ num, animal, points })),
+    top: rows.slice(0, LEADERBOARD_TOP).map(({ num, animal, points, owner }) => ({ num, animal, points, ...(owner ? { owner: true } : {}) })),
     players: rows.length,
-    me: { rank: me === 'owner' ? null : at >= 0 ? at + 1 : null, points: { ...mine, total: mine.flagged ? 0 : mine.total }, ahead: at > 0 ? rows[at - 1].points : null },
+    me: { rank: at >= 0 ? at + 1 : null, points: { ...mine, total: mine.flagged ? 0 : mine.total }, ahead: at > 0 ? rows[at - 1].points : null },
   };
 }
 async function setAnimal(request, env, who) {
@@ -1447,6 +1448,26 @@ async function purgeToken(env, token) {
   return json({ removed: { trips: ft.results.length, jobs: jb.results.length, queue: qu.results.length } });
 }
 
+// Delete an invite that's been turned off, completely: everything its phone(s) sent (as
+// tombstones, so other phones drop it too), its keys, its phones, its Animal#1234 and the invite.
+async function deleteInvite(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return error;
+  const token = String(body.token || '').toUpperCase().trim();
+  if (!TOKEN_RE.test(token)) return json({ error: 'Not an invite.' }, 400);
+  const inv = await env.DB.prepare('SELECT revoked, animal FROM invites WHERE token = ?1').bind(token).first();
+  if (!inv) return json({ error: 'No such invite.' }, 404);
+  if (inv.revoked !== 1) return json({ error: 'Turn it off first.' }, 409);
+  const removed = await (await purgeToken(env, token)).json();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM access_keys WHERE invite = ?1').bind(token),
+    env.DB.prepare('DELETE FROM phones WHERE who = ?1').bind(token),
+    env.DB.prepare('DELETE FROM ident WHERE who = ?1').bind(token),
+    env.DB.prepare('DELETE FROM invites WHERE token = ?1').bind(token),
+  ]);
+  return json({ deleted: token, animal: inv.animal, ...removed });
+}
+
 async function revokeInvite(request, env) {
   const { body, error } = await readJson(request);
   if (error) return error;
@@ -1483,7 +1504,7 @@ export default {
     const isJobsPost = url.pathname === '/api/jobs' && request.method === 'POST';
     const isDelete = url.pathname === '/api/jobs/delete' && request.method === 'POST';
     const isFormulaWrite = ['/api/formula', '/api/formula/delete', '/api/queue', '/api/queue/delete',
-      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/access/purge-mine', '/api/me/animal', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
+      '/api/access/redeem', '/api/access/open', '/api/owner/claim', '/api/events', '/api/events/delete', '/api/invites/purge', '/api/invites/delete', '/api/access/purge-mine', '/api/me/animal', '/api/invites/create', '/api/invites/revoke'].includes(url.pathname) && request.method === 'POST';
     if (request.method !== 'GET' && !isJobsPost && !isDelete && !isFormulaWrite) return json({ error: 'Method not allowed' }, 405);
 
     if (url.pathname === '/api/status') {
@@ -1520,6 +1541,7 @@ export default {
         if (url.pathname === '/api/invites/create') return await createInvite(request, env);
         if (url.pathname === '/api/invites/revoke') return await revokeInvite(request, env);
         if (url.pathname === '/api/invites/purge') return await purgeInvite(request, env);
+        if (url.pathname === '/api/invites/delete') return await deleteInvite(request, env);
         if (url.pathname === '/api/invites') return await listInvites(env);
       } catch {
         return json({ error: 'The database couldn’t be reached.' }, 502);

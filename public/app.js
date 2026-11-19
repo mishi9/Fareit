@@ -1007,7 +1007,25 @@ function buildOwner() {
           });
           row.append(off);
         }
-        if (inv.used_at && (inv.trips || inv.jobs || inv.queue)) {
+        if (inv.revoked) {
+          // Turned off: delete it completely (its trips, its phones, its Animal#1234 and the invite).
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'ghost small danger';
+          delBtn.textContent = 'Delete';
+          let armedD = false;
+          const nameD = inv.ident_num ? tagOf(inv.ident_animal, inv.ident_num) : inv.animal || inv.token;
+          delBtn.addEventListener('click', async () => {
+            if (!armedD) { armedD = true; delBtn.textContent = `Delete ${nameD} for good?`; setTimeout(() => { armedD = false; delBtn.textContent = 'Delete'; }, 4000); return; }
+            try {
+              const r = await ownerApi('/api/invites/delete', { token: inv.token });
+              settingsMsg(`Deleted ${nameD}: ${r.removed.trips} trip${r.removed.trips === 1 ? '' : 's'} and the invite. Other phones drop the trips on their next sync.`);
+              list();
+            } catch (e) { settingsMsg(e.message, true); }
+          });
+          row.append(delBtn);
+        }
+        if (inv.used_at && !inv.revoked && (inv.trips || inv.jobs || inv.queue)) {
           // Remove everything this phone sent, for everyone. Tap twice.
           const purge = document.createElement('button');
           purge.type = 'button';
