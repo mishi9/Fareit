@@ -106,11 +106,11 @@ const toRow = (t) => ({
   card_min: t.cardMin ?? null, pickup_km: t.pickupKm ?? null, lat: t.lat ?? null, lng: t.lng ?? null,
   ...(t.rain === 0 || t.rain === 1 ? { rain: t.rain } : {}),
   ...(t.arrow === 0 || t.arrow === 1 ? { arrow: t.arrow } : {}),
-  ...(t.platform === 'tada' ? { platform: 'tada', offer: t.offer ? 1 : 0, level: [0, 1, 2].includes(t.level) ? t.level : null, fuel: t.fuel ?? null } : {}),
+  ...(t.platform === 'tada' ? { platform: 'tada', offer: t.offer ? 1 : 0, level: [0, 1, 2].includes(t.level) ? t.level : null, fuel: t.fuel ?? null, rider_fare: t.riderFare ?? null } : {}),
 });
 const fromRow = (r) => ({
   id: r.id, ts: r.ts, km: r.km, min: r.min ?? null, erp: r.erp || 0, actual: r.paid, earned: r.earned, surge: r.surge,
-  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, rain: r.rain === 1 ? 1 : r.rain === 0 ? 0 : null, arrow: r.arrow === 1 ? 1 : r.arrow === 0 ? 0 : null, ...(r.platform === 'tada' ? { platform: 'tada', offer: r.offer === 1, level: r.level ?? null, fuel: r.fuel ?? null } : {}), shared: true, d: r.d || null, trusted: r.tr === 1,
+  predicted: r.predicted, predictedEarned: r.predicted_earned, cardMin: r.card_min ?? null, pickupKm: r.pickup_km ?? null, lat: r.lat ?? null, lng: r.lng ?? null, rain: r.rain === 1 ? 1 : r.rain === 0 ? 0 : null, arrow: r.arrow === 1 ? 1 : r.arrow === 0 ? 0 : null, ...(r.platform === 'tada' ? { platform: 'tada', offer: r.offer === 1, level: r.level ?? null, fuel: r.fuel ?? null, riderFare: r.rider_fare ?? null } : {}), shared: true, d: r.d || null, trusted: r.tr === 1,
 });
 // Surge or airport: the learned % on top of the normal fare (null for normal trips).
 const liftFor = (kind, ts) => (kind === 'surge' ? surgeLift(dataset(), ts) : kind === 'airport' ? airportLift(dataset(), ts) : null);
@@ -239,7 +239,7 @@ export async function buildLab(root) {
       <p class="log-km-note">Distances in <b>km</b>: if Grab shows metres, divide by 1000. <b>800 m = 0.8</b> · 1,250 m = 1.25</p>
       <div class="log-guide-key tada-only" hidden>
         <span><span class="log-n">1</span> Trip km (TADA's Job Details, under the date)</span>
-        <span><span class="log-n">2</span> Ride fare · Fuel support (under Net Earnings)</span>
+        <span><span class="log-n">2</span> Rider's fare (what the passenger pays) · Ride fare (your earnings, before the S$0.60 / S$0.82 fee)</span>
         <span class="adv">The driver platform fee (S$0.60, or S$0.82 over a S$25 fare) is filled in for you.</span>
       </div>
       <div class="log-guide-key grab-only">
@@ -599,13 +599,17 @@ function readForm() {
     cardMin: num($('#lab-cardmin', r)), pickupKm: num($('#lab-pickupkm', r)), timeSplit: true,
     ts: lab.pending ? lab.pending.ts : Date.now(), // when you tapped Got a job, else when you save
     actual: num($('#lab-actual', r)), earned: num($('#lab-earned', r)), surge: lab.surge,
-    ...(isTada() ? tadaParts(num($('#lab-actual', r)), num($('#lab-earned', r))) : {}),
+    ...(isTada() ? tadaParts(num($('#lab-earned', r)), num($('#lab-actual', r))) : {}),
   };
 }
-// TADA: the second box is fuel support; you earned = ride fare + fuel support − the flat fee.
-function tadaParts(fare, fuelTyped) {
-  const fuel = fuelTyped != null ? fuelTyped : fare > 0 ? tadaFuel(fare) : null;
-  return { platform: 'tada', fuel, earned: fare > 0 ? Math.round((fare + (fuel || 0) - tadaFee(fare)) * 100) / 100 : null, level: lab.level };
+// TADA asks for the Rider's fare (what the passenger pays) and the Ride fare (your earnings, before
+// the S$0.60 / S$0.82 fee). The formula learns the ride fare (what TADA offers show as Net Fare);
+// the rider's fare is kept with it. You earned = ride fare + fuel support (by TADA's usual amounts)
+// − the fee.
+function tadaParts(fare, riderFare) {
+  const fuel = fare > 0 ? tadaFuel(fare) : null;
+  return { platform: 'tada', actual: fare, riderFare: riderFare ?? null, fuel,
+    earned: fare > 0 ? Math.round((fare + (fuel || 0) - tadaFee(fare)) * 100) / 100 : null, level: lab.level };
 }
 
 // Grab or TADA: labels, colours and boxes that differ by app.
@@ -615,9 +619,10 @@ function applyPlatform() {
   const t = isTada();
   for (const el of r.querySelectorAll('.tada-only')) el.hidden = !t;
   for (const el of r.querySelectorAll('.grab-only')) el.hidden = t;
-  r.querySelector('label[for="lab-actual"]').textContent = t ? 'Ride fare (S$)' : 'Passenger paid (S$)';
-  r.querySelector('label[for="lab-earned"]').textContent = t ? 'Fuel support (S$)' : 'You earned (S$)';
-  $('#lab-earned', r).placeholder = t ? 'e.g. 0.90' : '';
+  r.querySelector('label[for="lab-actual"]').textContent = t ? 'Rider\u2019s fare (S$)' : 'Passenger paid (S$)';
+  r.querySelector('label[for="lab-earned"]').textContent = t ? 'Ride fare (S$)' : 'You earned (S$)';
+  $('#lab-actual', r).placeholder = t ? 'passenger pays' : '';
+  $('#lab-earned', r).placeholder = t ? 'before the fee' : '';
   r.querySelector('.log-head h2').textContent = t ? 'Log a TADA job' : 'Log a job';
   const note = $('#lab-mode-note', r);
   if (note) note.textContent = t ? 'From TADA\u2019s Job Details.' : 'Three numbers from Grab\u2019s trip summary.';
@@ -726,7 +731,7 @@ function update(ev) {
       return `<div class="kept">${label}: <b class="${cls}">${Math.abs(vs) < 0.005 ? 'spot on' : `${signed(vs)} vs estimate`}</b></div>`;
     };
     check.innerHTML = plain(isTada() ? 'Ride fare' : 'Passenger paid', shown, f.actual) + plain('You earned', earn, f.earned);
-    if (isTada() && f.actual > 0) check.innerHTML += `<div class="kept">You earned <b>${money(f.earned)}</b> = ride fare ${money(f.actual)} + fuel ${money(f.fuel || 0)} − fee ${money(tadaFee(f.actual))}</div>`;
+    if (isTada() && f.actual > 0) check.innerHTML += `<div class="kept">You earned <b>${money(f.earned)}</b> = ride fare ${money(f.actual)} + fuel ${money(f.fuel || 0)} − fee ${money(tadaFee(f.actual))}${f.riderFare > 0 ? ` · rider paid ${money(f.riderFare)}` : ''}</div>`;
     if (f.actual > 0 && f.surge === 'normal' && (f.actual - p.fare) / p.fare >= SURGE_PRICE_MIN) {
       check.innerHTML += `<div class="kept">\u2191 Paid <b>${Math.round(((f.actual - p.fare) / p.fare) * 100)}% above</b> normal: counts as a <b>surge</b> job.</div>`;
     }
@@ -757,7 +762,8 @@ async function save() {
   const f = readForm();
   const msg = $('#lab-msg', lab.root);
   if (!(f.km > 0)) { msg.textContent = 'Step 1: add the trip km.'; msg.classList.add('err'); $('#lab-km', lab.root).focus(); return; }
-  if (!(f.actual > 0)) { msg.textContent = 'Step 2: add what the passenger paid.'; msg.classList.add('err'); $('#lab-actual', lab.root).focus(); return; }
+  if (isTada() && !(f.riderFare > 0)) { msg.textContent = 'Step 2: add the Rider\u2019s fare (what the passenger pays).'; msg.classList.add('err'); $('#lab-actual', lab.root).focus(); return; }
+  if (!(f.actual > 0)) { msg.textContent = isTada() ? 'Step 2: add the Ride fare (your earnings, before the fee).' : 'Step 2: add what the passenger paid.'; msg.classList.add('err'); $(isTada() ? '#lab-earned' : '#lab-actual', lab.root).focus(); return; }
   const sane = plausible({ km: f.km, min: f.min, paid: f.actual, earned: f.earned, erp: f.erp });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
   // Predictions are recorded before this trip changes anything: an honest test each time.
@@ -887,8 +893,8 @@ async function routeTo(text) {
 
 function applyQuickPlatform() {
   const t = isTada();
-  const lp = document.querySelector('label[for="qj-paid"]'); if (lp) lp.textContent = t ? 'Ride fare (S$)' : 'Paid by passenger (S$)';
-  const le = document.querySelector('label[for="qj-earned"]'); if (le) le.textContent = t ? 'Fuel support (S$)' : 'You earned (S$)';
+  const lp = document.querySelector('label[for="qj-paid"]'); if (lp) lp.textContent = t ? 'Rider\u2019s fare (S$)' : 'Paid by passenger (S$)';
+  const le = document.querySelector('label[for="qj-earned"]'); if (le) le.textContent = t ? 'Ride fare (S$)' : 'You earned (S$)';
   const ar = document.querySelector('#qj-arrow'); if (ar && t) ar.hidden = true;
   const title = document.querySelector('#job-sheet .sheet-title'); if (title) title.textContent = t ? 'Got a TADA job' : 'Got a job';
 }
@@ -900,8 +906,8 @@ function quickRead() {
   const km = typed ?? (r && r.km > 0 ? r.km : null);
   const base = { km, drop: typed === null && r && r.km > 0 ? r.label : null, paid: n('#qj-paid'), earned: n('#qj-earned'), surge: quick.surge };
   if (!isTada()) return base;
-  const tp = tadaParts(base.paid, base.earned);
-  return { ...base, fuel: tp.fuel, earned: tp.earned };
+  const tp = tadaParts(base.earned, base.paid); // boxes: Rider's fare, Ride fare
+  return { ...base, paid: tp.actual, riderFare: tp.riderFare, fuel: tp.fuel, earned: tp.earned };
 }
 
 // Safeguard: a fare far from the estimate (60%+ above, 40%+ below) needs a second tap on Save,
@@ -962,7 +968,8 @@ async function quickSave() {
   const f = quickRead();
   const msg = document.querySelector('#qj-msg');
   const missing = !(f.km > 0) ? (quick.route && quick.route.pending ? 'Still finding the drop-off…' : 'Add the drop-off.')
-    : !(f.paid > 0) ? (isTada() ? 'Add the ride fare.' : 'Add what the passenger paid.') : !(f.earned > 0) ? 'Add what you earned.' : '';
+    : isTada() && !(f.riderFare > 0) ? 'Add the Rider\u2019s fare (what the passenger pays).'
+    : !(f.paid > 0) ? (isTada() ? 'Add the Ride fare (your earnings, before the fee).' : 'Add what the passenger paid.') : !(f.earned > 0) ? 'Add what you earned.' : '';
   if (missing) { msg.textContent = missing; msg.classList.add('err'); return; }
   const sane = plausible({ km: f.km, paid: f.paid, earned: f.earned });
   if (!sane.ok) { msg.textContent = sane.reason; msg.classList.add('err'); return; }
@@ -980,7 +987,7 @@ async function quickSave() {
     ...(f.drop ? { dropLabel: f.drop, kmSource: /\(approx\.\)$/.test(f.drop) ? 'district' : 'map' } : {}), // drop-off name stays on this phone
     rain: rainTagNow((lab.pending && lab.pending.precise) || here(), e.ts),
     ...(isOwnerPhone() && !isTada() ? { arrow: quick.arrow ? 1 : 0 } : {}),
-    ...(isTada() ? { platform: 'tada', fuel: f.fuel, level: 0 } : {}),
+    ...(isTada() ? { platform: 'tada', fuel: f.fuel, riderFare: f.riderFare, level: 0 } : {}),
   });
   quick.arrow = false;
   await db.setKV(KEY, lab.trips);

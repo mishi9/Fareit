@@ -158,8 +158,8 @@ test('trips saved without a rain tag are checked against NEA\'s past readings, t
 test('the server keeps the app, TADA offers, TADA colour and fuel support (Grab trips stay as before)', () => {
   const now = Date.now();
   const base = { id: 'trip-tada-01', ts: now, km: 4.93, paid: 11.6, earned: 11.9, surge: 'normal', lat: 1.31, lng: 103.84 };
-  const t = cleanFormulaTrip({ ...base, platform: 'tada', level: 2, fuel: 0.9 }, now);
-  assert.deepEqual([t.platform, t.level, t.fuel, t.offer], ['tada', 2, 0.9, null]);
+  const t = cleanFormulaTrip({ ...base, platform: 'tada', level: 2, fuel: 0.9, rider_fare: 13.88 }, now);
+  assert.deepEqual([t.platform, t.level, t.fuel, t.offer, t.rider_fare], ['tada', 2, 0.9, null, 13.88]);
   const o = cleanFormulaTrip({ ...base, id: 'trip-tada-02', earned: null, platform: 'tada', offer: 1, level: 1 }, now);
   assert.deepEqual([o.platform, o.offer, o.level], ['tada', 1, 1]);
   const g = cleanFormulaTrip({ ...base, id: 'trip-grab-01', level: 2, offer: 1 }, now);

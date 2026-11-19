@@ -342,6 +342,7 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'offer INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'level INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'fuel REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'rider_fare REAL', 'formula_trips'))
       .then(() => addColumn(db, 'recovery_hash TEXT', 'ident'))
       .then(() => addColumn(db, 'animal TEXT', 'invites'))
       .then(() => addColumn(db, 'opened_at INTEGER', 'invites'))
@@ -565,22 +566,23 @@ export function cleanFormulaTrip(t, now = Date.now()) {
   const offer = platform && (t.offer === 1 || t.offer === true) ? 1 : null;
   const level = platform && [0, 1, 2].includes(t.level) ? t.level : null;
   const fuel = platform && inRange(n(t.fuel), 0, 10) ? r2(n(t.fuel)) : null;
+  const riderFare = platform && inRange(n(t.rider_fare), 2, 500) ? r2(n(t.rider_fare)) : null; // TADA: what the passenger paid
   return {
     id: String(t.id), ts: Math.round(ts / 60000) * 60000, km: r2(km), min: r2(min), erp: r2(erp), paid: r2(paid),
     earned: r2(earned), surge: t.surge, predicted: r2(predicted), predicted_earned: r2(predictedEarned),
-    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1], rain, arrow, platform, offer, level, fuel,
+    card_min: r2(cardMin), pickup_km: r2(pickupKm), lat: where[0], lng: where[1], rain, arrow, platform, offer, level, fuel, rider_fare: riderFare,
   };
 }
 
 const FORMULA_UPSERT = `INSERT INTO formula_trips (id, device, ip_hash, received_at, updated_at, rev, ts, km, min, erp, paid,
-    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng, rain, arrow, platform, offer, level, fuel)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+    earned, surge, predicted, predicted_earned, deleted, card_min, pickup_km, lat, lng, rain, arrow, platform, offer, level, fuel, rider_fare)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM formula_trips), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts, km = excluded.km,
     min = excluded.min, erp = excluded.erp, paid = excluded.paid, earned = excluded.earned, surge = excluded.surge,
     predicted = excluded.predicted, predicted_earned = excluded.predicted_earned, deleted = 0,
     card_min = excluded.card_min, pickup_km = excluded.pickup_km, lat = excluded.lat, lng = excluded.lng,
     rain = COALESCE(excluded.rain, formula_trips.rain), arrow = COALESCE(excluded.arrow, formula_trips.arrow),
-    platform = excluded.platform, offer = excluded.offer, level = excluded.level, fuel = excluded.fuel
+    platform = excluded.platform, offer = excluded.offer, level = excluded.level, fuel = excluded.fuel, rider_fare = excluded.rider_fare
   WHERE formula_trips.device = excluded.device`;
 
 async function readJson(request) {
@@ -622,7 +624,7 @@ async function postFormula(request, env) {
     }
     writes.push(env.DB.prepare(FORMULA_UPSERT).bind(
       t.id, device, ipHash, now, t.ts, t.km, t.min, t.erp, t.paid, t.earned, t.surge, t.predicted, t.predicted_earned,
-      t.card_min, t.pickup_km, t.lat, t.lng, t.rain, t.arrow, t.platform, t.offer, t.level, t.fuel,
+      t.card_min, t.pickup_km, t.lat, t.lng, t.rain, t.arrow, t.platform, t.offer, t.level, t.fuel, t.rider_fare,
     ));
     accepted.push(t.id);
   }
@@ -637,7 +639,7 @@ async function getFormula(url, env, who = null) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, rain, arrow, platform, offer, level, fuel, deleted, device
+    `SELECT rev, id, ts, km, min, erp, paid, earned, surge, predicted, predicted_earned, card_min, pickup_km, lat, lng, rain, arrow, platform, offer, level, fuel, rider_fare, deleted, device
        FROM formula_trips WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;
