@@ -89,8 +89,7 @@ export function renderBoard() {
     ${p.held ? '<p class="note">Points are on hold while many of your fares are far from the estimate.</p>' : ''}
     <p class="note">${p.jobs} job${p.jobs === 1 ? '' : 's'} · ${p.activeDays} active day${p.activeDays === 1 ? '' : 's'}${p.run ? ` · on a <b>${p.run}-day</b> streak` : ''}${p.streaks ? ` · ${p.streaks} full week${p.streaks === 1 ? '' : 's'}` : ''}</p>
     <h3 class="me-h3">Top 3 · ${esc(monthName)}</h3>
-    ${b.top.length ? `<ol class="me-top">${b.top.map((r, i) => `<li class="${me.data && r.num === me.data.num ? 'you' : ''}"><span class="rk">${i + 1}</span><span>${esc(tagOf(r.animal, r.num))}${r.owner ? ' <span class="note">(owner)</span>' : ''}</span><b>${r.points}</b></li>`).join('')}${!b.me.rank || b.me.rank > b.top.length ? `<li class="you gap"><span class="rk">${b.me.rank || "–"}</span><span>${esc(myTag())}</span><b>${p.total}</b></li>` : ''}</ol>` : '<p class="note">Nobody has points yet this month: be the first.</p>'}
-    <p class="note">The top driver this month wins a <b>free month</b> (the owner doesn't count).</p>
+    ${b.top.length ? `<ol class="me-top">${b.top.map((r, i) => `<li class="${me.data && r.num === me.data.num ? 'you' : ''}"><span class="rk">${i + 1}</span><span>${esc(tagOf(r.animal, r.num))}</span><b>${r.points}</b></li>`).join('')}${!b.me.rank || b.me.rank > b.top.length ? `<li class="you gap"><span class="rk">${b.me.rank || "–"}</span><span>${esc(myTag())}</span><b>${p.total}</b></li>` : ''}</ol>` : '<p class="note">Nobody has points yet this month: be the first.</p>'}
     <details class="me-how"><summary>How points work</summary><ul class="st-list">
       <li><b>1 point</b> for every 5 jobs logged (TADA offers count).</li>
       <li><b>+1</b> for each day you log 3 or more jobs.</li>
