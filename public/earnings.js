@@ -3,7 +3,7 @@
 // shift timer, a daily goal, and suggestions from the driver's own history. Everything typed here
 // stays on this phone (days run 00:00-23:59). Grab jobs saved with Got a job or Log show up here automatically.
 import * as db from './db.js';
-import { myLabTrips } from './lab.js';
+import { myLabTrips, labReady } from './lab.js';
 
 export const PLATFORMS = [
   { id: 'grab', name: 'Grab', color: '#2fbf6a' },
@@ -134,7 +134,40 @@ export async function buildEarnings(root) {
   const saved = await db.getKV(KEY);
   if (saved) e.data = { ...e.data, ...saved };
   root.addEventListener('click', onClick);
+  // A job saved in Log or Got a job starts a shift too; and a shift with no jobs for 2 hours ends
+  // by itself (checked every minute and whenever the app is opened).
+  window.addEventListener('agaration:job', async (ev) => { if (autoStart(ev.detail.ts)) { await save(); renderEarnings(); } });
+  const check = async () => { await labReady; if (autoEnd()) { await save(); renderEarnings(); } };
+  setInterval(check, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
   renderEarnings();
+  check();
+}
+
+// ---------- shifts that run themselves ----------
+// The first job (or fee) with no shift running starts one, AUTO_START_BEFORE_MIN before the job
+// (you were driving to it). Not within an hour of a shift you ended yourself.
+export const AUTO_START_BEFORE_MIN = 15;
+// No job or fee for IDLE_END_H hours: the shift ends by itself, AFTER_LAST_MIN after the last job
+// (jobs are logged at pickup, so this covers the trip), and the idle time isn't counted.
+export const IDLE_END_H = 2;
+export const AFTER_LAST_MIN = 30;
+function autoStart(ts) {
+  if (running()) return false;
+  if (e.data.shifts.some((s) => s.end && !s.auto && ts - s.end < 3600000 && ts >= s.end)) return false;
+  e.data.shifts.push({ start: ts - AUTO_START_BEFORE_MIN * 60000, end: null, autoStarted: true });
+  e.data.shifts = e.data.shifts.slice(-400);
+  return true;
+}
+const lastActivity = (sh) => Math.max(sh.start, ...allJobs().map((j) => j.ts).filter((t) => t >= sh.start), ...fees().map((f) => f.ts).filter((t) => t >= sh.start));
+function autoEnd(now = Date.now()) {
+  const sh = running();
+  if (!sh) return false;
+  const last = lastActivity(sh);
+  if (now - last < IDLE_END_H * 3600000) return false;
+  sh.end = Math.min(now, last + AFTER_LAST_MIN * 60000);
+  sh.auto = 'idle';
+  return true;
 }
 
 export function renderEarnings() {
@@ -169,6 +202,7 @@ export function renderEarnings() {
         const h = (now - sh.start) / 3600000;
         return `<div class="ea-shift"><span>This shift · since <b>${hm(sh.start)}</b>${new Date(sh.start).toDateString() !== new Date(now).toDateString() ? ' (yesterday)' : ''} · <b>${h.toFixed(1)} h</b></span><span><b>${money(b.net)}</b> · ${b.jobs.length} job${b.jobs.length === 1 ? '' : 's'}${h >= 1 ? ` · <b>${money(b.net / h)}/h</b>` : ''}</span></div>`;
       })() : ''}
+      ${!sh ? (() => { const l = e.data.shifts[e.data.shifts.length - 1]; return l && l.auto === 'idle' && now - l.end < 12 * 3600000 ? `<p class="note">Shift ended by itself at <b>${hm(l.end)}</b>: no jobs for ${IDLE_END_H} h (counted until ${AFTER_LAST_MIN} min after the last one). A new job starts a new shift.</p>` : ''; })() : ''}
       <button type="button" class="${sh ? 'ghost' : 'primary'} wide" data-act="shift">${sh ? 'End shift' : 'Start shift'}</button>
     </div>
     ${t.by.length ? `<div class="ea-plats">${t.by.map((p) => `<div class="ea-plat"><span class="ea-dot" style="background:${p.color}"></span><b>${p.name}</b><span class="note">${p.jobs} job${p.jobs === 1 ? '' : 's'}${p.fee ? ` · fees ${money(p.fee)}` : ''}</span><span class="ea-amt">${money(p.sum)}</span></div>`).join('')}</div>` : ''}
@@ -269,8 +303,7 @@ async function onClick(ev) {
     }
     // Clear the boxes for the next one (the redraw keeps whatever is still in them).
     for (const id of ['#ea-amt', '#ea-km']) { const el = e.root.querySelector(id); if (el) el.value = ''; }
-    // Starting work without pressing Start shift: start it now, so S$/hour has something to go on.
-    if (e.mode !== 'cost' && !running() && !e.data.shifts.some((s) => s.end && Date.now() - s.end < 3600000)) e.data.shifts.push({ start: Date.now() - 15 * 60000, end: null });
+    if (e.mode !== 'cost') autoStart(Date.now());
     await save(); renderEarnings(); return;
   }
   if (act === 'csv') downloadCsv();

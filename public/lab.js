@@ -23,6 +23,8 @@ import {
 } from './formula.js';
 
 const KEY = 'formulaLab';
+// A job was saved (Log or Got a job): the Earnings tab starts a shift if none is running.
+const jobLogged = (ts) => window.dispatchEvent(new CustomEvent('agaration:job', { detail: { ts } }));
 
 // The owner sees how the estimate is worked out (the formula, Grab's cut rule, the base trip,
 // the raw surge %); testers see the estimates. A code in Settings, not real security.
@@ -158,9 +160,13 @@ const GUIDE = [
   { src: 'guide/log-3.jpg', title: 'Route details', note: '2 you earn · passenger paid', marks: [{ k: '2', x: 50, y: 9.8 }, { k: '2', x: 76.5, y: 70.3 }] },
 ];
 
+let readyNow;
+// Resolves once this phone's saved jobs are loaded (Earnings waits for it before ending an idle shift).
+export const labReady = new Promise((r) => { readyNow = r; });
 export async function buildLab(root) {
   lab.root = root;
   lab.trips = (await db.getKV(KEY)) || [];
+  readyNow();
   lab.shared = (await db.getKV('formulaShared')) || {};
   changed();
   lab.device = await db.getKV('device');
@@ -617,6 +623,7 @@ async function save() {
   });
   lab.arrow = false;
   await db.setKV(KEY, lab.trips);
+  jobLogged(f.ts);
   syncLab();
   msg.classList.remove('err');
   msg.textContent = isOwner()
@@ -787,6 +794,7 @@ async function quickSave() {
   });
   quick.arrow = false;
   await db.setKV(KEY, lab.trips);
+  jobLogged(e.ts);
   const saved = new Date(e.ts);
   lab.pending = null;
   msg.classList.remove('err');
