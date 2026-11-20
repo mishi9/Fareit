@@ -15,8 +15,8 @@ export const RIDE_SHARE = 0.3;
 
 // Changi terminal by airline (ICAO code = the first 3 letters of the callsign), from Changi
 // Airport's own Passenger Airline Information page (changiairport.com, Nov 2026: the check-in
-// terminal; flights arrive at the same one). Singapore Airlines uses both T2 and T3 and is shown
-// on its own ('SQ'). Airlines missing here show as "terminal not known". Re-check each season.
+// terminal; flights arrive at the same one). Singapore Airlines flights go by flight number
+// (SQ_TERMINAL). Airlines missing here show as "terminal not known". Re-check each season.
 // Not mapped yet (ICAO code not confirmed): Aero Dili (8G), AirBorneo (MY), Sun PhuQuoc Airways (9G).
 export const AIRLINE_TERMINAL = {
   // T1
@@ -36,10 +36,32 @@ export const AIRLINE_TERMINAL = {
   MGL: 'T4', MXD: 'T4', PAS: 'T4', TLM: 'T4', TNU: 'T4', VJC: 'T4', VSV: 'T4', WFL: 'T4',
   SIA: 'SQ',
 };
+// Singapore Airlines uses T1, T2 and T3, by flight. By flight number (callsign SIA11 = SQ11), from
+// Changi's arrivals listing on 21 Nov 2026: the terminal it showed, or for flights it hadn't
+// assigned yet, the terminal SQ used from the same city that day. Any other SQ flight: 'split',
+// counted half at T2 and half at T3.
+export const SQ_TERMINAL = {
+  11: 'T3', 23: 'T3', 25: 'T3', 31: 'T3', 33: 'T3', 37: 'T2', 214: 'T1', 216: 'T1', 218: 'T3', 224: 'T1',
+  226: 'T1', 228: 'T3', 236: 'T3', 238: 'T3', 246: 'T3', 248: 'T3', 252: 'T2', 254: 'T2', 256: 'T3', 282: 'T2',
+  286: 'T2', 301: 'T1', 305: 'T3', 309: 'T3', 313: 'T3', 317: 'T3', 319: 'T3', 321: 'T3', 323: 'T1', 325: 'T3',
+  327: 'T2', 329: 'T3', 335: 'T3', 345: 'T3', 351: 'T3', 355: 'T2', 365: 'T3', 367: 'T2', 387: 'T3', 391: 'T3',
+  401: 'T3', 403: 'T3', 421: 'T3', 423: 'T3', 431: 'T3', 437: 'T3', 441: 'T3', 447: 'T1', 469: 'T3', 479: 'T2',
+  505: 'T3', 509: 'T3', 511: 'T3', 517: 'T1', 519: 'T3', 523: 'T3', 525: 'T1', 529: 'T1', 535: 'T3', 537: 'T2',
+  601: 'T2', 605: 'T2', 607: 'T2', 611: 'T2', 619: 'T2', 621: 'T2', 623: 'T2', 631: 'T3', 633: 'T3', 635: 'T3',
+  801: 'T3', 805: 'T3', 807: 'T3', 819: 'T2', 825: 'T2', 827: 'T2', 831: 'T2', 833: 'T2', 839: 'T2', 851: 'T2',
+  853: 'T2', 857: 'T2', 951: 'T3', 953: 'T3', 955: 'T3', 957: 'T3', 959: 'T3', 961: 'T3', 963: 'T3', 965: 'T3',
+  967: 'T3',
+};
 // Cargo airlines: no passengers, left out.
 export const CARGO = new Set(['CSS', 'FDX', 'UPS', 'CKS', 'CLX', 'GTI', 'CAO', 'CKK', 'SQC', 'ABW', 'DHK', 'DHX', 'BCS', 'CAL5', 'CPA9', 'KZR9', 'TAY', 'MPH', 'AHK', 'HKC', 'YZR', 'CYZ', 'RCH', 'QTR9', 'ETH9', 'UAE9', 'TGX', 'NCA', 'ACX', 'BOX', 'SQC']);
 export const isCargo = (call) => { const c = String(call || '').trim().toUpperCase(); return CARGO.has(c.slice(0, 3)) || CARGO.has(c.slice(0, 4)); };
-export const terminalFor = (callsign) => AIRLINE_TERMINAL[String(callsign || '').trim().slice(0, 3).toUpperCase()] || null;
+export function terminalFor(callsign) {
+  const c = String(callsign || '').trim().toUpperCase();
+  const t = AIRLINE_TERMINAL[c.slice(0, 3)] || null;
+  if (t !== 'SQ') return t;
+  const n = /^SIA0*(\d+)/.exec(c);
+  return (n && SQ_TERMINAL[n[1]]) || 'split';
+}
 
 // Typical seats by aircraft type (ICAO type code, as the receivers report it). Unknown: 180.
 export const SEATS = {
@@ -117,18 +139,18 @@ export function track(state, aircraft, now) {
 // and landed in the last LANDED_MIN.
 export function summarize(state, now) {
   const blank = () => ({ next: 0, pax: 0, riders: 0, landed: 0, landedPax: 0 });
-  const terminals = { T1: blank(), T2: blank(), T3: blank(), T4: blank(), SQ: blank() };
+  const terminals = { T1: blank(), T2: blank(), T3: blank(), T4: blank() };
   const unknown = blank();
   const pax = (seats) => seats * LOAD_FACTOR;
+  // An SQ flight we can't place counts half at T2 and half at T3.
+  const shares = (t) => (t === 'split' ? [[terminals.T2, 0.5], [terminals.T3, 0.5]] : [[terminals[t] || unknown, 1]]);
   for (const x of Object.values((state && state.inbound) || {})) {
     if (x.t - now > AHEAD_MIN * 60000) continue;
-    const k = terminals[x.terminal] || unknown;
-    k.next++; k.pax += pax(x.seats);
+    for (const [k, w] of shares(x.terminal)) { k.next += w; k.pax += w * pax(x.seats); }
   }
   for (const x of (state && state.landed) || []) {
     if (now - x.t > LANDED_MIN * 60000 || x.t > now) continue;
-    const k = terminals[x.terminal] || unknown;
-    k.landed++; k.landedPax += pax(x.seats);
+    for (const [k, w] of shares(x.terminal)) { k.landed += w; k.landedPax += w * pax(x.seats); }
   }
   for (const k of [...Object.values(terminals), unknown]) {
     k.riders = Math.round(k.pax * RIDE_SHARE);

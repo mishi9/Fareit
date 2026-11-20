@@ -857,7 +857,7 @@ test('Changi arrivals: who is landing, when, where, and planes that vanish on la
   const { inbound, track, summarize } = await import('../public/arrivals.js');
   const final = { hex: 'a1', flight: 'SIA11', t: 'B77W', lat: 1.30, lon: 103.95, alt_baro: 2000, gs: 160, track: 30, baro_rate: -700 };
   const x = inbound(final);
-  assert.ok(x && x.eta < 6 && x.terminal === 'SQ' && x.seats === 360, JSON.stringify(x));
+  assert.ok(x && x.eta < 6 && x.terminal === 'T3' && x.seats === 360, JSON.stringify(x));
   assert.equal(inbound({ ...final, flight: 'TGW123' }).terminal, 'T1', 'Scoot: T1 (Changi\'s list)');
   assert.equal(inbound({ ...final, flight: 'CSS219' }), null, 'cargo');
   assert.equal(inbound({ ...final, baro_rate: 2000, alt_baro: 6000 }), null, 'departing');
@@ -868,9 +868,12 @@ test('Changi arrivals: who is landing, when, where, and planes that vanish on la
   assert.equal(inbound({ hex: 'c', flight: 'MAS601', lat: 3.6, lon: 101.6, alt_baro: 36000, gs: 470, track: 135, baro_rate: 0 }), null);
   const now = Date.now();
   let s = track(null, [final], now);
-  assert.equal(summarize(s, now).terminals.SQ.next, 1);
+  assert.equal(summarize(s, now).terminals.T3.next, 1);
+  const half = summarize(track(null, [{ ...final, hex: 'z', flight: 'SIA9999' }], now), now).terminals;
+  assert.ok(half.T2.next === 0.5 && half.T3.next === 0.5 && half.T2.riders === Math.round(360 * 0.8 * 0.3 / 2), 'unknown SQ flight: half each');
+  assert.equal(inbound({ ...final, flight: 'SIA37' }).terminal, 'T2', 'SQ37 at T2');
   s = track(s, [], now + 5 * 60000); // gone from the receivers: it landed
-  const out = summarize(s, now + 6 * 60000).terminals.SQ;
+  const out = summarize(s, now + 6 * 60000).terminals.T3;
   assert.equal(out.next, 0);
   assert.equal(out.landed, 1);
   assert.equal(out.landedRiders, Math.round(360 * 0.8 * 0.3));
