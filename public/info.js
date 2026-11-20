@@ -7,11 +7,12 @@ import { here } from './where.js';
 import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow, surgingAreas } from './lab.js';
 import { loadSurge } from './surge.js';
+import { ERP_GROUPS, ERP_FROM, erpNow, hhmm, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
 import { FERRY_TERMINALS, ferryRowsHtml } from './ferries.js';
-import { loadRain, rainData, rainInfoHtml } from './rain.js';
+import { loadRain, rainData, rainInfoHtml, isWet } from './rain.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
 const LIVE_REFRESH = 2 * 60 * 1000;
@@ -35,6 +36,7 @@ export function buildInfo(root) {
   root.innerHTML = `
     <div id="info-old"></div>
     <div id="info-train"></div>
+    <section class="stack"><h2>My routes</h2><div id="info-routes" class="stack"></div></section>
     <section class="stack"><h2>Surging now</h2><div id="info-surging" class="stack"></div></section>
     <section class="stack"><h2>Road incidents</h2><div id="info-incidents" class="stack"></div></section>
     <section class="stack"><h2>Expressway travel times</h2><div id="info-travel" class="stack"></div></section>
@@ -53,7 +55,7 @@ export function showInfo() {
   renderEvents();
   renderLive();
   loadLive();
-  const rain = () => { const box = info.root.querySelector('#info-rain'); if (box) box.innerHTML = rainInfoHtml(rainData(), here()); };
+  const rain = () => { const box = info.root.querySelector('#info-rain'); if (box) box.innerHTML = rainInfoHtml(rainData(), here()); renderRoutes(); };
   rain();
   loadRain(rain);
   renderSurging();
@@ -61,6 +63,59 @@ export function showInfo() {
   clearInterval(info.timer);
   // every 2 minutes: as often as LTA's own feeds change (the server keeps one shared copy)
   info.timer = setInterval(() => { if (!info.root.closest('[hidden]')) { loadLive(); renderEvents(); loadRain(rain); loadSurge(renderSurging, true); } }, 2 * 60 * 1000);
+}
+
+// ---------- my routes ----------
+// Tap the roads you're on (from LTA's travel times, e.g. PIE to Tuas); for each: travel time, ERP
+// now and next, accidents on it in that direction, and rain along it. Picks stay on this phone.
+const arrow = (r) => (r.key === 'CITY' ? 'City · CBD / Orchard' : `${r.name} → ${titleCase(r.to)}`);
+function renderRoutes() {
+  const box = info.root && info.root.querySelector('#info-routes');
+  if (!box) return;
+  const lta = (info.live && info.live.lta) || {};
+  const choices = routeChoices(lta.travel);
+  const picked = pickedRoutes();
+  const chips = `<div class="st-apps route-chips">${choices.map((r) => `<button type="button" class="${picked.includes(r.key) ? 'on' : ''}" data-route="${esc(r.key)}"><span class="box"></span>${esc(arrow(r))}</button>`).join('')}</div>`;
+  const cards = choices.filter((r) => picked.includes(r.key)).map((r) => routeCard(r, lta)).join('');
+  box.innerHTML = chips + (cards || `<p class="note">${choices.length > 1 ? 'Tap the roads you’re on: travel time, ERP, accidents and rain along each show here.' : 'Expressways show once LTA’s travel times load; ERP for the city is ready.'}</p>`);
+  for (const b of box.querySelectorAll('[data-route]')) b.addEventListener('click', () => {
+    const k = b.dataset.route;
+    const cur = pickedRoutes();
+    setPicked(cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]);
+    renderRoutes();
+  });
+}
+function routeCard(r, lta) {
+  const now = Date.now();
+  const t = (lta.travel || []).find((x) => `${x.name}|${x.dir}` === r.key);
+  const travel = t ? `<b>${t.min} min</b> end to end${t.slow && t.slow.min >= 5 && t.slow.min < t.min ? ` · slowest: ${esc(titleCase(t.slow.from))} → ${esc(titleCase(t.slow.to))} ${t.slow.min} min` : ''}` : '';
+  // ERP on this road and direction
+  const groups = ERP_GROUPS.filter((g) => g.road === r.key);
+  const m = (v) => `$${v.toFixed(2)}`;
+  const erp = groups.length ? groups.map((g) => {
+    const e = erpNow(g, now);
+    let txt;
+    if (e.free) txt = 'no ERP today';
+    else if (e.now) txt = `<b class="erp-on">${m(e.now)} now</b>${e.next && e.next.amount ? ` · ${m(e.next.amount)} from ${hhmm(e.next.at)}` : ''}${e.next ? ` · off ${hhmm(e.next.amount === 0 ? e.next.at : (e.next.ends || e.next.at))}` : ''}`;
+    else if (e.next) txt = `off now · <b>${m(e.next.amount)}</b> from ${hhmm(e.next.at)}`;
+    else txt = 'off for the rest of today';
+    return `<div class="route-line"><span class="route-tag erp">ERP</span> ${esc(g.name)}: ${txt}</div>`;
+  }).join('') : `<div class="route-line note">No ERP charged on this road (LTA rates from ${ERP_FROM}).</div>`;
+  // Accidents and breakdowns on it, this direction (roadworks left out)
+  const inc = incidentsOn(r, (lta.incidents || []).filter((x) => x.type !== 'Roadwork'));
+  const incHtml = r.key === 'CITY' ? '' : inc.length
+    ? inc.slice(0, 4).map((x) => `<div class="route-line"><span class="route-tag bad">${esc(x.type)}</span> ${boldPlaces(unstamp(x.msg).replace(new RegExp(`^${x.type}\\s+`, 'i'), ''))}</div>`).join('')
+    : '<div class="route-line note">No accidents or breakdowns reported.</div>';
+  // Rain along it: NEA forecast for the towns it runs through, and rain gauges near them
+  const rd = rainData() || {};
+  const towns = ROAD_TOWNS[r.key === 'CITY' ? 'CITY' : r.name] || [];
+  const areas = (rd.areas || []).filter((a) => towns.includes(a.name));
+  const wetNow = areas.filter((a) => (rd.wet || []).some((g) => kmApart(a, g) <= 3)).map((a) => a.name);
+  const fc = areas.filter((a) => isWet(a.f) && !wetNow.includes(a.name)).map((a) => `${a.name} (${a.f})`);
+  const rainHtml = !rd.areas ? '' : wetNow.length || fc.length
+    ? `<div class="route-line"><span class="route-tag rain">Rain</span> ${wetNow.length ? `raining near <b>${wetNow.map(esc).join(', ')}</b>` : ''}${wetNow.length && fc.length ? ' · ' : ''}${fc.length ? `forecast ${fc.map(esc).join(', ')}` : ''}</div>`
+    : '<div class="route-line note">Dry along the way.</div>';
+  return `<div class="route-card"><div class="route-head"><b>${esc(arrow(r))}</b>${travel ? `<span class="note">${travel}</span>` : ''}</div>${erp}${incHtml}${rainHtml}</div>`;
 }
 
 // ---------- surging now ----------
@@ -221,6 +276,7 @@ function renderLive() {
 // ---------- LTA DataMall: MRT disruptions, road incidents, floods, expressway times ----------
 const INCIDENT_ORDER = ['Accident', 'Road Block', 'Fire', 'Vehicle breakdown', 'Heavy Traffic', 'Obstacle', 'Unattended Vehicle', 'Diversion', 'Weather', 'Reverse Flow', 'Plant Failure', 'Miscellaneous', 'Roadwork'];
 function renderLta(lta) {
+  renderRoutes();
   const r = info.root;
   const inc = r.querySelector('#info-incidents');
   const trv = r.querySelector('#info-travel');
