@@ -143,6 +143,8 @@ Plus: invite-only, code names, Turn off, and surge alerts need 2+ drivers.
 
 ## Info tab
 
+**Layout:** MRT alerts (only when something's wrong), **My routes** and **Surging now** are open at the top. Everything else is folded to one line, its title and a short summary ("Road incidents · 3 now · nearest accident 2 km", "Rain · Raining near you", "Airport · 305 taxis waiting"); tap to open. Folds you open stay open on this phone.
+
 Replaces Reconcile (older jobs still waiting for a fare are linked from the top of Info). In order: road incidents and expressway travel times, events (what's ending soon and the next one; the rest folded away), From JB, the airport. Display only: nothing here changes the estimates, except the event rule below.
 
 - **My routes** (at the top): tap the roads you're on, as LTA's travel times name them (**PIE (TUAS)**, **PIE (CHANGI)**, **CTE (AYE/MCE)**...) plus **CITY** (CBD / Orchard). Each picked road is one short card: name and travel time, then tags: **ERP** ("ERP $1–$4 · till 10:00", "ERP from 07:30", "No ERP today"), **accidents** that direction, with where ("Accident after Clementi Ave 6", "Breakdown after Adam Rd", or "Clear") and **rain** along it ("Rain · Clementi", "Rain expected"). Tap a card for each gantry's charge now and next, the incident text, the forecast and the slowest stretch. Picks stay on this phone. ERP rates are LTA's base table for cars and taxis (DataMall static dataset "ERP Rates", effective 7 Sep 2026; gantry groups from the table and the DataMall guide's Annex D) in `public/erp.js`: weekdays only; nothing on weekends or public holidays (MOM's list for 2026-27 in `PUBLIC_HOLIDAYS`, plus the Monday after a Sunday holiday; add each new year when MOM publishes it). Temporary changes (e.g. school-holiday cuts) aren't in it; when LTA revises rates, replace `ERP_GROUPS`.
@@ -169,6 +171,8 @@ A full trip, at the job's own time and pickup area: **drop-off** (area, postal c
 No extra taps: it comes from trips saved as **Surge** (green ↑ on the job card). When at least 2 different drivers have saved a Surge trip within about 1.5 km of each other in the last 30 minutes, drivers within 3 km (about 5 to 10 minutes away) see a green banner at the top of Radar: "Orchard likely surging · 2.1 km away", or "Likely surging around you" within 1.5 km. One phone's trips count once. Ranges are in `public/surge.js`.
 
 ## Radar notices
+
+At most **two notices** show at once (in Radar's order: MRT and floods, surge, Changi, event, rain, JB / ferry); the rest sit behind **+n more**. Close one with the **✕** or **swipe it sideways**.
 
 Every notice at the top of Radar (MRT, floods, surging near you, Changi surging, events, rain, JB / ferries) has a **✕**. Closing one hides it for 3 hours, or until it turns into a different one (another MRT alert, another event, a surge spot somewhere else); rain stays closed for the 3 hours even if it goes from forecast to raining. Settings → **Radar notices** turns whole kinds off. Both are kept on this phone (`public/notices.js`).
 

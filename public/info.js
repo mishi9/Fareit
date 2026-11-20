@@ -12,7 +12,7 @@ import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
 import { FERRY_TERMINALS, ferryRowsHtml } from './ferries.js';
-import { loadRain, rainData, rainInfoHtml, isWet } from './rain.js';
+import { loadRain, rainData, rainInfoHtml, isWet, rainAt } from './rain.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
 const LIVE_REFRESH = 2 * 60 * 1000;
@@ -31,6 +31,13 @@ const dayLabel = (ts) => {
   return diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : d.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short' });
 };
 
+// Below the top (MRT, My routes, Surging now) every section is folded to one line: its title and a
+// short summary; tap to open.
+const FOLD_KEY = 'agaration-info-open';
+const foldsOpen = () => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '[]'); } catch { return []; } };
+const fold = (id, title, body) => `<details class="fold" data-fold="${id}"${foldsOpen().includes(id) ? ' open' : ''}><summary><span class="fold-title">${title}</span><span class="fold-sum" id="sum-${id}"></span><span class="fold-chev" aria-hidden="true"></span></summary><div class="fold-body stack">${body}</div></details>`;
+const summary = (id, html) => { const el = info.root && info.root.querySelector(`#sum-${id}`); if (el) el.innerHTML = html; };
+
 export function buildInfo(root) {
   info.root = root;
   root.innerHTML = `
@@ -38,13 +45,19 @@ export function buildInfo(root) {
     <div id="info-train"></div>
     <section class="stack"><h2>My routes</h2><div id="info-routes" class="stack"></div></section>
     <section class="stack"><h2>Surging now</h2><div id="info-surging" class="stack"></div></section>
-    <section class="stack"><h2>Road incidents</h2><div id="info-incidents" class="stack"></div></section>
-    <section class="stack"><h2>Expressway travel times</h2><div id="info-travel" class="stack"></div></section>
-    <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
-    <section class="stack"><h2>Rain</h2><div id="info-rain" class="stack"></div></section>
-    <section class="stack"><h2>From JB</h2><div id="info-jb" class="stack"></div></section>
-    <section class="stack"><h2>Ferries</h2><div id="info-ferries" class="stack"></div></section>
-    <section class="stack"><h2>Airport</h2><div id="info-airport" class="stack"></div></section>`;
+    ${fold('incidents', 'Road incidents', '<div id="info-incidents" class="stack"></div>')}
+    ${fold('events', 'Events', '<div id="info-events" class="stack"></div><div id="info-event-add"></div>')}
+    ${fold('rain', 'Rain', '<div id="info-rain" class="stack"></div>')}
+    ${fold('airport', 'Airport', '<div id="info-airport" class="stack"></div>')}
+    ${fold('jb', 'From JB', '<div id="info-jb" class="stack"></div>')}
+    ${fold('ferries', 'Ferries', '<div id="info-ferries" class="stack"></div>')}
+    ${fold('travel', 'All expressways', '<div id="info-travel" class="stack"></div>')}`;
+  // Folded sections remember being open (on this phone).
+  for (const d of root.querySelectorAll('details.fold')) d.addEventListener('toggle', () => {
+    const open = new Set(foldsOpen());
+    if (d.open) open.add(d.dataset.fold); else open.delete(d.dataset.fold);
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify([...open])); } catch { /* private mode */ }
+  });
   onEventsChange(() => renderEvents());
   buildEventForm();
 }
@@ -55,7 +68,15 @@ export function showInfo() {
   renderEvents();
   renderLive();
   loadLive();
-  const rain = () => { const box = info.root.querySelector('#info-rain'); if (box) box.innerHTML = rainInfoHtml(rainData(), here()); renderRoutes(); };
+  const rain = () => {
+    const box = info.root.querySelector('#info-rain');
+    const d = rainData();
+    if (box) box.innerHTML = rainInfoHtml(d, here());
+    const near = d && d.at ? rainAt(here(), d) : null;
+    const wetAreas = d && d.areas ? d.areas.filter((a) => isWet(a.f)).length : 0;
+    summary('rain', !d || !d.at ? '' : near ? `<b class="sum-rain">${near.kind === 'now' ? 'Raining near you' : 'Rain expected here'}</b>` : wetAreas ? `${wetAreas} area${wetAreas === 1 ? '' : 's'} forecast rain` : 'Dry');
+    renderRoutes();
+  };
   rain();
   loadRain(rain);
   renderSurging();
@@ -175,6 +196,8 @@ function renderEvents() {
   };
   // Only what's next: everything ending soon, then the next two (the owner sees all, to manage them).
   const next = isOwnerPhone() ? later : later.slice(0, 2);
+  const first = soon[0] || later[0];
+  summary('events', first ? `${soon.length ? '<b class="sum-hot">' : ''}${esc(first.name)} · ${first.ends_at <= now ? 'out now' : `${first.ends_at > now + 2 * 3600000 ? `${dayLabel(first.ends_at)} ` : ''}~${hm(first.ends_at)}`}${soon.length ? '</b>' : ''}${list.length > 1 ? ` · +${list.length - 1}` : ''}` : 'None listed');
   box.innerHTML = `
     ${soon.length ? `<div class="band-head">Ending soon</div>${soon.map(card).join('')}` : '<p class="note">Nothing ending in the next 2 h.</p>'}
     ${next.length ? `<div class="band-head">Next up</div>${next.map(card).join('')}` : ''}
@@ -280,6 +303,7 @@ function renderLive() {
   if (!r) return;
   const L = info.live || {};
   const taxis = L.taxis;
+  summary('airport', taxis && Number.isFinite(taxis.changi) ? `${taxis.changi} taxis waiting` : '');
   r.querySelector('#info-airport').innerHTML = `
     <div class="band-head">Grab queue</div>
     ${waitHtml(queueWaitNow())}
@@ -304,12 +328,14 @@ function renderLta(lta) {
     inc.innerHTML = `<p class="note">${t}</p>`;
     trv.innerHTML = `<p class="note">${t}</p>`;
     trn.innerHTML = '';
+    summary('incidents', 'Coming soon');
     return;
   }
   if (!lta.at) {
     const t = info.liveErr ? esc(info.liveErr) : 'Loading…';
     inc.innerHTML = `<p class="note">${t}</p>`;
     trv.innerHTML = `<p class="note">${t}</p>`;
+    summary('incidents', info.liveErr ? 'Not available' : 'Loading…');
     return;
   }
   const loc = here();
@@ -330,6 +356,8 @@ function renderLta(lta) {
     <div>${boldPlaces(unstamp(x.msg).replace(new RegExp(`^${x.type}\\s+`, 'i'), ''))}</div></div>`;
   // Everything that matters to a driver, no tapping to see more; roadworks left out.
   const shown = main.slice(0, 8);
+  const top = main[0];
+  summary('incidents', `${floods.length ? `<b class="sum-bad">${floods.length} flood${floods.length === 1 ? '' : 's'}</b> · ` : ''}${main.length ? `${main.length} now${top && top.d != null ? ` · nearest ${esc(top.type.replace(/^Vehicle breakdown$/i, 'breakdown').toLowerCase())} ${top.d < 1 ? '<1' : Math.round(top.d)} km` : ''}` : 'None now'}`);
   inc.innerHTML = `
     ${floods.map((f) => `<div class="alert-card bad"><div><b>Flash flood</b>${km(f.d)}</div><div>${boldPlaces(unstamp(f.desc))}</div></div>`).join('')}
     ${shown.length ? shown.map(row).join('') : '<p class="note">No accidents or breakdowns now.</p>'}
@@ -338,6 +366,7 @@ function renderLta(lta) {
   // Expressway times: one row per expressway, both directions
   const by = new Map();
   for (const t of lta.travel || []) { if (!by.has(t.name)) by.set(t.name, []); by.get(t.name).push(t); }
+  summary('travel', by.size ? `${by.size} expressways, both ways` : '');
   trv.innerHTML = by.size ? `${[...by.entries()].map(([name, dirs]) => `<div class="jb-row compact"><b>${esc(name)}</b>
       <span class="note">${dirs.map((d) => `to ${esc(titleCase(d.to))} <b>${d.min} min</b>`).join(' · ')}</span></div>`).join('')}
     <p class="note">Full length · LTA · ${upd.replace(/^Last updated /, 'updated ').replace(/\.$/, '')}</p>` : `<p class="note">No travel times now.</p>`;
@@ -349,6 +378,7 @@ const titleCase = (s) => String(s).toLowerCase().replace(/\b([a-z])/g, (m) => m.
 function renderJb() {
   const box = info.root?.querySelector('#info-jb');
   if (!box) return;
+  summary('jb', 'KTM and buses into Woodlands');
   box.innerHTML = `${jbRowsHtml(new Date())}
     <p class="note">~ = estimate (timetable + journey + immigration); later when checkpoints are busy.</p>`;
 }
@@ -359,6 +389,7 @@ function renderFerries() {
   const box = info.root?.querySelector('#info-ferries');
   if (!box) return;
   const now = new Date();
+  summary('ferries', FERRY_TERMINALS.map((t) => esc(t.short)).join(', '));
   box.innerHTML = `${FERRY_TERMINALS.map((t) => `<div class="band-head">Into <b>${esc(t.short)}</b></div>${ferryRowsHtml(t.id, now)}`).join('')}
     <p class="note">Published timetables, Singapore time; then immigration.</p>`;
 }

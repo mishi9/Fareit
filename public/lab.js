@@ -14,7 +14,7 @@ import { ferryTerminalAt, ferryRowsHtml } from './ferries.js';
 import { loadSurge, surgeNow, surgeBanner, surgeSpotsNow } from './surge.js';
 import { loadRain, rainNow, rainBanner, rainTagNow, isThunder } from './rain.js';
 import { loadAlerts, alertsList } from './alerts.js';
-import { notice, wireNotices } from './notices.js';
+import { notice, wireNotices, limitNotices } from './notices.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal, postalDistrict } from './places.js';
 import {
@@ -505,6 +505,7 @@ export function renderBands() {
       ? `<div class="band-head">Next from JB · <b>${pl.at === 'woodlands' ? 'Woodlands' : pl.name}</b></div>${rows}`
       : `<div class="band-head">Next ferry · <b>${ferry.short}</b></div>${rows}`) : '');
   }
+  limitNotices(document.querySelector('#view-window'), document.querySelector('#radar-more'));
   const airport = atAirport(loc);
   const ap = document.querySelector('#ap-flights');
   if (ap) {

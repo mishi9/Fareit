@@ -737,3 +737,23 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .rd-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); }
 .rd-line b { color: var(--ink); white-space: nowrap; }
 .rd-line.bad { color: var(--ink); display: block; }
+
+/* Info: folded sections (title + one-line summary) */
+details.fold { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+details.fold > summary { list-style: none; display: flex; align-items: baseline; gap: 10px; padding: 12px 14px; cursor: pointer; }
+details.fold > summary::-webkit-details-marker { display: none; }
+.fold-title { font-family: var(--display); font-weight: 800; font-size: 16px; white-space: nowrap; }
+.fold-sum { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.fold-chev::after { content: "▾"; color: var(--muted); font-size: 12px; }
+details.fold[open] .fold-chev::after { content: "▴"; }
+details.fold[open] > summary { border-bottom: 1px dashed var(--line); }
+.fold-body { padding: 10px 14px 14px; }
+.sum-hot, .sum-rain { color: var(--accent); }
+.sum-bad { color: var(--stop); }
+#view-info details.fold + details.fold { margin-top: -4px; }
+/* Radar notices: easier to dismiss (bigger ✕, swipe), at most two shown */
+.notice-x { width: 36px; height: 36px; top: 4px; right: 4px; font-size: 16px; background: color-mix(in srgb, var(--ink) 14%, transparent); color: var(--ink); }
+.notice { touch-action: pan-y; transition: transform .15s ease, opacity .15s ease; }
+.notice.gone { transform: translateX(110%); opacity: 0; }
+.notice.extra { display: none; }
+.notices-more { width: 100%; border: 1px dashed var(--line); background: transparent; color: var(--muted); border-radius: 12px; padding: 8px; font-weight: 700; font-size: 13px; cursor: pointer; }

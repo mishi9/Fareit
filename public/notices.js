@@ -44,13 +44,45 @@ export function wireNotices(root, onChange) {
   if (!root || root.dataset.noticesWired) return;
   root.dataset.noticesWired = '1';
   window.addEventListener('agaration-notices', onChange);
+  const away = (n) => { n.classList.add('gone'); dismiss(n.dataset.nkind, n.dataset.nkey); setTimeout(onChange, 160); };
   root.addEventListener('click', (ev) => {
+    const more = ev.target.closest('.notices-more');
+    if (more) { showAll = true; onChange(); return; }
     const x = ev.target.closest('.notice-x');
-    if (!x) return;
-    const n = x.closest('.notice');
-    dismiss(n.dataset.nkind, n.dataset.nkey);
-    onChange();
+    if (x) away(x.closest('.notice'));
   });
+  // Swipe a notice sideways to dismiss it.
+  let sw = null;
+  root.addEventListener('touchstart', (ev) => {
+    const n = ev.target.closest('.notice');
+    if (n && ev.touches.length === 1) sw = { n, x: ev.touches[0].clientX, y: ev.touches[0].clientY, dx: 0 };
+  }, { passive: true });
+  root.addEventListener('touchmove', (ev) => {
+    if (!sw) return;
+    sw.dx = ev.touches[0].clientX - sw.x;
+    if (Math.abs(ev.touches[0].clientY - sw.y) > 30) { sw.n.style.transform = ''; sw = null; return; }
+    sw.n.style.transform = `translateX(${sw.dx}px)`; sw.n.style.opacity = String(Math.max(0.2, 1 - Math.abs(sw.dx) / 300));
+  }, { passive: true });
+  root.addEventListener('touchend', () => {
+    if (!sw) return;
+    const { n, dx } = sw; sw = null;
+    if (Math.abs(dx) > 90) away(n); else { n.style.transform = ''; n.style.opacity = ''; }
+  });
+}
+// At most MAX_SHOWN notices at a time (the first ones, in Radar's order); the rest behind "+n more".
+export const MAX_SHOWN = 2;
+let showAll = false;
+export function limitNotices(root, moreBox) {
+  if (!root) return;
+  const all = [...root.querySelectorAll('.notice')];
+  all.forEach((n, i) => n.classList.toggle('extra', !showAll && i >= MAX_SHOWN));
+  if (!moreBox) return;
+  const hidden = showAll ? 0 : Math.max(0, all.length - MAX_SHOWN);
+  moreBox.hidden = !hidden;
+  moreBox.innerHTML = hidden ? `<button type="button" class="notices-more">+${hidden} more notice${hidden === 1 ? '' : 's'}</button>` : '';
+  for (const box of root.querySelectorAll('#radar-alerts, #radar-surge, #radar-airport, #radar-event, #radar-rain, #radar-place')) {
+    if (box.querySelector('.notice') && ![...box.querySelectorAll('.notice')].some((n) => !n.classList.contains('extra'))) box.hidden = true;
+  }
 }
 // Settings: tick the kinds to show.
 export function renderNoticeSettings(el) {
