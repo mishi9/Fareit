@@ -364,7 +364,7 @@ function renderLta(lta) {
   const road = (m) => { const r = /\bon\s+(.+?)\s+(?:\(towards|after|before|at|near|from)\b/i.exec(unstamp(m)); return r ? r[1] : ''; };
   const floodFirst = nearFlood && (!near || nearFlood.d <= near.d);
   summary('incidents', floodFirst ? `<b class="sum-bad">Flash flood · ${kmTxt(nearFlood.d)}</b>`
-    : near ? `<b class="sum-bad">${esc(near.type.replace(/^Vehicle breakdown$/i, 'Breakdown'))}</b> · ${esc([road(near.msg), shortWhere(near.msg)].filter(Boolean).join(' '))} · ${kmTxt(near.d)}`
+    : near ? `<b class="sum-bad">${esc(near.type.replace(/^Vehicle breakdown$/i, 'Breakdown'))} · ${kmTxt(near.d)}</b> · ${esc([road(near.msg), shortWhere(near.msg)].filter(Boolean).join(' '))}`
     : loc ? 'None within 5 km' : main.length ? `${main.length} on the roads` : 'None now');
   inc.innerHTML = `
     ${floods.map((f) => `<div class="alert-card bad"><div><b>Flash flood</b>${km(f.d)}</div><div>${boldPlaces(unstamp(f.desc))}</div></div>`).join('')}
