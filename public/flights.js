@@ -58,6 +58,6 @@ export function renderFlights(box, onDone) {
         </div>`;
       }).join('')}
     </div>
-    <p class="note">${u.next ? `+${u.next} more landing, terminal not known. ` : ''}Riders: about 30% of passengers (planes ~80% full) booking Grab or another app; a family is one booking. Terminals from Changi Airport\u2019s airline and arrivals lists; a Singapore Airlines flight we can\u2019t place counts half at T2, half at T3. Flight data: <b>adsb.lol</b> (open data, thanks to its volunteer receivers).</p>
+    <p class="note">${u.next ? `+${u.next} more, terminal not known. ` : ''}Riders ≈ 30% of passengers. Flight data: <b>adsb.lol</b> (open data, thanks to its volunteers).</p>
     ${f.error ? `<p class="note">${f.error}</p>` : ''}`;
 }

@@ -5,6 +5,7 @@
 import * as db from './db.js';
 import { here, atAirport, onMove } from './where.js';
 
+import { platformNow } from './formula.js';
 const KEY = 'queueLog';
 const OPEN_FOR = 4 * 3600 * 1000; // a reading can be closed with "Got a job" for 4 hours
 const $ = (s, root) => root.querySelector(s);
@@ -65,8 +66,11 @@ const all = () => {
   const mine = new Set(q.mine.map((r) => r.id));
   return [...q.mine, ...Object.values(q.shared).filter((r) => !mine.has(r.id))];
 };
-const toRow = (r) => ({ id: r.id, ts: r.ts, cars_ahead: r.cars ?? null, est_wait_min: r.est ?? null, actual_wait_min: r.actual ?? null });
-const fromRow = (r) => ({ id: r.id, ts: r.ts, cars: r.cars_ahead, est: r.est_wait_min, actual: r.actual_wait_min, shared: true });
+const toRow = (r) => ({ id: r.id, ts: r.ts, cars_ahead: r.cars ?? null, est_wait_min: r.est ?? null, actual_wait_min: r.actual ?? null, ...(r.platform === 'tada' ? { platform: 'tada' } : {}) });
+const fromRow = (r) => ({ id: r.id, ts: r.ts, cars: r.cars_ahead, est: r.est_wait_min, actual: r.actual_wait_min, platform: r.platform === 'tada' ? 'tada' : 'grab', shared: true });
+// Each reading is for one app's queue (Grab or TADA); older ones are Grab's.
+const appOf = (r) => (r.platform === 'tada' ? 'tada' : 'grab');
+const forApp = (list, app) => list.filter((r) => appOf(r) === app);
 const printOf = (r) => JSON.stringify(toRow(r));
 
 async function post(path, body) {
@@ -85,7 +89,32 @@ export async function clearMyQueue() {
   await db.setKV(KEY, []);
   if (q.root) render();
 }
-export const queueWaitNow = () => queueWait(all(), Date.now());
+export const queueWaitNow = () => queueWait(forApp(all(), platformNow()), Date.now());
+
+// Info's Airport (expanded): for each app, what its queue screen says now (the latest reading under
+// QUEUE_FRESH_MIN old: its estimated wait and, for Grab, cars ahead) and the real wait drivers got
+// (the latest recorded within 3 hours, else the usual around this hour). Pure, for the page and the tests.
+export function queueApps(readings, ts = Date.now()) {
+  const out = {};
+  for (const app of ['grab', 'tada']) {
+    const rs = forApp(readings, app).filter((r) => Number.isFinite(r.ts) && r.ts <= ts + 60000);
+    const fresh = rs.filter((r) => ts - r.ts <= QUEUE_FRESH_MIN * 60000 && (r.est > 0 || r.cars != null));
+    const latest = fresh.length ? fresh.reduce((a, b) => (b.ts > a.ts ? b : a)) : null;
+    const done = rs.filter((r) => r.actual > 0);
+    const lastDone = done.filter((r) => ts - (r.ts + r.actual * 60000) <= 3 * 3600000).reduce((a, b) => (!a || b.ts > a.ts ? b : a), null);
+    const usual = queueSummary(done, ts);
+    out[app] = {
+      est: latest && latest.est > 0 ? Math.round(latest.est) : null,
+      cars: latest && latest.cars != null ? latest.cars : null,
+      at: latest ? latest.ts : null,
+      actual: lastDone ? Math.round(lastDone.actual) : usual && usual.actual != null ? Math.round(usual.actual) : null,
+      actualAt: lastDone ? lastDone.ts + lastDone.actual * 60000 : null,
+      actualN: lastDone ? 1 : usual ? usual.nActual : 0,
+    };
+  }
+  return out;
+}
+export const queueAppsNow = () => queueApps(all(), Date.now());
 // "07:19 (12 min ago)", or a day for older readings.
 export function updatedText(at, now = Date.now()) {
   const mins = Math.round((now - at) / 60000);
@@ -159,7 +188,7 @@ export async function buildQueue(root) {
     <div class="row2">
       <div class="field"><label for="q-cars">Cars ahead</label>
         <input id="q-cars" type="number" inputmode="numeric" step="1" min="0"></div>
-      <div class="field"><label for="q-est">Grab's wait (min)</label>
+      <div class="field"><label for="q-est" id="q-est-label">Grab's wait (min)</label>
         <input id="q-est" type="number" inputmode="numeric" step="1" min="0"></div>
     </div>
     <p class="msg" id="q-msg" role="status"></p>
@@ -181,6 +210,7 @@ async function save() {
   q.mine.push({
     id: `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ts: Date.now(),
     cars: Number.isFinite(cars) ? Math.round(cars) : null, est: Number.isFinite(est) ? est : null, actual: null,
+    ...(platformNow() === 'tada' ? { platform: 'tada' } : {}),
   });
   await db.setKV(KEY, q.mine);
   $('#q-cars', r).value = '';
@@ -202,7 +232,7 @@ export async function closeOpenReading() {
 async function gotJob(reading) {
   reading.actual = Math.max(1, Math.round((Date.now() - reading.ts) / 60000));
   await db.setKV(KEY, q.mine);
-  $('#q-msg', q.root).textContent = `Waited ${reading.actual} min${reading.est ? ` (Grab estimated ${reading.est})` : ''}. Saved.`;
+  $('#q-msg', q.root).textContent = `Waited ${reading.actual} min${reading.est ? ` (${appOf(reading) === 'tada' ? 'TADA' : 'Grab'} estimated ${reading.est})` : ''}. Saved.`;
   render();
   syncQueue();
 }
@@ -235,6 +265,8 @@ function render() {
   const inZone = atAirport(here());
   r.hidden = !(inZone || openNow);
   $('#q-where', r).textContent = inZone ? `Changi · ${hm(Date.now())}` : 'reading still open';
+  const appName = platformNow() === 'tada' ? 'TADA' : 'Grab';
+  $('#q-est-label', r).textContent = `${appName}'s wait (min)`;
   // The latest open reading of yours: Got a job closes it with the actual wait.
   const open = [...q.mine].reverse().find((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
   const openBox = $('#q-open', r);
@@ -244,7 +276,7 @@ function render() {
     const mins = Math.round((Date.now() - open.ts) / 60000);
     const card = document.createElement('div');
     card.className = 'card q-open';
-    card.innerHTML = `<div class="meta">In queue <b>${mins} min</b>${open.cars != null ? ` · ${open.cars} cars` : ''}${open.est ? ` · Grab said ${open.est}` : ''}</div>`;
+    card.innerHTML = `<div class="meta">In queue <b>${mins} min</b>${open.cars != null ? ` · ${open.cars} cars` : ''}${open.est ? ` · ${appOf(open) === 'tada' ? 'TADA' : 'Grab'} said ${open.est}` : ''}</div>`;
     card.append(deleteButton(open));
     openBox.append(card);
   }

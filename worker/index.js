@@ -347,6 +347,7 @@ function ensureSchema(db) {
       .then(() => addColumn(db, 'level INTEGER', 'formula_trips'))
       .then(() => addColumn(db, 'fuel REAL', 'formula_trips'))
       .then(() => addColumn(db, 'rider_fare REAL', 'formula_trips'))
+      .then(() => addColumn(db, 'platform TEXT', 'airport_queue'))
       .then(() => addColumn(db, 'recovery_hash TEXT', 'ident'))
       .then(() => addColumn(db, 'animal TEXT', 'invites'))
       .then(() => addColumn(db, 'opened_at INTEGER', 'invites'))
@@ -715,15 +716,16 @@ export function cleanQueueReading(q, now = Date.now()) {
   return {
     id: String(q.id), ts: Math.round(ts / 60000) * 60000,
     cars_ahead: cars === null ? null : Math.round(cars), est_wait_min: r2(est), actual_wait_min: r2(actual),
+    platform: q.platform === 'tada' ? 'tada' : null,
   };
 }
 
 const QUEUE_UPSERT = `INSERT INTO airport_queue (id, device, ip_hash, received_at, updated_at, rev, ts, cars_ahead,
-    est_wait_min, actual_wait_min, deleted)
-  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM airport_queue), ?5, ?6, ?7, ?8, 0)
+    est_wait_min, actual_wait_min, platform, deleted)
+  VALUES (?1, ?2, ?3, ?4, ?4, (SELECT COALESCE(MAX(rev), 0) + 1 FROM airport_queue), ?5, ?6, ?7, ?8, ?9, 0)
   ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, rev = excluded.rev, ts = excluded.ts,
     cars_ahead = excluded.cars_ahead, est_wait_min = excluded.est_wait_min, actual_wait_min = excluded.actual_wait_min,
-    deleted = 0
+    platform = excluded.platform, deleted = 0
   WHERE airport_queue.device = excluded.device`;
 
 async function postQueue(request, env) {
@@ -753,7 +755,7 @@ async function postQueue(request, env) {
       budget--;
       known.set(q.id, { device });
     }
-    writes.push(env.DB.prepare(QUEUE_UPSERT).bind(q.id, device, ipHash, now, q.ts, q.cars_ahead, q.est_wait_min, q.actual_wait_min));
+    writes.push(env.DB.prepare(QUEUE_UPSERT).bind(q.id, device, ipHash, now, q.ts, q.cars_ahead, q.est_wait_min, q.actual_wait_min, q.platform));
     accepted.push(q.id);
   }
   await writeAll(env.DB, writes);
@@ -765,7 +767,7 @@ async function getQueue(url, env) {
   const limit = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get('limit')) || MAX_PAGE));
   await ensureSchema(env.DB);
   const { results } = await env.DB.prepare(
-    `SELECT rev, id, ts, cars_ahead, est_wait_min, actual_wait_min, deleted
+    `SELECT rev, id, ts, cars_ahead, est_wait_min, actual_wait_min, platform, deleted
        FROM airport_queue WHERE rev > ?1 ORDER BY rev LIMIT ?2`,
   ).bind(since, limit + 1).all();
   const more = results.length > limit;

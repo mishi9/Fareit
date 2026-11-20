@@ -409,7 +409,7 @@ test('From JB: one line per route with a best-estimate time out in Singapore', (
   assert.equal(jbPlace({ lat: 1.3526, lng: 103.9447 }), null);
 });
 
-import { queueWait, updatedText } from '../public/queue.js';
+import { queueWait, updatedText, queueApps } from '../public/queue.js';
 test('airport queue: estimated wait from the latest reading, else the usual for this hour', () => {
   const t0 = new Date(2026, 10, 18, 20, 0).getTime();
   const m = 60000;
@@ -884,4 +884,21 @@ test('Changi arrivals: who is landing, when, where, and planes that vanish on la
   assert.equal(out.next, 0);
   assert.equal(out.landed, 1);
   assert.equal(out.landedRiders, Math.round(360 * 0.8 * 0.3));
+});
+
+test('airport queue per app: what Grab / TADA says now, and the real wait drivers got', () => {
+  const m = 60000;
+  const t0 = Date.parse('2026-11-20T20:00:00+08:00');
+  const readings = [
+    { id: 'a', ts: t0 - 10 * m, cars: 45, est: 30, actual: null }, // Grab, now (older readings have no app: Grab)
+    { id: 'b', ts: t0 - 90 * m, cars: 50, est: 35, actual: 41, platform: 'grab' }, // Grab job 49 min ago
+    { id: 'c', ts: t0 - 8 * m, cars: null, est: 20, actual: null, platform: 'tada' }, // TADA, now
+    { id: 'd', ts: t0 - 7 * 86400000 - 20 * m, est: 15, actual: 25, platform: 'tada' }, // TADA last week, around this hour
+  ];
+  const q = queueApps(readings, t0);
+  assert.deepEqual([q.grab.est, q.grab.cars, q.grab.actual], [30, 45, 41]);
+  assert.equal(q.grab.actualAt, t0 - 49 * m);
+  assert.deepEqual([q.tada.est, q.tada.actual, q.tada.actualAt], [20, 25, null], 'TADA: usual real wait for this hour');
+  // nothing fresh: no "says"
+  assert.equal(queueApps(readings, t0 + 60 * m).grab.est, null);
 });

@@ -8,7 +8,7 @@ import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow, surgingAreas } from './lab.js';
 import { loadSurge } from './surge.js';
 import { ERP_GROUPS, erpNow, roadErp, hhmm, shortWhere, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
-import { queueWaitNow, waitHtml, updatedText } from './queue.js';
+import { queueAppsNow, updatedText } from './queue.js';
 import { jbRowsHtml, jbSummary } from './jb.js';
 import { flightsSoon, renderFlights } from './flights.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
@@ -306,9 +306,8 @@ function renderLive() {
   const L = info.live || {};
   const taxis = L.taxis;
   r.querySelector('#info-airport').innerHTML = `
+    ${queueHtml()}
     <div id="info-flights"></div>
-    <div class="band-head">Grab queue</div>
-    ${waitHtml(queueWaitNow())}
     <div class="band-head">Taxis waiting at Changi</div>
     <div class="q-wait"><div class="q-wait-min">${taxis && Number.isFinite(taxis.changi) ? taxis.changi : '—'}</div>
       <div class="note">street taxis free${taxis ? ` · updated ${updatedText(taxis.at)}` : info.liveErr ? ` · ${esc(info.liveErr)}` : ''}</div></div>`;
@@ -316,6 +315,25 @@ function renderLive() {
   renderJb();
   renderFerries();
   renderLta(L.lta || {});
+}
+
+// Each app's queue: what its queue screen says (from drivers' latest reading) and the real wait
+// drivers got when the job came (Got a job).
+function queueHtml() {
+  const qa = queueAppsNow();
+  const row = (app, name) => {
+    const x = qa[app];
+    const says = x.est != null || x.cars != null
+      ? `<b>${x.est != null ? `~${x.est} min` : '—'}</b>${app === 'grab' && x.cars != null ? ` · ${x.cars} cars` : ''} <span class="note">· ${updatedText(x.at)}</span>`
+      : '<span class="note">no reading in the last 45 min</span>';
+    const real = x.actual != null
+      ? `<b>~${x.actual} min</b> <span class="note">· ${x.actualAt ? `job ${updatedText(x.actualAt)}` : `usual for this hour (${x.actualN})`}</span>`
+      : '<span class="note">no jobs recorded yet</span>';
+    return `<div class="q-app"><div class="q-app-name">${name}</div>
+      <div class="q-line"><span>${name} says</span><span>${says}</span></div>
+      <div class="q-line"><span>Real wait</span><span>${real}</span></div></div>`;
+  };
+  return `<div class="band-head">Queue</div>${row('grab', 'Grab')}${row('tada', 'TADA')}`;
 }
 
 // Airport line: flights still in the air that land within 45 minutes (landed ones not counted).

@@ -765,3 +765,9 @@ details.fold > summary { display: grid; grid-template-columns: 1fr auto; grid-te
 .fold-sum { grid-area: sum; text-align: left; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 14px; }
 .fold-sum:empty { display: none; }
 .fold-chev { grid-area: chev; padding-left: 8px; }
+
+/* Info: airport queue per app */
+.q-app { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; display: grid; gap: 4px; }
+.q-app-name { font-weight: 800; font-size: 14px; }
+.q-line { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+.q-line > span:first-child { color: var(--muted); }

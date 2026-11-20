@@ -293,7 +293,7 @@ test('airport queue readings: own table, numbers and time only, own-device edits
   assert.deepEqual((await call('/api/queue', { device: 'device-bbbbbbbb', readings: [q({ cars_ahead: 1 })] })).body.rejected, ['queue-read-0001']);
   const all = await call('/api/queue?since=0');
   assert.deepEqual(all.body.readings.map((r) => [r.cars_ahead, r.est_wait_min, r.actual_wait_min]), [[45, 38, 52]]);
-  assert.deepEqual(Object.keys(all.body.readings[0]).sort(), ['actual_wait_min', 'cars_ahead', 'est_wait_min', 'id', 'rev', 'ts']);
+  assert.deepEqual(Object.keys(all.body.readings[0]).sort(), ['actual_wait_min', 'cars_ahead', 'est_wait_min', 'id', 'platform', 'rev', 'ts']);
   // Separate from the jobs pool and the formula dataset.
   assert.equal((await call('/api/jobs?since=0')).body.jobs.length, 0);
   assert.equal((await call('/api/formula?since=0')).body.trips.length, 0);
