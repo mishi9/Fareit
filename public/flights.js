@@ -2,7 +2,8 @@
 // about how many people are on them, and about how many of those will book a ride-hailing car
 // (RIDE_SHARE). The server works it out from open flight-tracking data (public/arrivals.js) every
 // 5 minutes and shares it with every phone; this only asks the server.
-const TERMINALS = ['T1', 'T2', 'T3', 'T4'];
+const TERMINALS = ['T1', 'T2', 'T3', 'T4', 'SQ'];
+const LABEL = { SQ: 'Singapore Airlines · T2 or T3' };
 const REFRESH = 5 * 60 * 1000;
 const f = { data: null, at: 0, loading: false, error: '' };
 const pad = (n) => String(n).padStart(2, '0');
@@ -42,14 +43,14 @@ export function renderFlights(box, onDone) {
       ${TERMINALS.map((k) => {
         const x = t[k] || { next: 0, pax: 0, riders: 0, landed: 0, landedRiders: 0 };
         const busy = x.next >= 4 ? 'busy' : x.next === 0 && x.landed === 0 ? 'quiet' : '';
-        return `<div class="ap-term ${busy}">
-          <div class="ap-name">${k}</div>
+        return `<div class="ap-term ${busy}${k === 'SQ' ? ' wide' : ''}">
+          <div class="ap-name">${LABEL[k] || k}</div>
           <div class="ap-big">${x.next}<span class="ap-unit"> flight${x.next === 1 ? '' : 's'}</span></div>
           <div class="ap-riders">${x.next ? `~${x.riders} riders` : '—'}</div>
           <div class="ap-sub">${x.next ? `~${x.pax} on board · ` : ''}${x.landed} landed last 30 min${x.landed ? ` (~${x.landedRiders} riders)` : ''}</div>
         </div>`;
       }).join('')}
     </div>
-    <p class="note">${u.next ? `+${u.next} more landing, terminal not known. ` : ''}Riders: about 30% of passengers (planes ~80% full) booking Grab or another app; a family is one booking. Flight data: adsb.lol (open data).</p>
+    <p class="note">${u.next ? `+${u.next} more landing, terminal not known. ` : ''}Riders: about 30% of passengers (planes ~80% full) booking Grab or another app; a family is one booking. Terminals from Changi Airport\u2019s airline list. Flight data: <b>adsb.lol</b> (open data, thanks to its volunteer receivers).</p>
     ${f.error ? `<p class="note">${f.error}</p>` : ''}`;
 }

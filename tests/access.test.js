@@ -193,10 +193,10 @@ test('flights: our own feed from open ADS-B data, fetched once and shared', asyn
   assert.equal((await req('/api/flights')).status, 401); // invite-only like everything else
   const a = (await req('/api/flights', { key })).body;
   assert.equal(a.ready, true);
-  assert.equal(a.terminals.T3.next, 1, JSON.stringify(a));
+  assert.equal(a.terminals.SQ.next, 1, JSON.stringify(a));
   assert.equal(a.terminals.T4.next, 1);
-  assert.equal(a.terminals.T3.pax, 288); // 360 seats x 80%
-  assert.equal(a.terminals.T3.riders, 86); // 30% of them
+  assert.equal(a.terminals.SQ.pax, 288); // 360 seats x 80%
+  assert.equal(a.terminals.SQ.riders, 86); // 30% of them
   await req('/api/flights', { key });
   assert.equal(calls, 1, 'shared: one fetch for everyone');
 });

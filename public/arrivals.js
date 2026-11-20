@@ -13,19 +13,28 @@ export const LANDED_MIN = 30; // and what landed in the last 30 (people coming o
 export const LOAD_FACTOR = 0.8;
 export const RIDE_SHARE = 0.3;
 
-// Changi terminal by airline (ICAO code, the first 3 letters of the callsign). Best effort: the
-// sources disagree on several (Scoot especially), so check against the airport boards and fix
-// here. Singapore Airlines uses T2 and T3 and is counted under T3. Anything else is "unknown".
+// Changi terminal by airline (ICAO code = the first 3 letters of the callsign), from Changi
+// Airport's own Passenger Airline Information page (changiairport.com, Nov 2026: the check-in
+// terminal; flights arrive at the same one). Singapore Airlines uses both T2 and T3 and is shown
+// on its own ('SQ'). Airlines missing here show as "terminal not known". Re-check each season.
+// Not mapped yet (ICAO code not confirmed): Aero Dili (8G), AirBorneo (MY), Sun PhuQuoc Airways (9G).
 export const AIRLINE_TERMINAL = {
   // T1
-  TGW: 'T1', QFA: 'T1', JST: 'T1', BAW: 'T1', FIN: 'T1', JAL: 'T1', QTR: 'T1', UAE: 'T1', AFR: 'T1',
-  KLM: 'T1', THY: 'T1', ETD: 'T1', DLH: 'T1', ANA: 'T1', SVA: 'T1', ALK: 'T1', BKP: 'T1', UBG: 'T1',
+  AFR: 'T1', ANG: 'T1', BAW: 'T1', BKP: 'T1', CCA: 'T1', CDG: 'T1', CQN: 'T1', CSN: 'T1', CSZ: 'T1',
+  CXA: 'T1', FIN: 'T1', FJI: 'T1', JAL: 'T1', KLM: 'T1', QFA: 'T1', QTR: 'T1', TGW: 'T1', THY: 'T1',
+  TZP: 'T1', UAE: 'T1',
   // T2
-  MAS: 'T2', SWR: 'T2', ETH: 'T2', UAL: 'T2', AIC: 'T2', AXB: 'T2', IGO: 'T2', THA: 'T2', BBC: 'T2', MXD: 'T2',
+  ACA: 'T2', AIC: 'T2', ANA: 'T2', APJ: 'T2', AXB: 'T2', CSC: 'T2', DLH: 'T2', ETD: 'T2', ETH: 'T2',
+  FFM: 'T2', IGO: 'T2', JST: 'T2', MAS: 'T2', MMA: 'T2', OMA: 'T2', PAL: 'T2', RBA: 'T2', SJX: 'T2',
+  SWR: 'T2', THA: 'T2', TWB: 'T2', UAL: 'T2', UBA: 'T2',
   // T3
-  SIA: 'T3', GIA: 'T3', CES: 'T3', CCA: 'T3', CSN: 'T3', CAL: 'T3', AAR: 'T3', EVA: 'T3', PAL: 'T3', LNI: 'T3', BTK: 'T3',
+  AAR: 'T3', ACI: 'T3', ALK: 'T3', ANZ: 'T3', BBC: 'T3', CAL: 'T3', CES: 'T3', CSH: 'T3', CTV: 'T3',
+  DRK: 'T3', EVA: 'T3', GFA: 'T3', GIA: 'T3', HVN: 'T3', SVA: 'T3', UBG: 'T3',
   // T4
-  AXM: 'T4', CPA: 'T4', KAL: 'T4', CQH: 'T4', CEB: 'T4', HVN: 'T4', VJC: 'T4', JYH: 'T4', XAX: 'T4', AWQ: 'T4', CSC: 'T4', CXA: 'T4', HKE: 'T4',
+  AIQ: 'T4', AMU: 'T4', AXM: 'T4', BTK: 'T4', CBJ: 'T4', CDC: 'T4', CEB: 'T4', CHB: 'T4', CHH: 'T4',
+  CPA: 'T4', CQH: 'T4', DKH: 'T4', EVE: 'T4', GCR: 'T4', JJA: 'T4', JYH: 'T4', KAL: 'T4', KME: 'T4',
+  MGL: 'T4', MXD: 'T4', PAS: 'T4', TLM: 'T4', TNU: 'T4', VJC: 'T4', VSV: 'T4', WFL: 'T4',
+  SIA: 'SQ',
 };
 // Cargo airlines: no passengers, left out.
 export const CARGO = new Set(['CSS', 'FDX', 'UPS', 'CKS', 'CLX', 'GTI', 'CAO', 'CKK', 'SQC', 'ABW', 'DHK', 'DHX', 'BCS', 'CAL5', 'CPA9', 'KZR9', 'TAY', 'MPH', 'AHK', 'HKC', 'YZR', 'CYZ', 'RCH', 'QTR9', 'ETH9', 'UAE9', 'TGX', 'NCA', 'ACX', 'BOX', 'SQC']);
@@ -108,7 +117,7 @@ export function track(state, aircraft, now) {
 // and landed in the last LANDED_MIN.
 export function summarize(state, now) {
   const blank = () => ({ next: 0, pax: 0, riders: 0, landed: 0, landedPax: 0 });
-  const terminals = { T1: blank(), T2: blank(), T3: blank(), T4: blank() };
+  const terminals = { T1: blank(), T2: blank(), T3: blank(), T4: blank(), SQ: blank() };
   const unknown = blank();
   const pax = (seats) => seats * LOAD_FACTOR;
   for (const x of Object.values((state && state.inbound) || {})) {
