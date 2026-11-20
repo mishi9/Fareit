@@ -323,9 +323,12 @@ export async function buildLab(root) {
     <p class="note log-tip">On the road? Tap <b>Got a job</b> on Radar at pickup: it keeps the time and place for you.</p>
     </div></div>
 
-    <h2>Your jobs</h2>
-    <p class="note" id="lab-sync"></p>
-    <div id="lab-list" class="stack"></div>
+    <details class="fold" id="lab-jobs"><summary><span class="fold-title">Your jobs</span><span class="fold-sum" id="lab-jobs-sum"></span><span class="fold-chev" aria-hidden="true"></span></summary>
+      <div class="fold-body stack">
+        <p class="note" id="lab-sync"></p>
+        <div id="lab-list" class="stack"></div>
+      </div>
+    </details>
 
     <details class="log-more" id="lab-how"><summary>How the estimates are doing</summary>
       <div class="stack">
@@ -1179,6 +1182,11 @@ function renderList() {
   renderCut();
   $('#lab-sync', lab.root).textContent = lab.syncNote || 'Your trips upload so every driver\'s estimates learn from them.';
   const box = $('#lab-list', lab.root);
+  // Folded: one line with how many and the latest (tap to see them all).
+  const mineHere = lab.trips.filter((x) => platformOf(x) === lab.platform);
+  const last = mineHere.reduce((a, b) => (!a || b.ts > a.ts ? b : a), null);
+  const sum = $('#lab-jobs-sum', lab.root);
+  if (sum) sum.textContent = last ? `${mineHere.length} job${mineHere.length === 1 ? '' : 's'} · latest ${money(last.earned > 0 ? last.earned : (last.actual || 0))} earned, ${new Date(last.ts).toLocaleString('en-SG', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}` : 'None yet';
   box.innerHTML = lab.trips.some((x) => platformOf(x) === lab.platform) ? '' : '<p class="empty">No jobs logged yet. Your first one takes 10 seconds.</p>';
   for (const t of [...lab.trips].filter((x) => platformOf(x) === lab.platform).reverse()) {
     const cut = cutOf(t);
