@@ -127,6 +127,16 @@ export function incidentsOn(route, incidents) {
   });
 }
 
+// Where an incident is, in a few words, from LTA's text: "... after Clementi Ave 6 Exit. Avoid lane 1."
+// -> "after Clementi Ave 6". null when it can't tell.
+export function shortWhere(msg) {
+  const m = /\b(after|before|at|near|from)\s+([^.]+)/i.exec(String(msg || '').replace(/^\(\d+\/\d+\)\d+:\d+\s*/, ''));
+  if (!m) return null;
+  let place = m[2].replace(/\s+(Exit|Entrance|Entry)\b.*$/i, '').replace(/\s+to\s+.*$/i, '').trim();
+  if (place.length > 24) place = `${place.slice(0, 23).trim()}…`;
+  return `${m[1].toLowerCase()} ${place}`;
+}
+
 const PICK_KEY = 'agaration-routes';
 export const pickedRoutes = () => { try { return JSON.parse(localStorage.getItem(PICK_KEY) || '[]'); } catch { return []; } };
 export function setPicked(keys) { try { localStorage.setItem(PICK_KEY, JSON.stringify(keys)); } catch { /* private mode */ } }

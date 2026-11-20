@@ -7,7 +7,7 @@ import { here } from './where.js';
 import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow, surgingAreas } from './lab.js';
 import { loadSurge } from './surge.js';
-import { ERP_GROUPS, erpNow, roadErp, hhmm, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
+import { ERP_GROUPS, erpNow, roadErp, hhmm, shortWhere, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
@@ -104,7 +104,10 @@ function routeCard(r, lta) {
     : e.from != null ? `<span class="rt off">ERP from ${hhmm(e.from)}</span>`
     : '<span class="rt off">ERP done today</span>';
   const inc = r.key === 'CITY' ? [] : incidentsOn(r, (lta.incidents || []).filter((x) => x.type !== 'Roadwork'));
-  const incTag = r.key === 'CITY' ? '' : inc.length ? `<span class="rt bad">${inc.length} ${inc.length === 1 ? esc(inc[0].type.toLowerCase().replace('vehicle breakdown', 'breakdown').replace('unattended vehicle', 'stalled car')) : 'incidents'}</span>` : '<span class="rt off">Clear</span>';
+  const kind = (x) => x.type.replace(/^Vehicle breakdown$/i, 'Breakdown').replace(/^Unattended Vehicle$/i, 'Stalled car');
+  const incTag = r.key === 'CITY' ? '' : inc.length
+    ? inc.slice(0, 2).map((x) => { const w = shortWhere(x.msg); return `<span class="rt bad">${esc(kind(x))}${w ? ` ${esc(w)}` : ''}</span>`; }).join('') + (inc.length > 2 ? `<span class="rt bad">+${inc.length - 2} more</span>` : '')
+    : '<span class="rt off">Clear</span>';
   const rd = rainData() || {};
   const towns = ROAD_TOWNS[r.key === 'CITY' ? 'CITY' : r.name] || [];
   const areas = (rd.areas || []).filter((a) => towns.includes(a.name));

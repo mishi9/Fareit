@@ -42,3 +42,11 @@ test('public holidays (MOM): no ERP; a Sunday holiday makes Monday one too', asy
   assert.deepEqual([r.now, hhmm(r.until)], [[1, 4], '10:00']);
   assert.equal(roadErp(ERP_GROUPS.filter((g) => g.road === 'PIE|1'), at('2026-11-23T06:00:00')).from, 7 * 60);
 });
+
+test('incidents: where, in a few words', async () => {
+  const { shortWhere } = await import('../public/erp.js');
+  assert.equal(shortWhere('(20/11)17:05 Accident on PIE (towards Tuas) after Clementi Ave 6 Exit. Avoid lane 1.'), 'after Clementi Ave 6');
+  assert.equal(shortWhere('(20/11)17:10 Vehicle breakdown on PIE (towards Changi Airport) after Adam Rd.'), 'after Adam Rd');
+  assert.equal(shortWhere('(18/11)07:50 Heavy traffic on CTE (towards AYE) from Braddell Rd to PIE.'), 'from Braddell Rd');
+  assert.equal(shortWhere('Roadworks on Thomson Rd.'), null);
+});
