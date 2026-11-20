@@ -61,7 +61,18 @@ export function queueWait(readings, ts) {
   return { min: min == null ? null : Math.round(min), basis: 'usual', at: latest.ts, cars: s.cars, n: s.n, corrected: bias.length > 0 };
 }
 
-const q = { root: null, device: null, mine: [], shared: {}, note: '' };
+const q = { root: null, device: null, mine: [], shared: {}, note: '', leftAt: 0, again: false, done: '' };
+// After Got a job the form stays away until you've left the airport zone and come back (you're
+// driving off with a passenger, not queueing). Pure, for the page and the tests.
+export const AFTER_JOB_MAX = 3 * 3600 * 1000;
+export function formHidden(mine, { now = Date.now(), leftAt = 0, again = false } = {}) {
+  const open = mine.some((x) => !(x.actual > 0) && now - x.ts < OPEN_FOR);
+  if (open) return 'open';
+  if (again) return null;
+  const closed = mine.filter((x) => x.actual > 0).map((x) => x.ts + x.actual * 60000);
+  const last = closed.length ? Math.max(...closed) : 0;
+  return last && now - last < AFTER_JOB_MAX && last > leftAt ? 'done' : null;
+}
 const all = () => {
   const mine = new Set(q.mine.map((r) => r.id));
   return [...q.mine, ...Object.values(q.shared).filter((r) => !mine.has(r.id))];
@@ -232,7 +243,8 @@ export async function closeOpenReading() {
 async function gotJob(reading) {
   reading.actual = Math.max(1, Math.round((Date.now() - reading.ts) / 60000));
   await db.setKV(KEY, q.mine);
-  $('#q-msg', q.root).textContent = `Waited ${reading.actual} min${reading.est ? ` (${appOf(reading) === 'tada' ? 'TADA' : 'Grab'} estimated ${reading.est})` : ''}. Saved.`;
+  q.done = `Waited <b>${reading.actual} min</b>${reading.est ? ` (${appOf(reading) === 'tada' ? 'TADA' : 'Grab'} said ${reading.est})` : ''}. Saved.`;
+  q.again = false;
   render();
   syncQueue();
 }
@@ -263,6 +275,8 @@ function render() {
   // On Radar: shown in the airport zone, or anywhere while a reading is still open (to record the wait).
   const openNow = q.mine.some((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
   const inZone = atAirport(here());
+  if (!inZone) { q.leftAt = Date.now(); q.again = false; }
+  const hideWhy = formHidden(q.mine, { leftAt: q.leftAt, again: q.again });
   r.hidden = !(inZone || openNow);
   $('#q-where', r).textContent = inZone ? `Changi · ${hm(Date.now())}` : 'reading still open';
   const appName = platformNow() === 'tada' ? 'TADA' : 'Grab';
@@ -271,7 +285,20 @@ function render() {
   const open = [...q.mine].reverse().find((x) => !(x.actual > 0) && Date.now() - x.ts < OPEN_FOR);
   const openBox = $('#q-open', r);
   openBox.innerHTML = '';
-  $('#q-form', r).hidden = Boolean(open); // already in the queue: nothing to fill in
+  // Already in the queue, or just got a job here: nothing to fill in.
+  $('#q-form', r).hidden = Boolean(hideWhy);
+  if (hideWhy === 'done') {
+    const line = document.createElement('div');
+    line.className = 'q-done';
+    line.innerHTML = `<span>${q.done || 'Job recorded.'}</span>`;
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'ghost small';
+    again.textContent = 'Back in the queue?';
+    again.addEventListener('click', () => { q.again = true; q.done = ''; render(); });
+    line.append(again);
+    openBox.append(line);
+  }
   if (open) {
     const mins = Math.round((Date.now() - open.ts) / 60000);
     const card = document.createElement('div');

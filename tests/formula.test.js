@@ -409,7 +409,7 @@ test('From JB: one line per route with a best-estimate time out in Singapore', (
   assert.equal(jbPlace({ lat: 1.3526, lng: 103.9447 }), null);
 });
 
-import { queueWait, updatedText, queueApps } from '../public/queue.js';
+import { queueWait, updatedText, queueApps, formHidden } from '../public/queue.js';
 test('airport queue: estimated wait from the latest reading, else the usual for this hour', () => {
   const t0 = new Date(2026, 10, 18, 20, 0).getTime();
   const m = 60000;
@@ -901,4 +901,17 @@ test('airport queue per app: what Grab / TADA says now, and the real wait driver
   assert.deepEqual([q.tada.est, q.tada.actual, q.tada.actualAt], [20, 25, null], 'TADA: usual real wait for this hour');
   // nothing fresh: no "says"
   assert.equal(queueApps(readings, t0 + 60 * m).grab.est, null);
+});
+
+test('airport queue form: hidden while in the queue, and after a job until you leave the airport', () => {
+  const m = 60000;
+  const t0 = Date.parse('2026-11-21T06:35:00+08:00');
+  const inQueue = [{ id: 'a', ts: t0 - 10 * m, est: 8, actual: null }];
+  assert.equal(formHidden(inQueue, { now: t0 }), 'open');
+  const done = [{ id: 'a', ts: t0 - 20 * m, est: 8, actual: 15 }]; // job 5 min ago
+  assert.equal(formHidden(done, { now: t0 }), 'done', 'just got a job: no form');
+  assert.equal(formHidden(done, { now: t0, again: true }), null, '"Back in the queue?" shows it');
+  assert.equal(formHidden(done, { now: t0 + 40 * m, leftAt: t0 + 10 * m }), null, 'left the airport and came back: form again');
+  assert.equal(formHidden(done, { now: t0 + 4 * 60 * m }), null, 'hours later: form again');
+  assert.equal(formHidden([], { now: t0 }), null);
 });

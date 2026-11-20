@@ -771,3 +771,7 @@ details.fold > summary { display: grid; grid-template-columns: 1fr auto; grid-te
 .q-app-name { font-weight: 800; font-size: 14px; }
 .q-line { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
 .q-line > span:first-child { color: var(--muted); }
+
+.q-done { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.q-done b { color: var(--ink); }
+.q-done button { white-space: nowrap; flex: none; }
