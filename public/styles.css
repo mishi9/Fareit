@@ -759,3 +759,9 @@ details.fold[open] > summary { border-bottom: 1px dashed var(--line); }
 .notices-more { width: 100%; border: 1px dashed var(--line); background: transparent; color: var(--muted); border-radius: 12px; padding: 8px; font-weight: 700; font-size: 13px; cursor: pointer; }
 /* folded summaries must never widen the page: shrink and cut with … */
 #view-info > *, details.fold, details.fold > summary { min-width: 0; max-width: 100%; }
+/* summary on its own line under the title: room for the where */
+details.fold > summary { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "title chev" "sum chev"; align-items: center; row-gap: 2px; }
+.fold-title { grid-area: title; }
+.fold-sum { grid-area: sum; text-align: left; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 14px; }
+.fold-sum:empty { display: none; }
+.fold-chev { grid-area: chev; padding-left: 8px; }

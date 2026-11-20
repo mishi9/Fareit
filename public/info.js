@@ -166,7 +166,7 @@ function renderSurging() {
   const box = info.root && info.root.querySelector('#info-surging');
   if (!box) return;
   const list = surgingAreas(renderSurging);
-  if (!list.length) { box.innerHTML = '<p class="note">Nowhere surging right now. Shows here when 2 or more drivers get surge jobs near each other within 30 minutes, or Changi\u2019s own jobs run 15%+ above normal.</p>'; return; }
+  if (!list.length) { box.innerHTML = '<p class="note">Nowhere surging right now.</p>'; return; }
   box.innerHTML = list.map((a) => {
     const ago = a.latest ? Math.max(0, Math.round((Date.now() - a.latest) / 60000)) : null;
     const sub = a.airport ? `${a.jobs} airport jobs in the last hour` : `${a.drivers} drivers · ${ago < 1 ? 'now' : `${ago} min ago`}`;
