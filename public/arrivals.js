@@ -6,7 +6,8 @@
 
 export const CHANGI = { lat: 1.3644, lng: 103.9915 };
 const SELETAR = { lat: 1.4170, lng: 103.8678 };
-export const AHEAD_MIN = 30; // only what lands in the next 30 minutes
+export const AHEAD_MIN = 30; // per terminal: what lands in the next 30 minutes
+export const SOON_MIN = 45; // the total landing soon (Info's Airport line): next 45 minutes
 export const LANDED_MIN = 30; // and what landed in the last 30 (people coming out now)
 // About how full planes are, and the share of passengers who book Grab or another ride-hailing app
 // (the owner's estimate). Riders are people, not jobs: a family of 3 is one booking.
@@ -105,11 +106,12 @@ export function inbound(ac) {
   const close = km < 40 && alt < 10000; // on approach: may be turning in, any heading
   if (!close) {
     if (!Number.isFinite(ac.track) || angleGap(ac.track, bearing(p, CHANGI)) > 25) return null;
-    if (km > 150 && rate > -300 && alt > 30000) return null; // still cruising far out: may be passing
+    // Still cruising far out: count it only if it's pointed right at Changi (passing traffic isn't).
+    if (km > 150 && rate > -300 && alt > 30000 && angleGap(ac.track, bearing(p, CHANGI)) > 8) return null;
   }
   const kmh = Math.max(250, ac.gs * 1.852 * 0.8); // slows down on the way in
   const eta = (km / kmh) * 60 + (close ? 2 : 5);
-  if (eta > AHEAD_MIN) return null;
+  if (eta > SOON_MIN) return null;
   return { id: String(ac.hex || call), eta, terminal: terminalFor(call), seats: seatsFor(ac.t) };
 }
 
@@ -158,5 +160,7 @@ export function summarize(state, now) {
     k.landedRiders = Math.round(k.landedPax * RIDE_SHARE);
     k.landedPax = Math.round(k.landedPax);
   }
-  return { terminals, unknown };
+  // All flights still in the air that land within SOON_MIN (landed ones not counted).
+  const soon = Object.values((state && state.inbound) || {}).filter((x) => x.t - now <= SOON_MIN * 60000 && x.t >= now - 2 * 60000).length;
+  return { terminals, unknown, soon };
 }

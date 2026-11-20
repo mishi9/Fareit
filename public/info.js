@@ -10,6 +10,7 @@ import { loadSurge } from './surge.js';
 import { ERP_GROUPS, erpNow, roadErp, hhmm, shortWhere, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml, jbSummary } from './jb.js';
+import { flightsSoon, renderFlights } from './flights.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
 import { FERRY_TERMINALS, ferryRowsHtml, ferrySummary } from './ferries.js';
 import { loadRain, rainData, rainInfoHtml, isWet, rainAt } from './rain.js';
@@ -304,16 +305,26 @@ function renderLive() {
   if (!r) return;
   const L = info.live || {};
   const taxis = L.taxis;
-  summary('airport', taxis && Number.isFinite(taxis.changi) ? `${taxis.changi} taxis waiting` : '');
   r.querySelector('#info-airport').innerHTML = `
+    <div id="info-flights"></div>
     <div class="band-head">Grab queue</div>
     ${waitHtml(queueWaitNow())}
     <div class="band-head">Taxis waiting at Changi</div>
     <div class="q-wait"><div class="q-wait-min">${taxis && Number.isFinite(taxis.changi) ? taxis.changi : '—'}</div>
       <div class="note">street taxis free${taxis ? ` · updated ${updatedText(taxis.at)}` : info.liveErr ? ` · ${esc(info.liveErr)}` : ''}</div></div>`;
+  renderAirportLine(taxis);
   renderJb();
   renderFerries();
   renderLta(L.lta || {});
+}
+
+// Airport line: flights still in the air that land within 45 minutes (landed ones not counted).
+function renderAirportLine(taxis) {
+  const again = () => renderAirportLine(taxis);
+  const n = flightsSoon(again);
+  const fl = info.root && info.root.querySelector('#info-flights');
+  if (fl) renderFlights(fl, () => {});
+  summary('airport', n != null ? `<b class="${n >= 10 ? 'sum-hot' : ''}">${n} flight${n === 1 ? '' : 's'} landing in the next 45 min</b>` : taxis && Number.isFinite(taxis.changi) ? `${taxis.changi} taxis waiting` : '');
 }
 
 // ---------- LTA DataMall: MRT disruptions, road incidents, floods, expressway times ----------

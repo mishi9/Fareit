@@ -195,6 +195,7 @@ test('flights: our own feed from open ADS-B data, fetched once and shared', asyn
   assert.equal(a.ready, true);
   assert.equal(a.terminals.T3.next, 1, JSON.stringify(a));
   assert.equal(a.terminals.T4.next, 1);
+  assert.equal(a.soon, 2, 'landing within 45 min, landed ones not counted');
   assert.equal(a.terminals.T3.pax, 288); // 360 seats x 80%
   assert.equal(a.terminals.T3.riders, 86); // 30% of them
   await req('/api/flights', { key });

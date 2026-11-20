@@ -864,8 +864,15 @@ test('Changi arrivals: who is landing, when, where, and planes that vanish on la
   assert.equal(inbound({ ...final, flight: 'N123AB' }), null, 'not an airline');
   // high overhead on the way somewhere else
   assert.equal(inbound({ hex: 'b', flight: 'GIA88', lat: 1.6, lon: 103.9, alt_baro: 37000, gs: 480, track: 190, baro_rate: 0 }), null);
-  // far out, cruising towards Singapore but not coming down: beyond 30 minutes / maybe passing
-  assert.equal(inbound({ hex: 'c', flight: 'MAS601', lat: 3.6, lon: 101.6, alt_baro: 36000, gs: 470, track: 135, baro_rate: 0 }), null);
+  // far out, cruising right at Changi: lands in 30-45 min, so in the 45-min total but not the 30-min tiles
+  const far = { hex: 'c', flight: 'MAS601', lat: 3.6, lon: 101.6, alt_baro: 36000, gs: 470, track: 133, baro_rate: 0 };
+  const fx = inbound(far);
+  assert.ok(fx && fx.eta > 30 && fx.eta <= 45, JSON.stringify(fx));
+  const both = summarize(track(null, [final, far], Date.now()), Date.now());
+  assert.equal(both.soon, 2);
+  assert.equal(both.terminals.T2.next + both.terminals.T3.next, 1, 'tiles: only the one within 30 min');
+  // cruising the same way but not pointed at Changi (passing by): left out
+  assert.equal(inbound({ ...far, track: 150 }), null);
   const now = Date.now();
   let s = track(null, [final], now);
   assert.equal(summarize(s, now).terminals.T3.next, 1);

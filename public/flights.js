@@ -28,6 +28,12 @@ async function load(onDone) {
   onDone();
 }
 
+// For Info's Airport line: flights still in the air landing within 45 min (null until loaded).
+export function flightsSoon(onDone) {
+  load(onDone);
+  return f.data && f.data.ready ? (Number.isFinite(f.data.soon) ? f.data.soon : null) : null;
+}
+
 export function renderFlights(box, onDone) {
   load(() => renderFlights(box, onDone));
   const d = f.data;
