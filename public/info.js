@@ -68,6 +68,8 @@ export function showInfo() {
 // ---------- my routes ----------
 // Tap the roads you're on (from LTA's travel times, e.g. PIE to Tuas); for each: travel time, ERP
 // now and next, accidents on it in that direction, and rain along it. Picks stay on this phone.
+// Picker label: PIE (TUAS), PIE (CHANGI), BKE (WOODLANDS), CTE (AYE/MCE), CITY.
+const chipLabel = (r) => (r.key === 'CITY' ? 'CITY' : `${r.name} (${String(r.to).trim().split(/\s+/)[0].toUpperCase()})`);
 const arrow = (r) => (r.key === 'CITY' ? 'City · CBD / Orchard' : `${r.name} → ${titleCase(r.to)}`);
 function renderRoutes() {
   const box = info.root && info.root.querySelector('#info-routes');
@@ -75,7 +77,7 @@ function renderRoutes() {
   const lta = (info.live && info.live.lta) || {};
   const choices = routeChoices(lta.travel);
   const picked = pickedRoutes();
-  const chips = `<div class="st-apps route-chips">${choices.map((r) => `<button type="button" class="${picked.includes(r.key) ? 'on' : ''}" data-route="${esc(r.key)}"><span class="box"></span>${esc(arrow(r))}</button>`).join('')}</div>`;
+  const chips = `<div class="st-apps route-chips">${choices.map((r) => `<button type="button" class="${picked.includes(r.key) ? 'on' : ''}" data-route="${esc(r.key)}"><span class="box"></span>${esc(chipLabel(r))}</button>`).join('')}</div>`;
   const cards = choices.filter((r) => picked.includes(r.key)).map((r) => routeCard(r, lta)).join('');
   box.innerHTML = chips + (cards || `<p class="note">${choices.length > 1 ? 'Tap the roads you’re on: travel time, ERP, accidents and rain along each show here.' : 'Expressways show once LTA’s travel times load; ERP for the city is ready.'}</p>`);
   for (const b of box.querySelectorAll('[data-route]')) b.addEventListener('click', () => {
