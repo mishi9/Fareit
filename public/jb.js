@@ -110,6 +110,20 @@ export function jbPlace(loc) {
   return best;
 }
 
+// Info's one-line summary: what's next from JB within `withinMin` (KTM train, CW5 from Woodlands,
+// and whether the CW1 / CW2 buses are running). null when nothing is due: the section is hidden.
+export function jbSummary(now = new Date(), withinMin = 180) {
+  const timed = [];
+  const ktm = nextTimes(KTM_ARRIVALS, now, 1);
+  if (!ktm.done && minsUntil(ktm.next[0], now) <= withinMin) timed.push(['KTM', ktm.next[0]]);
+  const cw5 = nextTimes(CW5_FROM_WOODLANDS, now, 1);
+  if (!cw5.done && minsUntil(cw5.next[0], now) <= withinMin) timed.push(['CW5', cw5.next[0]]);
+  const parts = timed.sort((a, b) => minsUntil(a[1], now) - minsUntil(b[1], now)).map(([n, t]) => `${n} ${t}`);
+  const buses = ['CW1', 'CW2'].filter((id) => busNow(id, now).running);
+  if (buses.length) parts.push(`${buses.join('/')} running`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Compact rows. place: show only its routes, and the time that matters there.
 // Minutes from now until an "HH:MM" today (past midnight counts as tomorrow).

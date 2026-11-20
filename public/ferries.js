@@ -123,6 +123,15 @@ const kmTo = (a, b) => {
   const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 };
+// Info's one-line summary: the next ferry in at any terminal within `withinMin`, or null (hidden).
+export function ferrySummary(now = new Date(), withinMin = 180) {
+  let best = null;
+  for (const t of FERRY_TERMINALS) {
+    const a = ferryArrivals(t.id, now).find((x) => x.at.getTime() >= now.getTime());
+    if (a && a.at.getTime() - now.getTime() <= withinMin * 60000 && (!best || a.at < best.a.at)) best = { a, t };
+  }
+  return best ? `Next ${best.a.arrive} · ${best.t.short} from ${best.a.from}` : null;
+}
 export const ferryTerminalAt = (loc) => (loc ? FERRY_TERMINALS.find((t) => kmTo(loc, t) <= t.km) || null : null);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

@@ -757,3 +757,5 @@ details.fold[open] > summary { border-bottom: 1px dashed var(--line); }
 .notice.gone { transform: translateX(110%); opacity: 0; }
 .notice.extra { display: none; }
 .notices-more { width: 100%; border: 1px dashed var(--line); background: transparent; color: var(--muted); border-radius: 12px; padding: 8px; font-weight: 700; font-size: 13px; cursor: pointer; }
+/* folded summaries must never widen the page: shrink and cut with … */
+#view-info > *, details.fold, details.fold > summary { min-width: 0; max-width: 100%; }

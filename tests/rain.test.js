@@ -165,3 +165,13 @@ test('the server keeps the app, TADA offers, TADA colour and fuel support (Grab 
   const g = cleanFormulaTrip({ ...base, id: 'trip-grab-01', level: 2, offer: 1 }, now);
   assert.deepEqual([g.platform, g.offer, g.level, g.fuel], [null, null, null, null], 'Grab trips: none of the TADA fields');
 });
+
+test('Info summaries: JB and ferries only when something is due within 3 hours', async () => {
+  const { jbSummary } = await import('../public/jb.js');
+  const { ferrySummary } = await import('../public/ferries.js');
+  const at = (s) => new Date(`2026-11-20T${s}+08:00`);
+  assert.match(jbSummary(at('09:00:00')), /^CW5 09:10 · KTM 10:05 · CW1\/CW2 running$/);
+  assert.equal(jbSummary(at('02:00:00')), 'CW2 running'); // only the night bus
+  assert.match(ferrySummary(at('09:00:00')), /^Next \d\d:\d\d · /);
+  assert.equal(ferrySummary(at('02:00:00')), null, 'no ferries in the next 3 hours: hidden');
+});

@@ -143,7 +143,7 @@ Plus: invite-only, code names, Turn off, and surge alerts need 2+ drivers.
 
 ## Info tab
 
-**Layout:** MRT alerts (only when something's wrong), **My routes** and **Surging now** are open at the top. Everything else is folded to one line, its title and a short summary ("Road incidents · 3 now · nearest accident 2 km", "Rain · Raining near you", "Airport · 305 taxis waiting"); tap to open. Folds you open stay open on this phone.
+**Layout:** MRT alerts (only when something's wrong), **My routes** and **Surging now** are open at the top. Everything else is folded to one line, its title and the most relevant thing now: **Road incidents** the nearest within 5 km, with where ("Accident · PIE after Clementi Ave 6 · <1 km"; a flash flood if that's nearer; "None within 5 km"), **Events** the next to end, **Rain** near you, **Airport** taxis waiting, **From JB** what's next within 3 hours ("CW5 09:10 · KTM 10:05 · CW1/CW2 running") and **Ferries** the next arrival within 3 hours. From JB and Ferries are hidden when nothing is due in the next 3 hours. Tap to open. Folds you open stay open on this phone.
 
 Replaces Reconcile (older jobs still waiting for a fare are linked from the top of Info). In order: road incidents and expressway travel times, events (what's ending soon and the next one; the rest folded away), From JB, the airport. Display only: nothing here changes the estimates, except the event rule below.
 

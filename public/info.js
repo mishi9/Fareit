@@ -9,9 +9,9 @@ import { eventNow, surgingAreas } from './lab.js';
 import { loadSurge } from './surge.js';
 import { ERP_GROUPS, erpNow, roadErp, hhmm, shortWhere, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
-import { jbRowsHtml } from './jb.js';
+import { jbRowsHtml, jbSummary } from './jb.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
-import { FERRY_TERMINALS, ferryRowsHtml } from './ferries.js';
+import { FERRY_TERMINALS, ferryRowsHtml, ferrySummary } from './ferries.js';
 import { loadRain, rainData, rainInfoHtml, isWet, rainAt } from './rain.js';
 
 const info = { root: null, live: null, liveAt: 0, liveErr: '', timer: null };
@@ -36,6 +36,7 @@ const dayLabel = (ts) => {
 const FOLD_KEY = 'agaration-info-open';
 const foldsOpen = () => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '[]'); } catch { return []; } };
 const fold = (id, title, body) => `<details class="fold" data-fold="${id}"${foldsOpen().includes(id) ? ' open' : ''}><summary><span class="fold-title">${title}</span><span class="fold-sum" id="sum-${id}"></span><span class="fold-chev" aria-hidden="true"></span></summary><div class="fold-body stack">${body}</div></details>`;
+const hideFold = (id, hide) => { const el = info.root && info.root.querySelector(`details.fold[data-fold="${id}"]`); if (el) el.hidden = hide; };
 const summary = (id, html) => { const el = info.root && info.root.querySelector(`#sum-${id}`); if (el) el.innerHTML = html; };
 
 export function buildInfo(root) {
@@ -356,8 +357,15 @@ function renderLta(lta) {
     <div>${boldPlaces(unstamp(x.msg).replace(new RegExp(`^${x.type}\\s+`, 'i'), ''))}</div></div>`;
   // Everything that matters to a driver, no tapping to see more; roadworks left out.
   const shown = main.slice(0, 8);
-  const top = main[0];
-  summary('incidents', `${floods.length ? `<b class="sum-bad">${floods.length} flood${floods.length === 1 ? '' : 's'}</b> · ` : ''}${main.length ? `${main.length} now${top && top.d != null ? ` · nearest ${esc(top.type.replace(/^Vehicle breakdown$/i, 'breakdown').toLowerCase())} ${top.d < 1 ? '<1' : Math.round(top.d)} km` : ''}` : 'None now'}`);
+  // The nearest within 5 km, with where ("Accident · PIE after Clementi Ave 6 · 2 km").
+  const kmTxt = (d) => `${d < 1 ? '<1' : Math.round(d)} km`;
+  const nearFlood = floods.find((f) => f.d != null && f.d <= 5);
+  const near = main.find((x) => x.d != null && x.d <= 5);
+  const road = (m) => { const r = /\bon\s+(.+?)\s+(?:\(towards|after|before|at|near|from)\b/i.exec(unstamp(m)); return r ? r[1] : ''; };
+  const floodFirst = nearFlood && (!near || nearFlood.d <= near.d);
+  summary('incidents', floodFirst ? `<b class="sum-bad">Flash flood · ${kmTxt(nearFlood.d)}</b>`
+    : near ? `<b class="sum-bad">${esc(near.type.replace(/^Vehicle breakdown$/i, 'Breakdown'))}</b> · ${esc([road(near.msg), shortWhere(near.msg)].filter(Boolean).join(' '))} · ${kmTxt(near.d)}`
+    : loc ? 'None within 5 km' : main.length ? `${main.length} on the roads` : 'None now');
   inc.innerHTML = `
     ${floods.map((f) => `<div class="alert-card bad"><div><b>Flash flood</b>${km(f.d)}</div><div>${boldPlaces(unstamp(f.desc))}</div></div>`).join('')}
     ${shown.length ? shown.map(row).join('') : '<p class="note">No accidents or breakdowns now.</p>'}
@@ -378,7 +386,10 @@ const titleCase = (s) => String(s).toLowerCase().replace(/\b([a-z])/g, (m) => m.
 function renderJb() {
   const box = info.root?.querySelector('#info-jb');
   if (!box) return;
-  summary('jb', 'KTM and buses into Woodlands');
+  // Only when something's due within 3 hours; otherwise the section is hidden.
+  const js = jbSummary(new Date());
+  hideFold('jb', !js);
+  summary('jb', js ? esc(js) : '');
   box.innerHTML = `${jbRowsHtml(new Date())}
     <p class="note">~ = estimate (timetable + journey + immigration); later when checkpoints are busy.</p>`;
 }
@@ -389,7 +400,9 @@ function renderFerries() {
   const box = info.root?.querySelector('#info-ferries');
   if (!box) return;
   const now = new Date();
-  summary('ferries', FERRY_TERMINALS.map((t) => esc(t.short)).join(', '));
+  const fs = ferrySummary(new Date());
+  hideFold('ferries', !fs);
+  summary('ferries', fs ? esc(fs) : '');
   box.innerHTML = `${FERRY_TERMINALS.map((t) => `<div class="band-head">Into <b>${esc(t.short)}</b></div>${ferryRowsHtml(t.id, now)}`).join('')}
     <p class="note">Published timetables, Singapore time; then immigration.</p>`;
 }
