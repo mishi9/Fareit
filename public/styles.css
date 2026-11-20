@@ -724,11 +724,16 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 /* Info: my routes */
 .route-chips { --pc: var(--accent); }
 .route-chips button { font-size: 14px; padding: 7px 12px; }
-.route-card { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: var(--surface); display: grid; gap: 6px; }
-.route-head { display: grid; gap: 2px; }
-.route-line { font-size: 14px; line-height: 1.35; }
-.route-tag { display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 6px; margin-right: 4px; background: var(--raised); color: var(--muted); }
-.route-tag.erp { background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn); }
-.route-tag.bad { background: color-mix(in srgb, var(--stop) 22%, var(--surface)); color: var(--stop); }
-.route-tag.rain { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); color: var(--accent); }
-.erp-on { color: var(--warn); }
+.route-card { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: var(--surface); display: grid; gap: 8px; cursor: pointer; }
+.route-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 16px; }
+.route-min { font-family: var(--mono); font-weight: 700; font-size: 18px; }
+.route-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rt { font-size: 13px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--raised); color: var(--muted); }
+.rt.erp { background: color-mix(in srgb, var(--warn) 22%, var(--surface)); color: var(--warn); }
+.rt.bad { background: color-mix(in srgb, var(--stop) 22%, var(--surface)); color: var(--stop); }
+.rt.rain { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); color: var(--accent); }
+.route-chev { margin-left: auto; color: var(--muted); font-size: 12px; }
+.route-more { border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 5px; }
+.rd-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); }
+.rd-line b { color: var(--ink); white-space: nowrap; }
+.rd-line.bad { color: var(--ink); display: block; }

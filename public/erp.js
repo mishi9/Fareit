@@ -27,8 +27,25 @@ export const ERP_GROUPS = [
   { road: 'PIE|2', name: 'PIE to Changi, after Adam Rd', gantries: [37,  38], wkd: [[450,  455,  1.0],  [455,  505,  2.0],  [505,  510,  1.5],  [510,  565,  1.0],  [565,  570,  0.5]] },
 ];
 
+// Singapore public holidays, from MOM (mom.gov.sg/employment-practices/public-holidays, 2026-27).
+// No ERP on these. A holiday on a Sunday makes the Monday after a holiday too (isHoliday does that).
+// Add the next year when MOM publishes it.
+export const PUBLIC_HOLIDAYS = [
+  '2026-01-01', '2026-02-17', '2026-02-18', '2026-03-21', '2026-04-03', '2026-05-01', '2026-05-27', '2026-05-31',
+  '2026-08-09', '2026-11-08', '2026-12-25',
+  '2027-01-01', '2027-02-06', '2027-02-07', '2027-03-10', '2027-03-26', '2027-05-01', '2027-05-17', '2027-05-20',
+  '2027-08-09', '2027-10-28', '2027-12-25',
+];
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export function isHoliday(ts = Date.now()) {
+  const d = new Date(ts);
+  if (PUBLIC_HOLIDAYS.includes(ymd(d))) return true;
+  const y = new Date(ts - 86400000);
+  return d.getDay() === 1 && y.getDay() === 0 && PUBLIC_HOLIDAYS.includes(ymd(y));
+}
+
 // Charge now and what's next for one gantry group. ts: a time (Singapore). holiday: no ERP.
-export function erpNow(group, ts = Date.now(), holiday = false) {
+export function erpNow(group, ts = Date.now(), holiday = isHoliday(ts)) {
   const d = new Date(ts);
   const day = d.getDay();
   const min = d.getHours() * 60 + d.getMinutes();
@@ -57,6 +74,19 @@ export function erpNow(group, ts = Date.now(), holiday = false) {
     }
   }
   return { now, next, free };
+}
+// One road's ERP in a few words: { now: [lo, hi] dollars or null, until, from, amount, free }.
+export function roadErp(groups, ts = Date.now()) {
+  const es = groups.map((g) => erpNow(g, ts));
+  if (!es.length) return null;
+  if (es.every((e) => e.free)) return { free: true };
+  const on = es.filter((e) => e.now);
+  if (on.length) {
+    const ends = on.map((e) => (e.next ? (e.next.amount === 0 ? e.next.at : (e.next.ends || e.next.at)) : 0));
+    return { now: [Math.min(...on.map((e) => e.now)), Math.max(...on.map((e) => e.now))], until: Math.max(...ends) };
+  }
+  const nx = es.filter((e) => e.next).sort((a, b) => a.next.at - b.next.at)[0];
+  return nx ? { from: nx.next.at, amount: nx.next.amount } : { done: true };
 }
 export const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 

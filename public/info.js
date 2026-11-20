@@ -7,7 +7,7 @@ import { here } from './where.js';
 import { isOwner, isOwnerPhone } from './access.js';
 import { eventNow, surgingAreas } from './lab.js';
 import { loadSurge } from './surge.js';
-import { ERP_GROUPS, ERP_FROM, erpNow, hhmm, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
+import { ERP_GROUPS, erpNow, roadErp, hhmm, ROAD_TOWNS, routeChoices, incidentsOn, pickedRoutes, setPicked } from './erp.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
@@ -84,38 +84,51 @@ function renderRoutes() {
     setPicked(cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]);
     renderRoutes();
   });
+  for (const c of box.querySelectorAll('[data-open]')) c.addEventListener('click', () => {
+    const k = c.dataset.open;
+    if (openRoutes.has(k)) openRoutes.delete(k); else openRoutes.add(k);
+    renderRoutes();
+  });
 }
+// One line per road: name and time, then three short tags (ERP, accidents, rain). Tap for details.
+const openRoutes = new Set();
 function routeCard(r, lta) {
   const now = Date.now();
   const t = (lta.travel || []).find((x) => `${x.name}|${x.dir}` === r.key);
-  const travel = t ? `<b>${t.min} min</b> end to end${t.slow && t.slow.min >= 5 && t.slow.min < t.min ? ` · slowest: ${esc(titleCase(t.slow.from))} → ${esc(titleCase(t.slow.to))} ${t.slow.min} min` : ''}` : '';
-  // ERP on this road and direction
   const groups = ERP_GROUPS.filter((g) => g.road === r.key);
-  const m = (v) => `$${v.toFixed(2)}`;
-  const erp = groups.length ? groups.map((g) => {
-    const e = erpNow(g, now);
-    let txt;
-    if (e.free) txt = 'no ERP today';
-    else if (e.now) txt = `<b class="erp-on">${m(e.now)} now</b>${e.next && e.next.amount ? ` · ${m(e.next.amount)} from ${hhmm(e.next.at)}` : ''}${e.next ? ` · off ${hhmm(e.next.amount === 0 ? e.next.at : (e.next.ends || e.next.at))}` : ''}`;
-    else if (e.next) txt = `off now · <b>${m(e.next.amount)}</b> from ${hhmm(e.next.at)}`;
-    else txt = 'off for the rest of today';
-    return `<div class="route-line"><span class="route-tag erp">ERP</span> ${esc(g.name)}: ${txt}</div>`;
-  }).join('') : `<div class="route-line note">No ERP charged on this road (LTA rates from ${ERP_FROM}).</div>`;
-  // Accidents and breakdowns on it, this direction (roadworks left out)
-  const inc = incidentsOn(r, (lta.incidents || []).filter((x) => x.type !== 'Roadwork'));
-  const incHtml = r.key === 'CITY' ? '' : inc.length
-    ? inc.slice(0, 4).map((x) => `<div class="route-line"><span class="route-tag bad">${esc(x.type)}</span> ${boldPlaces(unstamp(x.msg).replace(new RegExp(`^${x.type}\\s+`, 'i'), ''))}</div>`).join('')
-    : '<div class="route-line note">No accidents or breakdowns reported.</div>';
-  // Rain along it: NEA forecast for the towns it runs through, and rain gauges near them
+  const e = roadErp(groups, now);
+  const m = (v) => `$${v % 1 ? v.toFixed(2) : v}`;
+  const erpTag = !e ? '<span class="rt off">No ERP</span>'
+    : e.free ? '<span class="rt off">No ERP today</span>'
+    : e.now ? `<span class="rt erp">ERP ${e.now[0] === e.now[1] ? m(e.now[0]) : `${m(e.now[0])}–${m(e.now[1])}`} · till ${hhmm(e.until)}</span>`
+    : e.from != null ? `<span class="rt off">ERP from ${hhmm(e.from)}</span>`
+    : '<span class="rt off">ERP done today</span>';
+  const inc = r.key === 'CITY' ? [] : incidentsOn(r, (lta.incidents || []).filter((x) => x.type !== 'Roadwork'));
+  const incTag = r.key === 'CITY' ? '' : inc.length ? `<span class="rt bad">${inc.length} ${inc.length === 1 ? esc(inc[0].type.toLowerCase().replace('vehicle breakdown', 'breakdown').replace('unattended vehicle', 'stalled car')) : 'incidents'}</span>` : '<span class="rt off">Clear</span>';
   const rd = rainData() || {};
   const towns = ROAD_TOWNS[r.key === 'CITY' ? 'CITY' : r.name] || [];
   const areas = (rd.areas || []).filter((a) => towns.includes(a.name));
   const wetNow = areas.filter((a) => (rd.wet || []).some((g) => kmApart(a, g) <= 3)).map((a) => a.name);
-  const fc = areas.filter((a) => isWet(a.f) && !wetNow.includes(a.name)).map((a) => `${a.name} (${a.f})`);
-  const rainHtml = !rd.areas ? '' : wetNow.length || fc.length
-    ? `<div class="route-line"><span class="route-tag rain">Rain</span> ${wetNow.length ? `raining near <b>${wetNow.map(esc).join(', ')}</b>` : ''}${wetNow.length && fc.length ? ' · ' : ''}${fc.length ? `forecast ${fc.map(esc).join(', ')}` : ''}</div>`
-    : '<div class="route-line note">Dry along the way.</div>';
-  return `<div class="route-card"><div class="route-head"><b>${esc(arrow(r))}</b>${travel ? `<span class="note">${travel}</span>` : ''}</div>${erp}${incHtml}${rainHtml}</div>`;
+  const fc = areas.filter((a) => isWet(a.f) && !wetNow.includes(a.name));
+  const rainTag = wetNow.length ? `<span class="rt rain">Rain · ${esc(wetNow[0])}${wetNow.length > 1 ? ` +${wetNow.length - 1}` : ''}</span>` : fc.length ? `<span class="rt rain">Rain expected</span>` : '';
+  const open = openRoutes.has(r.key);
+  // Details, when tapped
+  let more = '';
+  if (open) {
+    const lines = groups.map((g) => {
+      const x = erpNow(g, now);
+      const what = x.free ? 'none today' : x.now ? `${m(x.now)} now${x.next && x.next.amount ? `, ${m(x.next.amount)} at ${hhmm(x.next.at)}` : ''}` : x.next ? `${m(x.next.amount)} at ${hhmm(x.next.at)}` : 'done today';
+      return `<div class="rd-line"><span>${esc(g.name.replace(/^(AYE|PIE|CTE|KPE|MCE) /, ''))}</span><b>${what}</b></div>`;
+    });
+    for (const x of inc) lines.push(`<div class="rd-line bad">${boldPlaces(unstamp(x.msg))}</div>`);
+    if (wetNow.length) lines.push(`<div class="rd-line">Raining near ${wetNow.map(esc).join(', ')}</div>`);
+    if (fc.length) lines.push(`<div class="rd-line">Forecast: ${fc.map((a) => `${esc(a.name)} (${esc(a.f)})`).join(', ')}</div>`);
+    if (t && t.slow && t.slow.min >= 5 && t.slow.min < t.min) lines.push(`<div class="rd-line"><span>Slowest: ${esc(titleCase(t.slow.from))} → ${esc(titleCase(t.slow.to))}</span><b>${t.slow.min} min</b></div>`);
+    more = `<div class="route-more">${lines.join('') || '<div class="rd-line">Nothing else to show.</div>'}</div>`;
+  }
+  return `<div class="route-card${open ? ' open' : ''}" data-open="${esc(r.key)}" role="button" tabindex="0">
+    <div class="route-head"><b>${esc(arrow(r))}</b>${t ? `<span class="route-min">${t.min} min</span>` : ''}</div>
+    <div class="route-tags">${erpTag}${incTag}${rainTag}<span class="route-chev">${open ? '▴' : '▾'}</span></div>${more}</div>`;
 }
 
 // ---------- surging now ----------

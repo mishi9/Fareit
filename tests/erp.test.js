@@ -31,3 +31,14 @@ test('routes: picked from LTA travel times; incidents kept by road and direction
   assert.deepEqual(incidentsOn(routes[0], inc).map((x) => x.type), ['Accident', 'Heavy Traffic']);
   assert.deepEqual(incidentsOn(routes[1], inc).map((x) => x.type), ['Vehicle breakdown', 'Heavy Traffic']);
 });
+
+test('public holidays (MOM): no ERP; a Sunday holiday makes Monday one too', async () => {
+  const { isHoliday, roadErp } = await import('../public/erp.js');
+  assert.ok(isHoliday(at('2026-12-25T08:00:00')));
+  assert.ok(isHoliday(at('2026-11-09T08:00:00')), 'Deepavali 8 Nov 2026 is a Sunday: Monday 9 Nov off');
+  assert.ok(!isHoliday(at('2026-11-10T08:00:00')));
+  assert.equal(erpNow(pieChangi, at('2026-11-09T08:10:00')).free, true);
+  const r = roadErp(ERP_GROUPS.filter((g) => g.road === 'PIE|1'), at('2026-11-23T08:10:00'));
+  assert.deepEqual([r.now, hhmm(r.until)], [[1, 4], '10:00']);
+  assert.equal(roadErp(ERP_GROUPS.filter((g) => g.road === 'PIE|1'), at('2026-11-23T06:00:00')).from, 7 * 60);
+});
