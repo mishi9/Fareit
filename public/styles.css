@@ -716,3 +716,7 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .surging-price { text-align: right; }
 .surging-price b { font-family: var(--mono); font-size: 18px; }
 #st-notices { --pc: var(--accent); }
+
+/* Radar at the airport: riders per terminal */
+.ap-unit { font-size: 13px; font-weight: 600; color: var(--muted); }
+.ap-riders { font-weight: 800; color: var(--go); font-size: 15px; }

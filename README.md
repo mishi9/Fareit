@@ -228,9 +228,9 @@ The airport zone (`public/airport-zone.js`) is the official Changi Airport bound
 At Changi Airport (any terminal) jobs are auto-accepted, so there's no 8-second window to estimate for. Radar swaps the earnings cards for:
 
 - **Airport queue** at the top: note Grab's cars ahead and estimated wait. **Got a job** records how long you really waited, then opens the fare card with **Airport** already picked.
-- **Arrivals by terminal** (T1 to T4): flights landed in the last 30 min, landing in the next hour, and the hour after. Flight counts only, no passenger estimate.
+- **Arrivals by terminal** (T1 to T4): flights landing in the **next 30 minutes**, about how many people are on them, and **~riders**: about 30% of them booking Grab or another app (`RIDE_SHARE`; planes taken as ~80% full, `LOAD_FACTOR`). Plus what landed in the last 30 minutes (people coming out now). No callsigns or plane models shown.
 
-Arrivals come from a flight data service, fetched by the server at most every 30 minutes and shared by every phone (`FLIGHTS_PROVIDER`, `FLIGHTS_KEY` secret, optional `FLIGHTS_REFRESH_MIN`). Until a provider is set up, Radar says arrivals are coming soon.
+Arrivals are our own feed, no paid service and no key (`public/arrivals.js`). Every 5 minutes (the cron, or the first phone to ask) the server reads the planes around Singapore from **adsb.lol** (open data from community ADS-B receivers; credit adsb.lol) and keeps the airliners coming in to Changi: pointed at Changi and coming down, or low and close. Departures, planes passing high overhead, Seletar traffic, freighters and non-airline flights are left out. Landing time comes from distance and speed; a plane due within 10 minutes that drops off the receivers counts as landed. Seats come from the aircraft type, and the **terminal from the airline** (`AIRLINE_TERMINAL`). That table is a best guess, as published lists disagree: correct it from the airport boards. Singapore Airlines (T2 and T3) is counted under T3; airlines not in the table show as "terminal not known".
 
 ## Invite-only
 

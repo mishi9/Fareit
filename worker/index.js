@@ -24,7 +24,7 @@
 //   POST /api/owner/claim { code, device }    -> { key, kind }   10 tries an hour per connection
 //   GET  /api/access                          -> { ok, kind }    is this phone's key still good
 //   GET  /api/manifest?invite=TOKEN           -> manifest whose start_url carries the invite
-//   GET  /api/flights                         -> Changi arrivals per terminal (Radar at the airport)
+//   GET  /api/flights                         -> Changi arrivals per terminal, next 30 min (Radar at the airport)
 //   GET  /api/events                          -> { venues, events }   events the owner has added
 //   POST /api/events { name, venue, starts_at, ends_at } -> { venues, events }   owner only
 //   POST /api/events/delete { id }            -> { venues, events }   owner only
@@ -53,6 +53,7 @@ import { rainAt } from '../public/rain.js';
 import { isAnimal } from '../public/animals.js';
 import { SURGE_PRICE_MIN } from '../public/formula.js';
 import { plausible } from '../public/sanity.js';
+import { track as arrivalsTrack, summarize as arrivalsSummary } from '../public/arrivals.js';
 
 const OM = 'https://www.onemap.gov.sg';
 const SG = { latMin: 1.15, latMax: 1.48, lngMin: 103.55, lngMax: 104.1 };
@@ -1297,59 +1298,38 @@ async function getSurge(env) {
 }
 
 // ---------- Changi arrivals ----------
-// A flight data service is fetched at most every FLIGHTS_REFRESH_MIN minutes (default 30) for the
-// next few hours of arrivals; every phone gets the shared copy. Counts per terminal are worked out
-// on each request, so they roll forward between fetches. Flight counts only: no passenger numbers.
-// A source is a function (env, fromMs, toMs) -> [{ t: landing ms, terminal: 'T1'..'T4' | null, cancelled }].
-// The provider is picked once you've signed up for one (FLIGHTS_PROVIDER + FLIGHTS_KEY secret).
-export const FLIGHT_SOURCES = {};
-const FLIGHTS_AHEAD_MS = 4 * 3600 * 1000;
-
-export function terminalOf(v) {
-  const m = /([1-4])/.exec(String(v ?? ''));
-  return m ? `T${m[1]}` : null;
-}
-
-// Landed in the last 30 min / landing in the next hour / the hour after, per terminal.
-export function summarizeArrivals(list, now) {
-  const terminals = {};
-  for (const k of ['T1', 'T2', 'T3', 'T4']) terminals[k] = { landed: 0, next: 0, later: 0 };
-  let unknown = 0;
-  for (const a of list) {
-    if (!a || a.cancelled || !Number.isFinite(a.t)) continue;
-    const k = terminalOf(a.terminal);
-    const dt = a.t - now;
-    const slot = dt >= -30 * 60000 && dt < 0 ? 'landed' : dt >= 0 && dt < 3600000 ? 'next' : dt >= 3600000 && dt < 7200000 ? 'later' : null;
-    if (!slot) continue;
-    if (!k) { unknown++; continue; }
-    terminals[k][slot]++;
+// Our own feed (public/arrivals.js): every 5 minutes (the cron, or the first phone to ask) the server
+// reads the planes around Singapore from adsb.lol (open community ADS-B data) and keeps which are
+// about to land at Changi, and which just did. Every phone gets the shared copy.
+const ADSB_URL = 'https://api.adsb.lol/v2/point/1.3644/103.9915/250';
+const ARRIVALS_EVERY_MS = 5 * 60000;
+export async function refreshArrivals(env, now = Date.now()) {
+  await ensureSchema(env.DB);
+  const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'arrivals'").first();
+  const state = row ? JSON.parse(row.value) : null;
+  let ac = null;
+  for (let i = 0; i < 2 && !ac; i++) {
+    try {
+      const res = await fetch(ADSB_URL, { headers: { 'user-agent': 'agaration-arrivals/1.0' } });
+      if (res.ok) ac = (await res.json()).ac || [];
+    } catch { /* try once more */ }
   }
-  return { terminals, unknown };
+  if (!ac) return state ? { at: row.at, state, stale: true } : null;
+  const next = arrivalsTrack(state, ac, now);
+  await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('arrivals', ?1, ?2)
+    ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(now, JSON.stringify(next)).run();
+  return { at: now, state: next, stale: false };
 }
 
 async function getFlights(env) {
-  const source = FLIGHT_SOURCES[env.FLIGHTS_PROVIDER || ''];
-  if (!source || !env.FLIGHTS_KEY) return json({ ready: false });
   await ensureSchema(env.DB);
   const now = Date.now();
-  const refreshMs = Math.max(5, Number(env.FLIGHTS_REFRESH_MIN) || 30) * 60000;
-  const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'flights'").first();
-  let list = row ? JSON.parse(row.value) : null;
-  let at = row ? row.at : 0;
-  let stale = false;
-  if (!row || now - row.at >= refreshMs) {
-    try {
-      list = (await source(env, now - 3600000, now + FLIGHTS_AHEAD_MS))
-        .map((a) => ({ t: a.t, terminal: terminalOf(a.terminal), cancelled: Boolean(a.cancelled) }));
-      at = now;
-      await env.DB.prepare(`INSERT INTO cache (key, at, value) VALUES ('flights', ?1, ?2)
-        ON CONFLICT(key) DO UPDATE SET at = excluded.at, value = excluded.value`).bind(at, JSON.stringify(list)).run();
-    } catch {
-      if (!list) return json({ error: 'Couldn’t get flights right now.' }, 502);
-      stale = true;
-    }
-  }
-  return json({ ready: true, updated_at: at, stale, ...summarizeArrivals(list, now) });
+  const row = await env.DB.prepare("SELECT at, value FROM cache WHERE key = 'arrivals'").first();
+  let got = row ? { at: row.at, state: JSON.parse(row.value), stale: false } : null;
+  // The cron keeps it fresh; if it hasn't (just deployed, or the cron isn't set up), fetch now.
+  if (!got || now - got.at > ARRIVALS_EVERY_MS + 60000) got = (await refreshArrivals(env, now).catch(() => null)) || got;
+  if (!got) return json({ error: 'Couldn’t get flights right now.' }, 502);
+  return json({ ready: true, updated_at: got.at, stale: got.stale || now - got.at > 15 * 60000, ...arrivalsSummary(got.state, now) });
 }
 
 // ---------- invite-only access ----------
@@ -1581,9 +1561,11 @@ function inviteManifest(url) {
 export default {
   // Every 5 minutes (wrangler.jsonc "triggers"): keep LTA's travel times recorded even when no
   // phone has the app open, so the history has no gaps at night.
+  // Also Changi arrivals (no key needed).
   async scheduled(event, env, ctx) {
-    if (!env.DB || !env.LTA_KEY) return;
-    ctx.waitUntil(refreshInfo(env).catch(() => null));
+    if (!env.DB) return;
+    ctx.waitUntil(refreshArrivals(env).catch(() => null));
+    if (env.LTA_KEY) ctx.waitUntil(refreshInfo(env).catch(() => null));
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
