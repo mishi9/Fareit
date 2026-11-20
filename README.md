@@ -121,6 +121,7 @@ The old Trips view (reconciled jobs from the slider era, the old shared pool) is
 - **Your trips:** how many are logged on this phone, **Download (CSV)** (date, time, km, paid, earned, pricing, drop-off), and for testers **Remove all my trips**, which deletes them from the phone and the server for everyone, keeping access.
 - **Privacy:** what is and isn't collected.
 - **I'm the owner:** the owner code, folded away.
+- **Radar notices:** tick which notices show at the top of Radar (MRT disruptions, flash floods, surging near you, Changi surging, events, rain, next JB bus / ferry). Kept on this phone.
 
 ## Safeguards against wrong or made-up data
 
@@ -144,6 +145,7 @@ Plus: invite-only, code names, Turn off, and surge alerts need 2+ drivers.
 
 Replaces Reconcile (older jobs still waiting for a fare are linked from the top of Info). In order: road incidents and expressway travel times, events (what's ending soon and the next one; the rest folded away), From JB, the airport. Display only: nothing here changes the estimates, except the event rule below.
 
+- **Surging now** (at the top): every spot drivers are reporting as surging, plus Changi when its own jobs are, nearest first, each with **one number: what a 10 km job picked up there would earn now** (after the app's cut), to judge whether it's worth heading over. A reported spot is at least the bottom of the surge range; Changi uses its own airport jobs.
 - **Events:** the owner adds them (what, venue from a list, date, rough end time); every phone sees them. **Ending soon** (within 2 hours, or ended up to an hour ago: the crowd is coming out) and **Coming up**, with the distance from you.
 - **Adding events (owner):** **+ Add event** on Info opens a card (what, venue, date, rough end time).
 - **On Radar:** an event within 3 km, from an hour before it ends to 90 min after, shows as a banner (like surge). Within 1.5 km as it lets out (30 min before to 90 min after the end), the three cards switch to an **Event** pill and event prices: normal × what event trips have paid (+0% until there are some). Normal and surge prices are unchanged.
@@ -164,6 +166,10 @@ A full trip, at the job's own time and pickup area: **drop-off** (area, postal c
 ## Likely surging nearby
 
 No extra taps: it comes from trips saved as **Surge** (green ↑ on the job card). When at least 2 different drivers have saved a Surge trip within about 1.5 km of each other in the last 30 minutes, drivers within 3 km (about 5 to 10 minutes away) see a green banner at the top of Radar: "Orchard likely surging · 2.1 km away", or "Likely surging around you" within 1.5 km. One phone's trips count once. Ranges are in `public/surge.js`.
+
+## Radar notices
+
+Every notice at the top of Radar (MRT, floods, surging near you, Changi surging, events, rain, JB / ferries) has a **✕**. Closing one hides it for 3 hours, or until it turns into a different one (another MRT alert, another event, a surge spot somewhere else); rain stays closed for the 3 hours even if it goes from forecast to raining. Settings → **Radar notices** turns whole kinds off. Both are kept on this phone (`public/notices.js`).
 
 ## Surge by price (test)
 
@@ -216,6 +222,8 @@ From NEA (data.gov.sg, free): rain gauges every 5 minutes and the 2-hour forecas
 ## Radar at the airport
 
 The airport zone (`public/airport-zone.js`) is the official Changi Airport boundary (URA Master Plan 2019 subzone, from data.gov.sg) **and** within 1.5 km of a terminal, so nearby Changi (Changi Village, Changi Prison, the business park, Simei, Tanah Merah Ferry Terminal, the exhibition centre) doesn't count as the airport. The taxi count on Info uses the same zone.
+
+**Changi jobs live on their own.** Anything tagged Airport, or picked up in the airport zone even untagged, never feeds the normal fare formula, the surge range, "now" nearby or the surge spots, whatever it paid, so a busy night at Changi doesn't lift Tampines or Pasir Ris. Away from the airport Radar shows **✈ Changi Airport surging** when 2 or more airport jobs in the last hour averaged 15%+ above normal (`airportNow` in `public/formula.js`).
 
 At Changi Airport (any terminal) jobs are auto-accepted, so there's no 8-second window to estimate for. Radar swaps the earnings cards for:
 

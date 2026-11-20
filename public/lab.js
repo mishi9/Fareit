@@ -11,14 +11,15 @@ import { eventsList, onEventsChange, loadEvents } from './events.js';
 import { jbPlace, jbRowsHtml } from './jb.js';
 import { plausible, isOutlier } from './sanity.js';
 import { ferryTerminalAt, ferryRowsHtml } from './ferries.js';
-import { loadSurge, surgeNow, surgeBanner } from './surge.js';
+import { loadSurge, surgeNow, surgeBanner, surgeSpotsNow } from './surge.js';
 import { loadRain, rainNow, rainBanner, rainTagNow, isThunder } from './rain.js';
-import { loadAlerts, alertsHtml } from './alerts.js';
+import { loadAlerts, alertsList } from './alerts.js';
+import { notice, wireNotices } from './notices.js';
 import { watchLocation, here, rounded, onMove, atAirport } from './where.js';
 import { findArea, isPostal, postalDistrict } from './places.js';
 import {
   passengerFare, fitWeights, looError, fitCommission, driverEarns, cutOf, toCsv, timeOfDay, byTimeBlock, timeEstimator, withBase, surgeLift, airportLift, SURGE_HINT, bandOutlook, latestJob, isSurgeTrip, SURGE_BY_PRICE, SURGE_PRICE_MIN, arrowCompare,
-  markEvents, eventLift, eventFor, eventNear, rainLift, bandDetail, highJobs, HIGH_FLAG, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
+  markEvents, eventLift, eventFor, eventNear, rainLift, bandDetail, airportNow, tenKmAt, highJobs, HIGH_FLAG, usePlatform, platformOf, PLATFORMS, tadaFee, tadaFuel,
   MIN_PASSENGER, MIN_DRIVER, BASE_TRIPS,
 } from './formula.js';
 
@@ -413,15 +414,37 @@ function latestLine(now) {
 
 // The planning area for where the phone is, looked up once per ~1 km and kept for the session.
 const areaCache = {};
-function areaName(p) {
+function areaName(p, onFound = renderBands) {
   if (!p) return null;
   const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
   if (key in areaCache) return areaCache[key];
   areaCache[key] = null;
   fetch(`/api/area?at=${key}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
-    if (d && d.area) { areaCache[key] = d.area; renderBands(); }
+    if (d && d.area) { areaCache[key] = d.area; onFound(); }
   }).catch(() => {});
   return null;
+}
+
+// Info's "Surging now": every spot drivers are reporting as surging, plus Changi when its own jobs
+// are, with what a 10 km job there would earn now (after the app's cut). Nearest first.
+const CHANGI = { lat: 1.3592, lng: 103.9894 };
+export function surgingAreas(onName = () => {}) {
+  const now = Date.now();
+  const loc = here();
+  const trips = dataset();
+  const km = (p) => {
+    if (!loc) return null;
+    const rad = (d) => (d * Math.PI) / 180;
+    const h = Math.sin(rad(p.lat - loc.lat) / 2) ** 2 + Math.cos(rad(loc.lat)) * Math.cos(rad(p.lat)) * Math.sin(rad(p.lng - loc.lng) / 2) ** 2;
+    return 2 * 6371 * Math.asin(Math.sqrt(h));
+  };
+  const out = surgeSpotsNow().map((s) => ({
+    name: areaName({ lat: s.lat, lng: s.lng }, onName), km: km(s), drivers: s.drivers, latest: s.latest,
+    ...tenKmAt(trips, now, { lat: s.lat, lng: s.lng }, { surging: true }),
+  }));
+  const ap = isTada() ? null : airportNow(trips, now);
+  if (ap && ap.surging) out.push({ name: 'Changi Airport', airport: true, km: km(CHANGI), jobs: ap.n, ...tenKmAt(trips, now, CHANGI, { airport: ap }) });
+  return out.sort((a, b) => (a.km ?? 99) - (b.km ?? 99));
 }
 
 export function renderBands() {
@@ -433,32 +456,41 @@ export function renderBands() {
   // (above, from queue.js) and arrivals by terminal instead of the earnings cards.
   // Urgent from LTA: a major MRT disruption, or a flood alert within 3 km.
   loadAlerts(renderBands);
+  wireNotices(document.querySelector('#view-window'), renderBands);
+  // Each notice can be dismissed (✕) or its kind turned off in Settings (notices.js).
+  const show = (el, html) => { if (el) { el.hidden = !html; el.innerHTML = html; } };
   const alertBox = document.querySelector('#radar-alerts');
-  if (alertBox) { const h = alertsHtml(); alertBox.hidden = !h; alertBox.innerHTML = h; }
+  show(alertBox, alertsList().map((a) => notice(a.kind, a.html.replace(/<[^>]+>/g, '').slice(0, 60), `<div class="glance-line bad">${a.html}</div>`)).join(''));
   // Likely surging within 3 km (2+ drivers' Surge trips in the last 30 min): first thing on Radar.
   loadSurge(renderBands);
   const surgeBox = document.querySelector('#radar-surge');
   if (surgeBox) {
     const s = surgeNow();
-    surgeBox.hidden = !s;
-    if (s) surgeBox.innerHTML = surgeBanner(s, areaName({ lat: Math.round(s.lat * 100) / 100, lng: Math.round(s.lng * 100) / 100 }), now);
+    show(surgeBox, s ? notice('surge', `${s.lat.toFixed(1)},${s.lng.toFixed(1)}`, surgeBanner(s, areaName({ lat: Math.round(s.lat * 100) / 100, lng: Math.round(s.lng * 100) / 100 }), now)) : '');
+  }
+  // Changi surging (its own jobs only; they never move prices elsewhere): shown away from the airport.
+  const apBox = document.querySelector('#radar-airport');
+  if (apBox) {
+    const ap = !isTada() && !atAirport(loc) ? airportNow(dataset(), now) : null;
+    show(apBox, ap && ap.surging ? notice('airport', 'changi', `<div class="glance-line good"><span class="surge-up" aria-hidden="true">✈</span> <b>Changi Airport</b> surging<span class="glance-sub">${signed(ap.lift)} · ${ap.n} airport jobs in the last hour</span></div>`) : '');
   }
   // Raining near you (a rain gauge within 3 km), or rain forecast for your town: like surge.
   loadRain(renderBands);
   const wet = rainNow(loc);
   const rainBox = document.querySelector('#radar-rain');
-  if (rainBox) { rainBox.hidden = !wet; rainBox.innerHTML = rainBanner(wet); }
+  show(rainBox, wet ? notice('rain', 'rain', rainBanner(wet)) : '');
   // An event letting out within 3 km (from an hour before it ends to 90 min after): like surge.
   const evBox = document.querySelector('#radar-event');
   const near = eventNear(eventsList(), loc, now);
   if (evBox) {
     evBox.hidden = !near;
+    evBox.innerHTML = '';
     if (near) {
       const e = near.event;
       const t = new Date(e.ends_at);
       const when = now < e.ends_at ? `ends ~${pad(t.getHours())}:${pad(t.getMinutes())}` : `ended ${pad(t.getHours())}:${pad(t.getMinutes())} · crowd out`;
       const esc = (x) => String(x).replace(/[&<>"']/g, '');
-      evBox.innerHTML = `<div class="glance-line event"><span class="surge-up" aria-hidden="true">★</span> <b>${esc(e.name)}</b> · <b>${esc(e.venue_name || '')}</b><span class="glance-sub">${when} · ${near.km < 1 ? '<1' : near.km.toFixed(1)} km</span></div>`;
+      show(evBox, notice('event', String(e.id), `<div class="glance-line event"><span class="surge-up" aria-hidden="true">★</span> <b>${esc(e.name)}</b> · <b>${esc(e.venue_name || '')}</b><span class="glance-sub">${when} · ${near.km < 1 ? '<1' : near.km.toFixed(1)} km</span></div>`));
     }
   }
   // Near Woodlands or a JB bus drop-off: what's arriving next, at the top, to decide whether to
@@ -469,10 +501,9 @@ export function renderBands() {
     const pl = jbPlace(loc);
     const ferry = pl ? null : ferryTerminalAt(loc);
     const rows = pl ? jbRowsHtml(new Date(now), pl) : ferry ? ferryRowsHtml(ferry.id, new Date(now), { compact: true }) : '';
-    placeBox.hidden = !rows;
-    if (rows) placeBox.innerHTML = pl
+    show(placeBox, rows ? notice('place', pl ? `jb|${pl.at}` : `ferry|${ferry.id}`, pl
       ? `<div class="band-head">Next from JB · <b>${pl.at === 'woodlands' ? 'Woodlands' : pl.name}</b></div>${rows}`
-      : `<div class="band-head">Next ferry · <b>${ferry.short}</b></div>${rows}`;
+      : `<div class="band-head">Next ferry · <b>${ferry.short}</b></div>${rows}`) : '');
   }
   const airport = atAirport(loc);
   const ap = document.querySelector('#ap-flights');

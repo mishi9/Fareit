@@ -43,6 +43,7 @@
          queue and arrivals instead (jobs there are auto-accepted: there's no 8-second window). -->
     <div id="radar-alerts" class="stack" hidden aria-live="polite"></div>
     <div id="radar-surge" hidden aria-live="polite"></div>
+    <div id="radar-airport" hidden aria-live="polite"></div>
     <div id="radar-event" hidden aria-live="polite"></div>
     <div id="radar-rain" hidden aria-live="polite"></div>
     <div id="radar-place" class="stack" hidden aria-live="polite"></div>
@@ -177,6 +178,10 @@
 
       <h2>This month</h2>
       <div id="st-board" class="stack me-board"></div>
+
+      <h2>Radar notices</h2>
+      <p class="note">Which notices show at the top of Radar. Any notice can also be closed with ✕ (it stays away for 3 hours, or until it changes).</p>
+      <div class="st-apps" id="st-notices"></div>
 
       <h2>Apps you drive for</h2>
       <p class="note">Radar and Log show these. With only one, the Grab | TADA switch goes away.</p>

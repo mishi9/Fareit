@@ -5,7 +5,8 @@
 import { eventsList, venuesList, loadEvents, addEvent, deleteEvent, onEventsChange } from './events.js';
 import { here } from './where.js';
 import { isOwner, isOwnerPhone } from './access.js';
-import { eventNow } from './lab.js';
+import { eventNow, surgingAreas } from './lab.js';
+import { loadSurge } from './surge.js';
 import { queueWaitNow, waitHtml, updatedText } from './queue.js';
 import { jbRowsHtml } from './jb.js';
 import { boldPlaces, unstamp, mrtStretch } from './glance.js';
@@ -34,6 +35,7 @@ export function buildInfo(root) {
   root.innerHTML = `
     <div id="info-old"></div>
     <div id="info-train"></div>
+    <section class="stack"><h2>Surging now</h2><div id="info-surging" class="stack"></div></section>
     <section class="stack"><h2>Road incidents</h2><div id="info-incidents" class="stack"></div></section>
     <section class="stack"><h2>Expressway travel times</h2><div id="info-travel" class="stack"></div></section>
     <section class="stack"><h2>Events</h2><div id="info-events" class="stack"></div><div id="info-event-add"></div></section>
@@ -54,9 +56,28 @@ export function showInfo() {
   const rain = () => { const box = info.root.querySelector('#info-rain'); if (box) box.innerHTML = rainInfoHtml(rainData(), here()); };
   rain();
   loadRain(rain);
+  renderSurging();
+  loadSurge(renderSurging, true);
   clearInterval(info.timer);
   // every 2 minutes: as often as LTA's own feeds change (the server keeps one shared copy)
-  info.timer = setInterval(() => { if (!info.root.closest('[hidden]')) { loadLive(); renderEvents(); loadRain(rain); } }, 2 * 60 * 1000);
+  info.timer = setInterval(() => { if (!info.root.closest('[hidden]')) { loadLive(); renderEvents(); loadRain(rain); loadSurge(renderSurging, true); } }, 2 * 60 * 1000);
+}
+
+// ---------- surging now ----------
+// Where drivers are reporting surge right now, with what a 10 km job from there would earn:
+// enough to judge whether it's worth heading over, without a full price list.
+const money2 = (n) => `S$${n.toFixed(2)}`;
+function renderSurging() {
+  const box = info.root && info.root.querySelector('#info-surging');
+  if (!box) return;
+  const list = surgingAreas(renderSurging);
+  if (!list.length) { box.innerHTML = '<p class="note">Nowhere surging right now. Shows here when 2 or more drivers get surge jobs near each other within 30 minutes, or Changi\u2019s own jobs run 15%+ above normal.</p>'; return; }
+  box.innerHTML = list.map((a) => {
+    const ago = a.latest ? Math.max(0, Math.round((Date.now() - a.latest) / 60000)) : null;
+    const sub = a.airport ? `${a.jobs} airport jobs in the last hour` : `${a.drivers} drivers · ${ago < 1 ? 'now' : `${ago} min ago`}`;
+    return `<div class="surging-row"><div><b>${esc(a.name || 'Nearby area')}</b>${a.km != null ? ` <span class="note">· ${a.km < 1 ? '<1' : a.km.toFixed(1)} km away</span>` : ''}<div class="note">${sub}</div></div>
+      <div class="surging-price"><b>${money2(a.now)}</b><div class="note">10 km · ${signed(a.lift)}</div></div></div>`;
+  }).join('') + '<p class="note">About what a 10 km job picked up there would earn now, after the app\u2019s cut (normal 10 km: ' + money2(list[0].normal) + ').</p>';
 }
 
 // ---------- events ----------

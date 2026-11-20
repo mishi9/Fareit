@@ -1291,7 +1291,8 @@ async function getSurge(env) {
   const tags = new Map();
   const tag = async (d) => { if (!tags.has(d)) tags.set(d, (await sha256(`surge:${d}`)).slice(0, 10)); return tags.get(d); };
   const points = [];
-  for (const r of trips.results) points.push({ lat: r.lat, lng: r.lng, ts: r.ts, d: await tag(r.device) });
+  // Changi lives on its own (formula.js isAirportTrip): picked up there, even untagged, it's not a spot.
+  for (const r of trips.results) if (!inAirportZone(r.lat, r.lng)) points.push({ lat: r.lat, lng: r.lng, ts: r.ts, d: await tag(r.device) });
   return json({ points });
 }
 

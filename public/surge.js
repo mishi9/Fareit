@@ -61,6 +61,8 @@ export async function loadSurge(onDone, force = false) {
   onDone();
 }
 export const surgeNow = () => surgeFor(here(), surgeSpots(sg.points));
+// Every spot surging right now, anywhere (Info).
+export const surgeSpotsNow = () => surgeSpots(sg.points);
 
 
 // Banner for Radar (area: the planning-area name, when known): one line, places in bold.

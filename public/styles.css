@@ -704,3 +704,15 @@ body[data-apps="1"] .plat-bar { display: none !important; }
 .bd-h span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .band-detail .note { margin: 4px 0 0; font-size: 12px; }
 .band-chev { font-size: 13px; color: var(--muted); font-weight: 600; }
+
+/* Radar notices: ✕ to dismiss */
+.notice { position: relative; }
+.notice > .glance-line, .notice > .band-head { padding-right: 40px; }
+.notice-x { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 50%; border: 0; background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--muted); font-size: 14px; cursor: pointer; line-height: 1; }
+#radar-alerts .notice + .notice { margin-top: 8px; }
+
+/* Info: surging now */
+.surging-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--go) 14%, var(--surface)); }
+.surging-price { text-align: right; }
+.surging-price b { font-family: var(--mono); font-size: 18px; }
+#st-notices { --pc: var(--accent); }

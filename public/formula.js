@@ -12,6 +12,11 @@
 // (tested as a passenger).
 
 import { dayType, OTHER_DAY_WEIGHT, experienceLift, EXPERIENCE_WEIGHT } from './daypattern.js';
+import { inAirportZone } from './airport-zone.js';
+// Changi jobs live on their own: tagged Airport, or picked up in the airport zone. They never feed
+// the normal formula, the surge range or "now" anywhere else, whatever they paid (Changi has its
+// own queue and its own pricing). Radar only says when Changi itself is surging (airportNow).
+export const isAirportTrip = (t) => t.surge === 'airport' || Boolean(t.lat && t.lng && inAirportZone(t.lat, t.lng));
 export const MIN_PASSENGER = 8.10;
 // The least a driver earns on a trip (a minimum-fare guarantee), whatever the passenger paid.
 export const MIN_DRIVER = 6.20;
@@ -141,7 +146,7 @@ export const SURGE_PRICE_MIN = 0.15;
 const SURGE_R = Math.log(1 + SURGE_PRICE_MIN);
 // Surge (by price, or by tag when the test is off) for a trip, given the normal-price weights.
 export function isSurgeTrip(t, w, est, c) {
-  if (t.surge === 'airport' || t.event || t.base) return false;
+  if (isAirportTrip(t) || t.event || t.base) return false;
   if (!SURGE_BY_PRICE) return t.surge === 'surge';
   const r = ratioToFormula(t, w, est, c);
   return r !== null && r >= SURGE_R - 1e-9;
@@ -150,7 +155,7 @@ export function isSurgeTrip(t, w, est, c) {
 // A trip can teach the formula if it's normal-priced, complete, and not held up by the minimum.
 export function usable(t) {
   if (t.event || !(t.km > 0) || !(t.actual > 0)) return false;
-  if (SURGE_BY_PRICE ? t.surge === 'airport' : t.surge !== 'normal') return false;
+  if (SURGE_BY_PRICE ? isAirportTrip(t) : t.surge !== 'normal') return false;
   if (t.level >= 1) return false; // TADA showed yellow or orange: surged, so not the normal price
   return t.actual - (t.erp || 0) > P.minFare + 0.005;
 }
@@ -324,7 +329,7 @@ export const highJobs = memo((trips) => {
   const est = timeEstimator(all);
   const c = fitCommission(trips);
   const r = new Map();
-  for (const t of all) if (!t.base && Number.isFinite(t.ts) && t.surge !== 'airport') { const x = ratioToFormula(t, w, est, c); if (x !== null) r.set(t, x); }
+  for (const t of all) if (!t.base && Number.isFinite(t.ts) && !isAirportTrip(t)) { const x = ratioToFormula(t, w, est, c); if (x !== null) r.set(t, x); }
   const flagged = [...r].filter(([, x]) => x >= Math.log(1 + HIGH_FLAG) - 1e-9).map(([t]) => t);
   const unbacked = new Set();
   for (const t of flagged) {
@@ -418,6 +423,7 @@ export function timeOfDay(trips, ts, loc = null, opts = {}) {
   const items = [];
   for (const t of all) {
     if (!Number.isFinite(t.ts) || t.event) continue; // event trips are learned on their own
+    if (isAirportTrip(t) && !opts.airport) continue; // Changi doesn't move prices elsewhere
     // Every trip counts, by how close it is: in time of day, in place, and in recency.
     let place = 1;
     let d = 0;
@@ -687,6 +693,39 @@ export function arrowCompare(trips) {
     return { n: b.n, lift: b.n ? Math.exp(b.sum / b.n) - 1 : null, lo: xs[0] ?? null, hi: xs[xs.length - 1] ?? null, over15: xs.filter((x) => x >= SURGE_PRICE_MIN).length };
   };
   return { logged: { arrow: fin(out.logged.arrow), none: fin(out.logged.none) }, older: { arrow: fin(out.older.arrow), none: fin(out.older.none) } };
+}
+
+// Is Changi surging? Airport jobs in the last AIRPORT_NOW_MIN minutes against the normal price:
+// 2 or more, averaging AIRPORT_SURGE_MIN or more above it.
+export const AIRPORT_NOW_MIN = 60;
+export const AIRPORT_SURGE_MIN = 0.15;
+export function airportNow(trips, ts = Date.now()) {
+  const all = withBase(trips);
+  const w = fitWeights(trips);
+  const est = timeEstimator(all);
+  const c = fitCommission(trips);
+  const rs = [];
+  for (const t of all) {
+    if (t.base || !isAirportTrip(t) || !Number.isFinite(t.ts) || ts - t.ts < 0 || ts - t.ts > AIRPORT_NOW_MIN * 60000) continue;
+    const r = ratioToFormula(t, w, est, c);
+    if (r !== null) rs.push(r);
+  }
+  if (!rs.length) return { n: 0, lift: 0, surging: false };
+  const lift = Math.exp(rs.reduce((a, b) => a + b, 0) / rs.length) - 1;
+  return { n: rs.length, lift, surging: rs.length >= 2 && lift >= AIRPORT_SURGE_MIN };
+}
+
+// A 10 km job picked up at `loc` now (for Info's "Surging now"): normal, and now = normal x the
+// lift there. A spot drivers are reporting as surging is at least the bottom of the surge range;
+// Changi uses its own airport jobs (airportNow).
+export function tenKmAt(trips, ts, loc, { surging = false, airport = null } = {}) {
+  const w = fitWeights(trips);
+  const est = timeEstimator(withBase(trips));
+  const c = fitCommission(trips);
+  const paid = passengerFare(w, 10, est(10)).fare;
+  let lift = airport ? airport.lift : timeOfDay(trips, ts, loc).lift;
+  if (surging && !airport) lift = Math.max(lift, surgeLift(trips, ts).range.lo);
+  return { normal: driverEarns(c, paid), now: driverEarns(c, paid * (1 + lift)), lift };
 }
 
 // How rain trips have paid against normal (observation only). A start of +0% counts as one trip.

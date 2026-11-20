@@ -42,6 +42,9 @@ export function radarAlerts(lta, loc) {
   return out;
 }
 
+// The current alerts as a list ({ kind: 'mrt' | 'flood', html }), for Radar's notices.
+export const alertsList = () => radarAlerts(al.lta, here());
+
 export function alertsHtml() {
   return radarAlerts(al.lta, here()).map((a) => `<div class="glance-line bad">${a.html}</div>`).join('');
 }

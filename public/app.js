@@ -6,6 +6,7 @@ import { findArea, isPostal } from './places.js';
 import * as db from './db.js';
 import { pushJobs, pullJobs } from './sync.js';
 import { loadMe, chipOk, renderBoard } from './me.js';
+import { renderNoticeSettings } from './notices.js';
 import { tagOf } from './animals.js';
 import { buildLab, syncLab, myLabTrips, clearMyLabTrips, exportAllCsv, setPlatform, enabledApps, setEnabledApps } from './lab.js';
 import { clearMyQueue } from './queue.js';
@@ -766,6 +767,7 @@ function buildSettings() {
     showApps();
   });
   showApps();
+  renderNoticeSettings($('#st-notices'));
   buildOwner();
   // This phone
   const owner = isOwnerPhone();

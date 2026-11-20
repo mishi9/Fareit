@@ -820,3 +820,35 @@ test('a Radar card opens to each distance in its range, at the same "now" adjust
     rows.forEach((r) => assert.ok(Math.abs(r.now / r.normal - (1 + b.nowLift)) < 0.12, 'same lift as the card'));
   }
 });
+
+test('Changi jobs are isolated: they don\'t move "now" nearby or the normal price; Changi surging is its own signal', async () => {
+  const { timeOfDay, fitWeights, airportNow, isAirportTrip } = await import('../public/formula.js');
+  const now = Date.parse('2026-11-20T22:00:00+08:00');
+  const tampines = { lat: 1.3536, lng: 103.9450 };
+  const changi = { lat: 1.3592, lng: 103.9894 };
+  const plain = Array.from({ length: 8 }, (_, i) => make(8 + i, 15 + i, { ts: now - (i + 1) * 86400000, ...tampines }));
+  const atChangi = (mins, x, tagged) => { const t = make(20, 25, { ts: now - mins * 60000, ...changi, ...(tagged ? { surge: 'airport' } : {}) }); return { ...t, actual: Math.round(t.actual * x * 100) / 100 }; };
+  const busy = [atChangi(10, 1.5, true), atChangi(25, 1.4, false)]; // one tagged, one only by where
+  assert.ok(isAirportTrip(busy[1]), 'picked up in the airport zone counts as airport even untagged');
+  const a = timeOfDay(plain, now, tampines).lift;
+  const b = timeOfDay([...plain, ...busy], now, tampines).lift;
+  assert.ok(Math.abs(a - b) < 1e-9, `Tampines unchanged: ${a} vs ${b}`);
+  assert.deepEqual(fitWeights([...plain, ...busy], { includeBase: false }), fitWeights(plain, { includeBase: false }), 'normal price unchanged');
+  const s = airportNow([...plain, ...busy], now);
+  assert.equal(s.n, 2);
+  assert.ok(s.surging && s.lift > 0.3, JSON.stringify(s));
+  assert.equal(airportNow([...plain, busy[0]], now).surging, false, 'one job is not enough');
+});
+
+test('10 km estimate for a surging area: at least the bottom of the surge range; Changi uses its own lift', async () => {
+  const { tenKmAt, surgeLift } = await import('../public/formula.js');
+  const now = Date.parse('2026-11-20T22:00:00+08:00');
+  const spot = { lat: 1.3536, lng: 103.9450 };
+  const trips = Array.from({ length: 8 }, (_, i) => make(6 + i, 14 + i, { ts: now - (i + 1) * 86400000, ...spot }));
+  const plain = tenKmAt(trips, now, spot);
+  const hot = tenKmAt(trips, now, spot, { surging: true });
+  assert.ok(hot.lift >= surgeLift(trips, now).range.lo - 1e-9 && hot.now > plain.normal, JSON.stringify(hot));
+  assert.ok(Math.abs(hot.now / hot.normal - (1 + hot.lift)) < 0.1);
+  const ap = tenKmAt(trips, now, spot, { airport: { lift: 0.3 } });
+  assert.ok(Math.abs(ap.lift - 0.3) < 1e-9 && ap.now > ap.normal);
+});
