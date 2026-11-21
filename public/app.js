@@ -1158,7 +1158,14 @@ async function boot() {
   syncNow();
   if (db.isMemoryOnly()) toast('This browser is blocking storage, so trips won’t be kept. Add Agaration to your Home Screen.');
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Ask for the newest offline copy every time the app opens (and when it comes back to the front), so
+  // a fix reaches phones on the next open instead of whenever the browser gets round to it.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    }).catch(() => {});
+  }
   watchLocation();
 }
 

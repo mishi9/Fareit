@@ -2,10 +2,9 @@
 // Version v0.MINOR.PATCH (beta): a new feature or change goes up a minor, a bug fix a patch.
 // Phones from before v0.70.0 read the version as "agaration-v" + a number: this keeps them updating.
 // (legacy marker: agaration-v70)
-const CACHE = 'agaration-0.77.2';
+const CACHE = 'agaration-0.77.3';
 const SHELL = [
   './',
-  'index.html',
   'styles.css',
   'app.js',
   'model.js',
@@ -64,17 +63,29 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.endsWith('/sw.js')) return; // always from the server: it says which version is the latest
 
   // Stale-while-revalidate: answer from cache instantly, refresh in the background.
+  // Pages are kept under './' (the server redirects /index.html to /, and browsers refuse to open a
+  // page from a saved copy marked as redirected: that was the ERR_FAILED / blank-page bug).
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
-      const key = req.mode === 'navigate' ? 'index.html' : req;
-      const cached = await cache.match(key);
+      const key = req.mode === 'navigate' ? './' : req;
+      const cached = clean(await cache.match(key));
       const fresh = fetch(req)
         .then((res) => {
-          if (res.ok) cache.put(key, res.clone());
-          return res;
+          if (res.ok && !res.redirected) cache.put(key, res.clone());
+          return res.redirected ? clean(res) : res;
         })
-        .catch(() => cached);
+        .catch(() => cached || (req.mode === 'navigate' ? offlinePage() : Response.error()));
       return cached || fresh;
     }),
   );
 });
+
+// A saved copy that came through a redirect, rebuilt as a plain response the browser will accept.
+function clean(res) {
+  if (!res || !res.redirected) return res;
+  return res.blob().then((body) => new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers }));
+}
+// No copy and no signal: a short page instead of the browser's error screen.
+function offlinePage() {
+  return new Response('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agaration</title><body style="font:16px system-ui;padding:24px;background:#131615;color:#eef1ee"><h2>No connection</h2><p>Agaration will open when you have signal again.</p><button onclick="location.reload()" style="font:inherit;padding:10px 16px">Try again</button>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
